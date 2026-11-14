@@ -205,6 +205,7 @@ func (r *Runner) deletePrunedSandboxes(ctx context.Context, client sdk.Client, s
 		}
 		operations = append(operations, op)
 		removed = append(removed, stopped[i])
+		r.cleanupDeletedCloneRemote(ctx, &stopped[i], true)
 	}
 	return removed, operations, errors.Join(failures...)
 }

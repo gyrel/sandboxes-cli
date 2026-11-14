@@ -1735,6 +1735,9 @@ func (r *Runner) deleteSandboxesWithCloneCleanup(ctx context.Context, client sdk
 			failed = true
 			continue
 		}
+		if warning := cloneRemovalWarning(sb); warning != "" {
+			_, _ = fmt.Fprint(r.Err, warning)
+		}
 		op, err := client.Sandboxes().Delete(ctx, id, sdk.DeleteOptions{Force: true})
 		if err != nil {
 			r.error(err)

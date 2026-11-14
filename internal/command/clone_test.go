@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestValidateCloneInfo(t *testing.T) {
 		},
 	}
 	workdir, url, err := validateCloneInfo(sb)
-	if err != nil || workdir != "/workspace/demo" || url != "git://127.0.0.1:4321/demo/.git" {
+	if err != nil || workdir != "/workspace/demo" || url != "git://127.0.0.1:4321/demo" {
 		t.Fatalf("validateCloneInfo() = %q, %q, %v", workdir, url, err)
 	}
 	badCases := []*sdk.Sandbox{
@@ -38,6 +39,214 @@ func TestValidateCloneInfo(t *testing.T) {
 	for i, bad := range badCases {
 		if _, _, err := validateCloneInfo(bad); err == nil {
 			t.Errorf("case %d unexpectedly validated", i)
+		}
+	}
+}
+
+func TestCloneEndpointURLShape(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		endpoint *sdk.GitEndpoint
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:     "repository path has no .git suffix",
+			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 4321, Repository: "demo"},
+			want:     "git://127.0.0.1:4321/demo",
+		},
+		{
+			name:     "low port and punctuated repository",
+			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "my.repo_1"},
+			want:     "git://127.0.0.1:1/my.repo_1",
+		},
+		{
+			name:     "highest port",
+			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 65535, Repository: "r"},
+			want:     "git://127.0.0.1:65535/r",
+		},
+		{name: "missing endpoint", wantErr: true},
+		{name: "non-loopback host", endpoint: &sdk.GitEndpoint{HostIP: "192.0.2.10", Port: 1, Repository: "r"}, wantErr: true},
+		{name: "zero port", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 0, Repository: "r"}, wantErr: true},
+		{name: "port above range", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 65536, Repository: "r"}, wantErr: true},
+		{name: "dot repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "."}, wantErr: true},
+		{name: "traversal repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "../r"}, wantErr: true},
+		{name: "empty repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: ""}, wantErr: true},
+		{name: "repository with slash", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "a/b"}, wantErr: true},
+		{name: "repository with newline", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "r\nevil"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := cloneEndpointURL(tt.endpoint)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("cloneEndpointURL(%#v) = %q, want error", tt.endpoint, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("cloneEndpointURL() = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, ".git") || strings.HasSuffix(got, "/") {
+				t.Fatalf("clone URL does not match the sbx shape: %q", got)
+			}
+		})
+	}
+}
+
+func TestReconcileCloneRemoteManagesSbxFetchRefspecs(t *testing.T) {
+	t.Parallel()
+	const (
+		url            = "git://127.0.0.1:4321/demo"
+		firstRefspec   = "+refs/heads/*:refs/remotes/sandbox-demo/*"
+		secondRefspec  = "+refs/heads/*:refs/sandboxes/demo/*"
+		managedFetch   = "remote.sandbox-demo.fetch"
+		reconcileCalls = 2
+	)
+	tests := []struct {
+		name     string
+		fresh    bool
+		existing []string
+		want     []string
+	}{
+		{name: "new remote gets both refspecs", fresh: true, want: []string{firstRefspec, secondRefspec}},
+		{name: "remote from an older release gains both refspecs", existing: nil, want: []string{firstRefspec, secondRefspec}},
+		{name: "missing mirror refspec is repaired", existing: []string{firstRefspec}, want: []string{firstRefspec, secondRefspec}},
+		{name: "missing remote-tracking refspec is repaired", existing: []string{secondRefspec}, want: []string{secondRefspec, firstRefspec}},
+		{name: "complete remote is left unchanged", existing: []string{firstRefspec, secondRefspec}, want: []string{firstRefspec, secondRefspec}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := initCloneTestRepo(t)
+			configPath := filepath.Join(root, ".git", "config")
+			if !tt.fresh {
+				seedCloneRemote(t, configPath, url, tt.existing)
+			}
+			ctx := context.Background()
+			for attempt := 0; attempt < reconcileCalls; attempt++ {
+				if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", url, runGitConfig); err != nil {
+					t.Fatalf("reconcile attempt %d: %v", attempt, err)
+				}
+				if got := gitConfigValues(t, configPath, managedFetch); !slices.Equal(got, tt.want) {
+					t.Fatalf("attempt %d refspecs = %#v, want %#v", attempt, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestReconcileCloneRemoteRefreshIsByteIdempotent(t *testing.T) {
+	t.Parallel()
+	root := initCloneTestRepo(t)
+	configPath := filepath.Join(root, ".git", "config")
+	ctx := context.Background()
+	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:4321/demo", runGitConfig); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:4321/demo", runGitConfig); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("idempotent refresh rewrote .git/config:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestReconcileCloneRemoteNeverRewritesForeignRemote(t *testing.T) {
+	t.Parallel()
+	const url = "git://127.0.0.1:4321/demo"
+	tests := []struct {
+		name     string
+		settings map[string]string
+		fetch    string
+	}{
+		{
+			name: "foreign owner",
+			settings: map[string]string{
+				"url": url, "rheic-last-url": url, "rheic-managed-by": "other-sandbox-id",
+			},
+		},
+		{
+			name: "user edited URL",
+			settings: map[string]string{
+				"url": "git://user-edit.invalid/demo", "rheic-last-url": url, "rheic-managed-by": "sandbox-id",
+			},
+		},
+		{
+			name: "missing owner marker",
+			settings: map[string]string{
+				"url": url, "rheic-last-url": url,
+			},
+		},
+		{
+			name: "user added fetch refspec",
+			settings: map[string]string{
+				"url": url, "rheic-last-url": url, "rheic-managed-by": "sandbox-id",
+			},
+			fetch: "+refs/heads/*:refs/tags/private/*",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := initCloneTestRepo(t)
+			configPath := filepath.Join(root, ".git", "config")
+			for key, value := range tt.settings {
+				if err := gitConfigSet(t, configPath, "--replace-all", "remote.sandbox-demo."+key, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.fetch != "" {
+				if err := gitConfigSet(t, configPath, "--add", "remote.sandbox-demo.fetch", tt.fetch); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = reconcileCloneRemote(context.Background(), root, "sandbox-demo", "sandbox-id", url, runGitConfig)
+			if err == nil || !strings.Contains(err.Error(), "preserving it") {
+				t.Fatalf("reconcile error = %v, want preservation error", err)
+			}
+			after, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("foreign remote was rewritten:\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+}
+
+func seedCloneRemote(t *testing.T, configPath, url string, refspecs []string) {
+	t.Helper()
+	for key, value := range map[string]string{
+		"remote.sandbox-demo.url":              url,
+		"remote.sandbox-demo.rheic-last-url":   url,
+		"remote.sandbox-demo.rheic-managed-by": "sandbox-id",
+	} {
+		if err := gitConfigSet(t, configPath, "--replace-all", key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, refspec := range refspecs {
+		if err := gitConfigSet(t, configPath, "--add", "remote.sandbox-demo.fetch", refspec); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -91,8 +300,8 @@ func TestReconcileCloneRemoteOwnershipAndDuplicateProtection(t *testing.T) {
 	cfg := filepath.Join(root, ".git", "config")
 	ctx := context.Background()
 	remote := "sandbox-demo"
-	first := "git://127.0.0.1:1234/demo/.git"
-	second := "git://127.0.0.1:5678/demo/.git"
+	first := "git://127.0.0.1:1234/demo"
+	second := "git://127.0.0.1:5678/demo"
 	if err := reconcileCloneRemote(ctx, root, remote, "sandbox-id", first, runGitConfig); err != nil {
 		t.Fatal(err)
 	}
@@ -116,17 +325,23 @@ func TestRemoveCloneRemotePreservesUserAddedOptions(t *testing.T) {
 	root := initCloneTestRepo(t)
 	cfg := filepath.Join(root, ".git", "config")
 	ctx := context.Background()
-	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:1234/demo/.git", runGitConfig); err != nil {
+	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:1234/demo", runGitConfig); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitConfigSet(t, cfg, "--add", "remote.sandbox-demo.fetch", "+refs/heads/*:refs/remotes/sandbox-demo/*"); err != nil {
+	if got := gitConfigValues(t, cfg, "remote.sandbox-demo.fetch"); !slices.Equal(got, []string{
+		"+refs/heads/*:refs/remotes/sandbox-demo/*",
+		"+refs/heads/*:refs/sandboxes/demo/*",
+	}) {
+		t.Fatalf("managed fetch refspecs = %#v", got)
+	}
+	if err := gitConfigSet(t, cfg, "--add", "remote.sandbox-demo.pushurl", "git://user-edit.invalid/demo"); err != nil {
 		t.Fatal(err)
 	}
 	if err := removeCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", runGitConfig); err == nil {
 		t.Fatal("removal should preserve and report a user-extended section")
 	}
-	if got := gitConfigValues(t, cfg, "remote.sandbox-demo.fetch"); len(got) != 1 {
-		t.Fatalf("user fetch option was removed: %#v", got)
+	if got := gitConfigValues(t, cfg, "remote.sandbox-demo.pushurl"); len(got) != 1 {
+		t.Fatalf("user remote option was removed: %#v", got)
 	}
 	if got := gitConfigValues(t, cfg, "remote.sandbox-demo.url"); len(got) != 1 {
 		t.Fatalf("owned remote URL should remain on conflict: %#v", got)
@@ -154,14 +369,14 @@ func TestReconcileCloneRemoteSerializesConcurrentGitConfigWriter(t *testing.T) {
 		}
 		return runGitConfig(ctx, path, args...)
 	}
-	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:4321/demo/.git", run); err != nil {
+	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:4321/demo", run); err != nil {
 		t.Fatal(err)
 	}
 	if concurrentErr == nil {
 		t.Fatal("concurrent Git config writer was not blocked by the config lock")
 	}
 	values := gitConfigValues(t, configPath, "remote.sandbox-demo.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo/.git" {
+	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo" {
 		t.Fatalf("unexpected remote after serialized update: %#v", values)
 	}
 }
@@ -294,9 +509,17 @@ func TestActivateCloneSandboxReachableEndpointWritesRemote(t *testing.T) {
 	if calls != 1 || address != "127.0.0.1:4321" {
 		t.Fatalf("probe calls=%d address=%q", calls, address)
 	}
-	values := gitConfigValues(t, filepath.Join(root, ".git", "config"), "remote.sandbox-demo.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo/.git" {
+	configPath := filepath.Join(root, ".git", "config")
+	values := gitConfigValues(t, configPath, "remote.sandbox-demo.url")
+	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo" {
 		t.Fatalf("managed remote = %#v", values)
+	}
+	refspecs := gitConfigValues(t, configPath, "remote.sandbox-demo.fetch")
+	if !slices.Equal(refspecs, []string{
+		"+refs/heads/*:refs/remotes/sandbox-demo/*",
+		"+refs/heads/*:refs/sandboxes/demo/*",
+	}) {
+		t.Fatalf("managed fetch refspecs = %#v", refspecs)
 	}
 }
 
@@ -334,7 +557,7 @@ func TestActivateCloneSandboxUnreachableEndpointPreservesExistingRemote(t *testi
 	t.Parallel()
 	root := initCloneTestRepo(t)
 	configPath := filepath.Join(root, ".git", "config")
-	first := "git://127.0.0.1:1234/demo/.git"
+	first := "git://127.0.0.1:1234/demo"
 	if err := reconcileCloneRemote(context.Background(), root, "sandbox-demo", "sandbox-id", first, runGitConfig); err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +604,7 @@ func TestActivateCloneSandboxRetriesTransientDialFailure(t *testing.T) {
 		t.Fatalf("probe attempts = %d, want 2", calls)
 	}
 	values := gitConfigValues(t, filepath.Join(root, ".git", "config"), "remote.sandbox-demo.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo/.git" {
+	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo" {
 		t.Fatalf("managed remote = %#v", values)
 	}
 }

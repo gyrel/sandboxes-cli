@@ -135,9 +135,10 @@ func cloneEndpointURL(endpoint *sdk.GitEndpoint) (string, error) {
 	if endpoint.HostIP != loopbackHost || net.ParseIP(endpoint.HostIP) == nil || endpoint.Port == 0 || endpoint.Port > 65535 || !cloneRepositorySlugPattern.MatchString(endpoint.Repository) || endpoint.Repository == "." || endpoint.Repository == ".." {
 		return "", errors.New("daemon returned an unsafe clone Git endpoint")
 	}
-	// The managed forward serves the clone's Git directory, so the repository
-	// name is the clone and its exported path is <repository>/.git.
-	url := "git://" + net.JoinHostPort(endpoint.HostIP, strconv.FormatUint(uint64(endpoint.Port), 10)) + "/" + endpoint.Repository + "/.git"
+	// The managed forward serves the clone's Git directory, so the exported
+	// path is the repository name without a '/.git' suffix, matching the URL
+	// shape published by Docker sbx v0.50.1.
+	url := "git://" + net.JoinHostPort(endpoint.HostIP, strconv.FormatUint(uint64(endpoint.Port), 10)) + "/" + endpoint.Repository
 	return url, nil
 }
 
@@ -299,6 +300,28 @@ func (r *Runner) cleanupDeletedCloneRemote(ctx context.Context, sb *sdk.Sandbox,
 	return false
 }
 
+// cloneRemovalWarning mirrors the Docker sbx v0.50.1 warning printed before a
+// clone sandbox is removed. It is advisory only: printing it never fails the
+// command, and it is not skipped by --force.
+const cloneRemovalWarningFormat = "warning: sandbox %s is a private clone; commits made inside it are lost when the sandbox is removed unless they are fetched first. Fetch them with 'git fetch %s'; fetched branches are mirrored into %s/* and survive removal. Recover one with 'git branch LOCAL %s/BRANCH'.\n"
+
+// cloneRemovalWarning returns the pre-removal warning for a clone sandbox, or
+// an empty string when the sandbox is not an owned clone.
+func cloneRemovalWarning(sb *sdk.Sandbox) string {
+	if sb == nil || sb.Clone == nil {
+		return ""
+	}
+	name, ok := cloneSandboxName(sb.Clone.RemoteName)
+	if !ok || name != sb.Name {
+		return ""
+	}
+	namespace, ok := cloneFetchedBranchNamespace(sb.Clone.RemoteName)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(cloneRemovalWarningFormat, sanitizeTerminalText(name), sb.Clone.RemoteName, namespace, namespace)
+}
+
 func cleanupCloneSandbox(ctx context.Context, client sdk.Client, op *sdk.Operation, sandbox *sdk.Sandbox, run gitConfigCommand) error {
 	if op == nil || op.Kind != "create" {
 		return errors.New("cannot clean up clone sandbox because create operation did not prove ownership")
@@ -359,33 +382,90 @@ func cloneConfigKey(remote, key string) string {
 	return "remote." + remote + "." + key
 }
 
-func gitConfigGet(ctx context.Context, configPath, key string, run gitConfigCommand) (string, bool, error) {
+// cloneSandboxName derives the sandbox name from its managed remote name. The
+// remote name is always "sandbox-<name>", which is also the namespace Docker
+// sbx v0.50.1 uses for the fetched-branch mirror.
+func cloneSandboxName(remote string) (string, bool) {
+	if !validCloneRemoteName(remote) {
+		return "", false
+	}
+	name := strings.TrimPrefix(remote, "sandbox-")
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// cloneFetchRefspecs returns the two fetch refspecs observed on Docker sbx
+// v0.50.1 clone remotes. The first mirrors branches into the remote-tracking
+// namespace; the second mirrors them into refs/sandboxes/<name>/*, which is
+// preserved when the sandbox and its owned remote are removed.
+func cloneFetchRefspecs(remote string) ([]string, error) {
+	name, ok := cloneSandboxName(remote)
+	if !ok {
+		return nil, errors.New("daemon returned an invalid clone remote name")
+	}
+	return []string{
+		"+refs/heads/*:refs/remotes/" + remote + "/*",
+		"+refs/heads/*:refs/sandboxes/" + name + "/*",
+	}, nil
+}
+
+func cloneFetchedBranchNamespace(remote string) (string, bool) {
+	name, ok := cloneSandboxName(remote)
+	if !ok {
+		return "", false
+	}
+	return "refs/sandboxes/" + name, true
+}
+
+func gitConfigGetAllValues(ctx context.Context, configPath, key string, run gitConfigCommand) ([]string, bool, error) {
 	output, err := run(ctx, configPath, "--get-all", key)
 	if err == nil {
-		values := strings.Split(output, "\n")
-		if len(values) != 1 {
-			return "", false, fmt.Errorf("local Git config key %q has duplicate values; preserving it", key)
-		}
-		return values[0], true, nil
+		return strings.Split(output, "\n"), true, nil
 	}
 	var exitErr interface{ ExitCode() int }
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return "", false, nil
+		return nil, false, nil
 	}
-	return "", false, fmt.Errorf("read local Git config: %w", err)
+	return nil, false, fmt.Errorf("read local Git config: %w", err)
+}
+
+func gitConfigGet(ctx context.Context, configPath, key string, run gitConfigCommand) (string, bool, error) {
+	values, found, err := gitConfigGetAllValues(ctx, configPath, key, run)
+	if err != nil || !found {
+		return "", false, err
+	}
+	if len(values) != 1 {
+		return "", false, fmt.Errorf("local Git config key %q has duplicate values; preserving it", key)
+	}
+	return values[0], true, nil
 }
 
 func gitRemoteExists(ctx context.Context, configPath, remote string, run gitConfigCommand) (bool, error) {
 	output, err := run(ctx, configPath, "--get-regexp", `^remote\.`+regexp.QuoteMeta(remote)+`\.`)
 	if err == nil {
+		refspecs, refspecErr := cloneFetchRefspecs(remote)
+		if refspecErr != nil {
+			return true, refspecErr
+		}
+		fetchKey := cloneConfigKey(remote, "fetch")
+		ownedFetch := make(map[string]bool, len(refspecs))
+		for _, refspec := range refspecs {
+			ownedFetch[refspec] = true
+		}
 		allowed := map[string]bool{
 			cloneConfigKey(remote, "url"):              true,
 			cloneConfigKey(remote, "rheic-managed-by"): true,
 			cloneConfigKey(remote, "rheic-last-url"):   true,
+			fetchKey:                                   true,
 		}
 		for _, line := range strings.Split(output, "\n") {
 			fields := strings.Fields(line)
 			if len(fields) < 2 || !allowed[fields[0]] {
+				return true, fmt.Errorf("git remote %q has user configuration; preserving it", remote)
+			}
+			if fields[0] == fetchKey && !ownedFetch[strings.Join(fields[1:], " ")] {
 				return true, fmt.Errorf("git remote %q has user configuration; preserving it", remote)
 			}
 		}
@@ -440,7 +520,10 @@ func createCloneRemote(ctx context.Context, configPath, remote, sandboxID, url s
 	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-last-url"), url, run); err != nil {
 		return err
 	}
-	return setGitConfig(ctx, configPath, cloneConfigKey(remote, "url"), url, run)
+	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "url"), url, run); err != nil {
+		return err
+	}
+	return ensureCloneFetchRefspecs(ctx, configPath, remote, run)
 }
 
 func updateCloneRemote(ctx context.Context, configPath, remote, sandboxID, url string, run gitConfigCommand) error {
@@ -457,6 +540,35 @@ func updateCloneRemote(ctx context.Context, configPath, remote, sandboxID, url s
 		}
 		if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-last-url"), url, run); err != nil {
 			return err
+		}
+	}
+	return ensureCloneFetchRefspecs(ctx, configPath, remote, run)
+}
+
+// ensureCloneFetchRefspecs adds any missing managed fetch refspec. A remote
+// that lost a refspec (for example a remote created by an older release) is
+// repaired in place; an already complete remote is left untouched so repeated
+// refreshes never duplicate refspecs.
+func ensureCloneFetchRefspecs(ctx context.Context, configPath, remote string, run gitConfigCommand) error {
+	refspecs, err := cloneFetchRefspecs(remote)
+	if err != nil {
+		return err
+	}
+	fetchKey := cloneConfigKey(remote, "fetch")
+	existing, _, err := gitConfigGetAllValues(ctx, configPath, fetchKey, run)
+	if err != nil {
+		return err
+	}
+	present := make(map[string]bool, len(existing))
+	for _, value := range existing {
+		present[value] = true
+	}
+	for _, refspec := range refspecs {
+		if present[refspec] {
+			continue
+		}
+		if _, err := run(ctx, configPath, "--add", fetchKey, refspec); err != nil {
+			return fmt.Errorf("configure local Git clone fetch refspec: %w", err)
 		}
 	}
 	return nil
@@ -494,7 +606,18 @@ func removeCloneRemoteLocked(ctx context.Context, configPath, remote, sandboxID 
 			return err
 		}
 	}
+	fetchKey := cloneConfigKey(remote, "fetch")
+	if err := unsetCloneFetchRefspecs(ctx, configPath, fetchKey, run); err != nil {
+		return err
+	}
 	return unsetGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-managed-by"), run)
+}
+
+func unsetCloneFetchRefspecs(ctx context.Context, configPath, fetchKey string, run gitConfigCommand) error {
+	if _, hasFetch, err := gitConfigGetAllValues(ctx, configPath, fetchKey, run); err != nil || !hasFetch {
+		return err
+	}
+	return unsetGitConfig(ctx, configPath, fetchKey, run)
 }
 
 type cloneRemoteOwnership struct {

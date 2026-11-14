@@ -39,6 +39,8 @@ const (
 	commandReset      = "reset"
 	stateUnavailable  = "unavailable"
 	commandAgents     = "agents"
+	commandImport     = "import"
+	skillsCommand     = "skills"
 	commandList       = "list"
 	commandDelete     = "delete"
 	commandRemove     = "remove"
@@ -224,9 +226,11 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.mcp(ctx, args), true
 	case commandReset:
 		return r.reset(ctx, args), true
+	case skillsCommand:
+		return r.skills(ctx, args), true
 	case "tui":
 		return r.tui(ctx, args), true
-	case "volume", "move", "ttl", "setup", "skills":
+	case "volume", "move", "ttl", "setup":
 		return r.unsupportedFamily(name), true
 	case completionCommand:
 		return r.completion(args), true
@@ -508,7 +512,7 @@ func (r *Runner) secret(ctx context.Context, args []string) int {
 			return r.secretListHelp()
 		}
 		return r.serviceSecretList(ctx, args[1:])
-	case "import", commandSetCustom:
+	case commandImport, commandSetCustom:
 		return r.secretExtendedCommand(ctx, args)
 	default:
 		_, _ = fmt.Fprintln(r.Err, "unknown secret command")
@@ -890,7 +894,6 @@ func (r *Runner) unsupportedFamily(name string) int {
 		"move":   "cloud move is unavailable without a tenant",
 		"ttl":    "cloud TTL is unavailable without a tenant",
 		"setup":  "host setup is not implemented",
-		"skills": "skills management is not implemented",
 	}
 	_, _ = fmt.Fprintf(r.Err, "rsbx %s: unsupported: %s\n", name, reasons[name])
 	return 1
@@ -1897,8 +1900,11 @@ Extensions:
   kit       Inspect local kit files; registry kits and builders are unavailable
   template  List and inspect built-in templates
 
+Experimental:
+  skills    Import, list and remove host-side agent skills
+
 Unsupported Docker Sandboxes commands:
-  move, setup, skills, ttl, volume
+  move, setup, ttl, volume
 
 Flags:
       --socket PATH  Local daemon endpoint

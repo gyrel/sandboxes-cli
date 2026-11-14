@@ -108,6 +108,9 @@ rsbx settings set policy.profile balanced
 rsbx attach dev
 rsbx kit inspect examples/kits/codex-go.yaml
 rsbx run --kit examples/kits/codex-go.yaml
+rsbx skills list
+rsbx skills import ./my-skill
+rsbx skills remove my-skill
 ```
 
 The `rsbx tui` dashboard draws the supplied blue shark logo directly in the
@@ -196,6 +199,18 @@ not written to SQLite, logs or argv. `${secret:service}` environment references
 are rejected because guest processes can read environment values. Migrate
 scripts to a supported host proxy route; the proxy keeps the real credential on
 the host and adds it only to requests sent to a fixed provider host.
+
+`rsbx skills` is experimental. It manages a host-side store under
+`~/.config/rheic/skills` (or `$XDG_CONFIG_HOME/rheic/skills`) and never writes
+inside a sandbox workspace or Docker state. `rsbx skills import PATH` requires a
+real skill directory whose `SKILL.md` starts with YAML frontmatter containing
+`name` and `description`; the name must match the directory name. Symlinks,
+special files and oversized trees are rejected. Identical re-imports are
+no-ops, `--force` replaces only content Rheic previously imported, and
+unmanaged directories are never overwritten. `rsbx skills list` supports table,
+JSON, YAML and quiet output. `rsbx skills remove NAME` prompts unless `--force`
+and removes only skills recorded in Rheic's registry. Guest VM delivery and
+Docker's Git-backed `skills add/update` are not implemented.
 
 Remote MCP servers can be registered with `rsbx mcp add NAME --url
 https://HOST/mcp`. All remote headers must use host-vault references. Use

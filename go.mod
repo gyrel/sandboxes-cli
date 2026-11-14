@@ -2,6 +2,8 @@ module github.com/rheic/sandboxes-cli
 
 go 1.27
 
+toolchain go1.27.4
+
 require (
 	github.com/gdamore/tcell/v3 v3.6.0
 	github.com/rheic/sandboxes-go-sdk v0.0.23

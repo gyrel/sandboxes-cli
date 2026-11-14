@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	posixpath "path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -112,8 +113,10 @@ func validateCloneInfo(sb *sdk.Sandbox) (string, string, error) {
 	return clone.GuestWorkdir, url, nil
 }
 
+// validateCloneGuestWorkdir validates a guest path, which is always POSIX and
+// therefore independent of the host platform separators.
 func validateCloneGuestWorkdir(path string) error {
-	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\x00\r\n") {
+	if path == "" || !posixpath.IsAbs(path) || posixpath.Clean(path) != path || strings.ContainsAny(path, "\x00\r\n") {
 		return errors.New("daemon returned an invalid clone guest workdir")
 	}
 	return nil

@@ -40,7 +40,6 @@ const (
 	stateUnavailable  = "unavailable"
 	commandAgents     = "agents"
 	commandImport     = "import"
-	skillsCommand     = "skills"
 	commandList       = "list"
 	commandDelete     = "delete"
 	commandRemove     = "remove"
@@ -98,6 +97,10 @@ type Runner struct {
 	SecretScreen func() tcell.Screen
 	gitConfig    gitConfigCommand
 	cloneDial    cloneDialFunc
+
+	// setupCollector overrides read-only host detection in tests. A nil
+	// collector uses the real host.
+	setupCollector func(context.Context) setupReport
 }
 
 // NewRunner creates a CLI runner.
@@ -210,17 +213,17 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.ports(ctx, args), true
 	case policyCommand:
 		return r.policy(ctx, args), true
-	case "settings":
+	case settingsCommand:
 		return r.settings(args), true
-	case "kit":
+	case kitCommand:
 		return r.kit(args), true
-	case "daemon":
+	case daemonCommand:
 		return r.daemon(args), true
-	case "template":
+	case templateCommand:
 		return r.template(args), true
 	case commandAgents:
 		return r.agents(args), true
-	case "env":
+	case envCommand:
 		return r.environment(ctx, args), true
 	case mcpCommand:
 		return r.mcp(ctx, args), true
@@ -230,7 +233,18 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.skills(ctx, args), true
 	case "tui":
 		return r.tui(ctx, args), true
-	case "volume", "move", "ttl", "setup":
+	case setupCommand:
+		return r.setup(ctx, args), true
+	default:
+		return r.fallbackCommand(name, args)
+	}
+}
+
+// fallbackCommand handles families that are either unimplemented Docker
+// commands or pure host-side generators.
+func (r *Runner) fallbackCommand(name string, args []string) (int, bool) {
+	switch name {
+	case volumeCommand, moveCommand, ttlCommand:
 		return r.unsupportedFamily(name), true
 	case completionCommand:
 		return r.completion(args), true
@@ -893,7 +907,6 @@ func (r *Runner) unsupportedFamily(name string) int {
 		"volume": "persistent volumes are cloud-only in this build",
 		"move":   "cloud move is unavailable without a tenant",
 		"ttl":    "cloud TTL is unavailable without a tenant",
-		"setup":  "host setup is not implemented",
 	}
 	_, _ = fmt.Fprintf(r.Err, "rsbx %s: unsupported: %s\n", name, reasons[name])
 	return 1
@@ -1896,15 +1909,23 @@ Sandbox commands:
 Management commands:
   agents, daemon, diagnose, env, login, logout, mcp, policy, reset, secret, settings, tui
 
+Other commands:
+  completion  Generate a shell completion script (bash, zsh, fish, powershell)
+  version     Show client and daemon versions
+
+Experimental commands:
+  setup       Read-only host readiness check (experimental)
+
 Extensions:
   kit       Inspect local kit files; registry kits and builders are unavailable
   template  List and inspect built-in templates
 
 Experimental:
   skills    Import, list and remove host-side agent skills
+  setup     Read-only host readiness check (experimental)
 
 Unsupported Docker Sandboxes commands:
-  move, setup, ttl, volume
+  move, ttl, volume
 
 Flags:
       --socket PATH  Local daemon endpoint

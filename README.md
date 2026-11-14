@@ -92,6 +92,8 @@ rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --dry-run
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --dry-run --filter until=168h
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --force
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" diagnose
+rsbx setup                         # experimental read-only host check
+rsbx setup --format json
 rsbx completion bash > /tmp/rsbx-completion.bash
 source /tmp/rsbx-completion.bash
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" wait <operation-id>
@@ -116,6 +118,14 @@ rsbx skills remove my-skill
 The `rsbx tui` dashboard draws the supplied blue shark logo directly in the
 terminal using block characters, alongside the Rheic name, brand colors, and
 sandbox status. The README logo image is `docs/assets/rheic-shark.png`.
+`rsbx completion bash|zsh|fish|powershell` prints a completion script generated
+from the current command tree. `rsbx setup` is experimental and read-only: it
+reports the platform, daemon socket reachability, runtime assets, required
+binaries, and Docker CLI availability, and supports `--format table|json|yaml`.
+It never installs software or starts a VM; the presence of files alone is not
+treated as proof that a sandbox can boot. It exits non-zero only when a required
+host component is missing.
+
 
 `rsbx create` mirrors the Docker grammar `create AGENT [PATH...]` with optional
 `--name NAME`; a missing PATH creates a mountless sandbox, and PATHs accept the

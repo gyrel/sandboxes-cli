@@ -123,6 +123,19 @@ Examples:
 	secretCommand     = "secret"
 	policyCommand     = "policy"
 	completionCommand = "completion"
+	daemonCommand     = "daemon"
+	envCommand        = "env"
+	kitCommand        = "kit"
+	settingsCommand   = "settings"
+	templateCommand   = "template"
+	moveCommand       = "move"
+	skillsCommand     = "skills"
+	ttlCommand        = "ttl"
+	volumeCommand     = "volume"
+	setupCommand      = "setup"
+	refreshFlag       = "--refresh"
+	refFlag           = "--ref"
+	tokenFlag         = "--token"
 )
 
 var errRunAgentRequired = errors.New("agent is required when --name is not set")

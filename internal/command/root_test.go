@@ -426,10 +426,13 @@ func TestRootHelpListsSupportedAndUnsupportedDockerCommandFamilies(t *testing.T)
 	if code := runner.Run(context.Background(), []string{"--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"Sandbox commands:", "Management commands:", "agents, daemon", "mcp, policy", "Extensions:", "reset", "template", "Unsupported Docker Sandboxes commands:", "move, setup", "volume", "--socket PATH"} {
+	for _, expected := range []string{"Sandbox commands:", "Management commands:", "agents, daemon", "mcp, policy", "Other commands:", "completion", "Experimental commands:", "setup", "Extensions:", "reset", "template", "Unsupported Docker Sandboxes commands:", "move, ttl, volume", "--socket PATH"} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("root help lacks %q: %s", expected, out.String())
 		}
+	}
+	if strings.Contains(out.String(), "move, setup") {
+		t.Errorf("setup is still listed as unsupported: %s", out.String())
 	}
 }
 

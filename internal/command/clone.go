@@ -266,11 +266,37 @@ func removeCloneRemoteForSandbox(ctx context.Context, sb *sdk.Sandbox, run gitCo
 	if workspacePath == "" {
 		return errors.New("daemon clone response has no host source workspace")
 	}
-	workspace, err := cloneWorkspaceForMount(ctx, sdk.Workspace{Path: workspacePath})
+	// Resolve the repository without invoking Git itself. Cleanup only edits a
+	// config file that cloneGitConfigPath and withGitConfigLock validate, so it
+	// must stay usable when the Git executable is unavailable.
+	workspace, err := canonicalCloneSourcePath(workspacePath)
 	if err != nil {
 		return err
 	}
-	return removeCloneRemote(ctx, workspace.Path, remote, sb.ID, run)
+	return removeCloneRemote(ctx, workspace, remote, sb.ID, run)
+}
+
+// cleanupDeletedCloneRemote removes the host remote owned by a clone sandbox
+// after the sandbox was deleted. Cleanup is best-effort: when bestEffort is
+// true, a failure is reported as a warning so bulk deletion exit codes still
+// reflect only real deletion failures.
+func (r *Runner) cleanupDeletedCloneRemote(ctx context.Context, sb *sdk.Sandbox, bestEffort bool) bool {
+	if sb == nil || sb.Clone == nil {
+		return false
+	}
+	if err := removeCloneRemoteForSandbox(ctx, sb, r.gitConfigCommand()); err != nil {
+		if bestEffort {
+			name := sb.Name
+			if name == "" {
+				name = sb.ID
+			}
+			_, _ = fmt.Fprintf(r.Err, "warning: clone remote cleanup for sandbox %s failed: %v\n", sanitizeTerminalText(name), err)
+			return false
+		}
+		r.error(err)
+		return true
+	}
+	return false
 }
 
 func cleanupCloneSandbox(ctx context.Context, client sdk.Client, op *sdk.Operation, sandbox *sdk.Sandbox, run gitConfigCommand) error {

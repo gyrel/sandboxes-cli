@@ -75,7 +75,7 @@ func (r *Runner) reset(ctx context.Context, args []string) int {
 			return 0
 		}
 	}
-	operations, removed, failed := r.deleteSandboxes(ctx, client, targets)
+	operations, removed, failed := r.deleteSandboxesBestEffort(ctx, client, targets)
 	if selected != listFormatTable {
 		if err := renderOperations(r.Out, selected, operations); err != nil {
 			r.error(err)

@@ -1708,6 +1708,17 @@ func allSandboxIDs(ctx context.Context, client sdk.Client) ([]string, error) {
 }
 
 func (r *Runner) deleteSandboxes(ctx context.Context, client sdk.Client, targets []string) ([]*sdk.Operation, []string, bool) {
+	return r.deleteSandboxesWithCloneCleanup(ctx, client, targets, false)
+}
+
+// deleteSandboxesBestEffort removes sandboxes and treats managed clone remote
+// cleanup as a warning, so failed cleanup cannot mask successful deletion in
+// the final exit code.
+func (r *Runner) deleteSandboxesBestEffort(ctx context.Context, client sdk.Client, targets []string) ([]*sdk.Operation, []string, bool) {
+	return r.deleteSandboxesWithCloneCleanup(ctx, client, targets, true)
+}
+
+func (r *Runner) deleteSandboxesWithCloneCleanup(ctx context.Context, client sdk.Client, targets []string, warnOnCloneCleanup bool) ([]*sdk.Operation, []string, bool) {
 	failed := false
 	operations := make([]*sdk.Operation, 0, len(targets))
 	removed := make([]string, 0, len(targets))
@@ -1735,8 +1746,7 @@ func (r *Runner) deleteSandboxes(ctx context.Context, client sdk.Client, targets
 			failed = true
 			continue
 		}
-		if err := removeCloneRemoteForSandbox(ctx, sb, r.gitConfigCommand()); err != nil {
-			r.error(err)
+		if r.cleanupDeletedCloneRemote(ctx, sb, warnOnCloneCleanup) {
 			failed = true
 		}
 		operations = append(operations, op)

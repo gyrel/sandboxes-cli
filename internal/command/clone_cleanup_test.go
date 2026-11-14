@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -104,8 +105,8 @@ func TestResetCleansCloneRemotesForMultipleSandboxes(t *testing.T) {
 				workspace := newCloneCleanupWorkspace(t, remoteState != cloneRemoteBrokenWorkspace)
 				sb := cloneCleanupSandbox(name, fmt.Sprintf("sb-%d", i), workspace)
 				items = append(items, sb)
-				for key, value := range cloneRemoteValues("sandbox-"+name, sb.ID, remoteState) {
-					state.values[key] = []string{value}
+				for key, values := range cloneRemoteValues("sandbox-"+name, sb.ID, remoteState) {
+					state.values[key] = slices.Clone(values)
 				}
 			}
 			sandboxes := &lifecycleSandbox{items: items}
@@ -161,6 +162,92 @@ func TestBulkDeleteWithoutCloneMetadataDoesNotAccessGit(t *testing.T) {
 	}
 }
 
+func TestRemoveCloneSandboxWarnsAboutUnfetchedCommits(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		clone       bool
+		wantWarning bool
+	}{
+		{name: "clone sandbox warns before removal", clone: true, wantWarning: true},
+		{name: "plain sandbox does not warn", clone: false},
+	}
+	wantParts := []string{
+		"warning: sandbox demo is a private clone",
+		"commits made inside it are lost when the sandbox is removed unless they are fetched first",
+		"git fetch sandbox-demo",
+		"refs/sandboxes/demo/*",
+		"survive removal",
+		"git branch LOCAL refs/sandboxes/demo/BRANCH",
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var sb sdk.Sandbox
+			var state *fakeGitConfigState
+			if tt.clone {
+				workspace := newCloneCleanupWorkspace(t, true)
+				sb = cloneCleanupSandbox("demo", "sb-demo", workspace)
+				state = newFakeGitConfigState(cloneRemoteValues("sandbox-demo", sb.ID, cloneRemoteOwned))
+			} else {
+				sb = sdk.Sandbox{ID: "sb-demo", Name: "demo", State: sdk.StateStopped}
+				state = newFakeGitConfigState(nil)
+			}
+			sandboxes := &lifecycleSandbox{items: []sdk.Sandbox{sb}}
+			runner, out, errOut := cloneCleanupRunner(sandboxes, state)
+
+			if code := runner.Run(context.Background(), []string{"rm", "--force", "demo"}); code != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if len(sandboxes.deletes) != 1 || sandboxes.deletes[0] != sb.ID {
+				t.Fatalf("deletes=%v", sandboxes.deletes)
+			}
+			if strings.Contains(out.String(), "warning:") {
+				t.Fatalf("clone warning was written to stdout: %q", out.String())
+			}
+			if !tt.wantWarning {
+				if errOut.Len() != 0 {
+					t.Fatalf("plain sandbox produced stderr: %q", errOut.String())
+				}
+				return
+			}
+			for _, part := range wantParts {
+				if !strings.Contains(errOut.String(), part) {
+					t.Fatalf("warning lacks %q: %q", part, errOut.String())
+				}
+			}
+			assertCloneRemoteState(t, state, "sandbox-demo", sb.ID, cloneRemoteOwned)
+		})
+	}
+}
+
+func TestCloneRemovalWarningOnlyAppliesToOwnedClones(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sb   *sdk.Sandbox
+		want bool
+	}{
+		{name: "nil sandbox", sb: nil},
+		{name: "no clone metadata", sb: &sdk.Sandbox{ID: "id", Name: "demo"}},
+		{name: "mismatched remote name", sb: &sdk.Sandbox{ID: "id", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-other"}}},
+		{name: "remote without sandbox prefix", sb: &sdk.Sandbox{ID: "id", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "demo"}}},
+		{name: "owned clone", sb: &sdk.Sandbox{ID: "id", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo"}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := cloneRemovalWarning(tt.sb)
+			if (got != "") != tt.want {
+				t.Fatalf("cloneRemovalWarning() = %q, want warning=%t", got, tt.want)
+			}
+			if tt.want && !strings.Contains(got, "refs/sandboxes/demo/*") {
+				t.Fatalf("warning lacks the mirrored ref namespace: %q", got)
+			}
+		})
+	}
+}
+
 func cloneCleanupSandbox(name, id, workspace string) sdk.Sandbox {
 	return sdk.Sandbox{
 		ID: id, Name: name, State: sdk.StateStopped, Workspace: workspace,
@@ -194,25 +281,30 @@ func newCloneCleanupWorkspace(t *testing.T, withGitDir bool) string {
 	return root
 }
 
-func cloneRemoteValues(remote, sandboxID string, state cloneRemoteState) map[string]string {
+func cloneRemoteValues(remote, sandboxID string, state cloneRemoteState) map[string][]string {
 	if state == cloneRemoteBrokenWorkspace {
 		return nil
 	}
-	url := "git://127.0.0.1:4321/demo/.git"
-	values := map[string]string{
-		"remote." + remote + ".url":              url,
-		"remote." + remote + ".rheic-managed-by": sandboxID,
-		"remote." + remote + ".rheic-last-url":   url,
+	url := "git://127.0.0.1:4321/demo"
+	name := strings.TrimPrefix(remote, "sandbox-")
+	values := map[string][]string{
+		"remote." + remote + ".url":              {url},
+		"remote." + remote + ".rheic-managed-by": {sandboxID},
+		"remote." + remote + ".rheic-last-url":   {url},
+		"remote." + remote + ".fetch": {
+			"+refs/heads/*:refs/remotes/" + remote + "/*",
+			"+refs/heads/*:refs/sandboxes/" + name + "/*",
+		},
 	}
 	switch state {
 	case cloneRemoteUserEdited:
-		values["remote."+remote+".url"] = "git://user-edit.invalid/demo.git"
+		values["remote."+remote+".url"] = []string{"git://user-edit.invalid/demo"}
 	case cloneRemoteForeignOwner:
-		values["remote."+remote+".rheic-managed-by"] = "other-sandbox-id"
+		values["remote."+remote+".rheic-managed-by"] = []string{"other-sandbox-id"}
 	case cloneRemoteNoOwner:
 		delete(values, "remote."+remote+".rheic-managed-by")
 	case cloneRemoteExtraConfig:
-		values["remote."+remote+".fetch"] = "+refs/heads/*:refs/remotes/" + remote + "/*"
+		values["remote."+remote+".pushurl"] = []string{"git://user-edit.invalid/demo"}
 	}
 	return values
 }
@@ -231,10 +323,9 @@ func assertCloneRemoteState(t *testing.T, state *fakeGitConfigState, remote, san
 	if !want.preserved() {
 		return
 	}
-	for key, value := range cloneRemoteValues(remote, sandboxID, want) {
-		got := state.values[key]
-		if len(got) != 1 || got[0] != value {
-			t.Errorf("preserved key %q = %v, want %q", key, got, value)
+	for key, values := range cloneRemoteValues(remote, sandboxID, want) {
+		if got := state.values[key]; !slices.Equal(got, values) {
+			t.Errorf("preserved key %q = %v, want %v", key, got, values)
 		}
 	}
 }
@@ -261,10 +352,10 @@ type fakeGitConfigState struct {
 	calls  []string
 }
 
-func newFakeGitConfigState(values map[string]string) *fakeGitConfigState {
-	state := &fakeGitConfigState{values: make(map[string][]string)}
+func newFakeGitConfigState(values map[string][]string) *fakeGitConfigState {
+	state := &fakeGitConfigState{values: make(map[string][]string, len(values))}
 	for key, value := range values {
-		state.values[key] = []string{value}
+		state.values[key] = slices.Clone(value)
 	}
 	return state
 }
@@ -305,6 +396,12 @@ func (s *fakeGitConfigState) run(_ context.Context, _ string, args ...string) (s
 			return "", fmt.Errorf("replace-all requires a value: %v", args)
 		}
 		s.values[args[1]] = []string{args[2]}
+		return "", nil
+	case "--add":
+		if len(args) < 3 {
+			return "", fmt.Errorf("add requires a value: %v", args)
+		}
+		s.values[args[1]] = append(s.values[args[1]], args[2])
 		return "", nil
 	case "--unset-all":
 		delete(s.values, args[1])

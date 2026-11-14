@@ -23,12 +23,24 @@ var completionTree = map[string][]string{
 	"prune":           {"--dry-run", "-f", forceFlag, "--filter", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
 	"wait":            {},
+	"attach":          {"--shell", helpShort, helpFlag},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {"-f", forceFlag},
-	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", commandFlag, globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
+	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, tokenFlag, "-t", forceFlag, "-f", refFlag, commandFlag, globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	mcpCommand:        {commandFlag, mcpArgsFlagName, "--dir", formatFlag, jsonFlag, quietLongFlag, forceFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	commandAgents:     {formatFlag, jsonFlag},
+	daemonCommand:     {jsonFlag, helpShort, helpFlag},
+	envCommand:        {nameFlag, envArgFlag, envArgsFileFlag, "-f", forceFlag, detachFlag, helpShort, helpFlag},
+	kitCommand:        {formatFlag, jsonFlag, helpShort, helpFlag},
+	"reset":           {"-f", forceFlag, formatFlag, jsonFlag, helpShort, helpFlag},
+	settingsCommand:   {formatFlag, jsonFlag, helpShort, helpFlag},
+	templateCommand:   {formatFlag, jsonFlag, helpShort, helpFlag},
+	"tui":             {refreshFlag, helpShort, helpFlag},
+	setupCommand:      {formatFlag, jsonFlag, helpShort, helpFlag},
+	moveCommand:       {},
+	ttlCommand:        {},
+	volumeCommand:     {},
 	skillsCommand:     {formatFlag, jsonFlag, "-q", quietLongFlag, forceFlag, "-f"},
 	completionCommand: {},
 	"help":            {},
@@ -40,6 +52,11 @@ var completionSubcommands = map[string][]string{
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 	commandAgents:     {"ls", commandList},
 	mcpCommand:        {"ls", "add", "call", "rm"},
+	daemonCommand:     {"status", startCommand, stopCommand, "restart", "log-level"},
+	envCommand:        {"plan", commandCreate, commandRun, commandExec, "rm"},
+	kitCommand:        {commandInspect, "ls", commandList},
+	settingsCommand:   {"ls", commandList, commandGet, commandSet, commandUnset},
+	templateCommand:   {"ls", commandList, commandInspect, "save", "load", "rm"},
 	skillsCommand:     {"ls", commandList, commandImport, "rm", commandRemove},
 }
 
@@ -81,8 +98,14 @@ func completionScript(shell string) (string, error) {
 	case "powershell":
 		return powershellCompletionScript(), nil
 	default:
-		return "", fmt.Errorf("unsupported shell %q", shell)
+		return "", fmt.Errorf("unsupported shell %q; supported shells: bash, zsh, fish, powershell", shell)
 	}
+}
+
+// completionTopLevelWords adds the global flags accepted before a command.
+func completionTopLevelWords() []string {
+	words := completionCommands()
+	return append(words, "--socket", helpFlag, helpShort)
 }
 
 func bashCompletionScript() string {
@@ -116,7 +139,7 @@ _rsbx_completion() {
 	fmt.Fprintf(&b, "    %s) COMPREPLY=(); return ;;\n", strings.Join(flags, "|"))
 	b.WriteString(`  esac
   if [ -z "$cmd" ]; then
-    COMPREPLY=( $(compgen -W "` + strings.Join(completionCommands(), " ") + `" -- "$cur") )
+    COMPREPLY=( $(compgen -W "` + strings.Join(completionTopLevelWords(), " ") + `" -- "$cur") )
     return
   fi
   case "$cmd" in
@@ -150,8 +173,8 @@ func zshCompletionScript() string {
 		}
 		fmt.Fprintf(&b, "    %s) _arguments '*: :(%s)' ;;\n", name, strings.Join(words, " "))
 	}
-	b.WriteString(`    *) _arguments '1: :($commands)' ;;
-  esac
+	b.WriteString("    *) _arguments '1: :(" + strings.Join(completionTopLevelWords(), " ") + ")' ;;\n")
+	b.WriteString(`  esac
 }
 
 compdef _rsbx rsbx
@@ -162,6 +185,8 @@ compdef _rsbx rsbx
 func fishCompletionScript() string {
 	var b strings.Builder
 	b.WriteString("complete -c rsbx -f\n")
+	b.WriteString("complete -c rsbx -l socket -r\n")
+	b.WriteString("complete -c rsbx -l help -s h\n")
 	for _, name := range completionCommands() {
 		fmt.Fprintf(&b, "complete -c rsbx -n '__fish_use_subcommand' -a %s\n", name)
 	}
@@ -241,6 +266,8 @@ func flagsTakingValue(flags []string) []string {
 		"-w": true, workdirFlag: true, "-u": true, userFlag: true,
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
 		usernameFlag: true, registryFlag: true, sandboxFlag: true,
+		"--socket": true, envArgFlag: true, envArgsFileFlag: true, refreshFlag: true,
+		"--service": true, refFlag: true, commandFlag: true, tokenFlag: true,
 	}
 	out := make([]string, 0, len(flags))
 	for _, flag := range flags {

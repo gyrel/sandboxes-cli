@@ -8,26 +8,83 @@ import (
 	"testing"
 )
 
-func TestCompletionScripts(t *testing.T) {
-	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
-		var out bytes.Buffer
-		runner := &Runner{Out: &out, Err: &out}
-		if code := runner.Run(context.Background(), []string{"completion", shell}); code != 0 {
-			t.Fatalf("%s exit=%d output=%q", shell, code, out.String())
-		}
-		expectedCompletions := []string{"rsbx", "create", "remove", "unset"}
-		if shell == "fish" {
-			expectedCompletions = append(expectedCompletions, "-l token", "-s t", "-l all", "-s f", "-l force")
-		} else {
-			expectedCompletions = append(expectedCompletions, "--token", "-t", "--all", "-f", "--force")
-		}
-		for _, expected := range expectedCompletions {
-			if !strings.Contains(out.String(), expected) {
-				t.Errorf("%s output lacks %q: %s", shell, expected, out.String())
+func TestCompletionCommandScripts(t *testing.T) {
+	tests := []struct {
+		name     string
+		shell    string
+		wantCode int
+		wants    []string
+	}{
+		{
+			name:     "bash",
+			shell:    "bash",
+			wantCode: 0,
+			wants:    []string{"rsbx", "create", "setup", "completion", "--token", "-t", "--all", "-f", "--force", "--socket"},
+		},
+		{
+			name:     "zsh",
+			shell:    "zsh",
+			wantCode: 0,
+			wants:    []string{"rsbx", "create", "setup", "completion", "--token", "-t", "--all", "-f", "--force", "--socket"},
+		},
+		{
+			name:     "fish",
+			shell:    "fish",
+			wantCode: 0,
+			wants:    []string{"rsbx", "create", "setup", "completion", "-l token", "-s t", "-l all", "-s f", "-l force", "-l socket"},
+		},
+		{
+			name:     "powershell",
+			shell:    "powershell",
+			wantCode: 0,
+			wants:    []string{"rsbx", "create", "setup", "completion", "--token", "-t", "--all", "-f", "--force"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var out bytes.Buffer
+			runner := &Runner{Out: &out, Err: &out}
+			if code := runner.Run(context.Background(), []string{"completion", test.shell}); code != test.wantCode {
+				t.Fatalf("exit=%d output=%q", code, out.String())
 			}
+			for _, want := range test.wants {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("%s output lacks %q: %s", test.shell, want, out.String())
+				}
+			}
+		})
+	}
+}
+
+func TestCompletionRejectsUnknownShell(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out}
+	if code := runner.Run(context.Background(), []string{"completion", "tcsh"}); code == 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	for _, want := range []string{"unsupported shell", "tcsh", "bash", "zsh", "fish", "powershell"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("error lacks %q: %q", want, out.String())
 		}
-		if t.Failed() {
-			t.Fatalf("%s output=%q", shell, out.String())
+	}
+}
+
+func TestCompletionCoversTopLevelCommandSurface(t *testing.T) {
+	expected := []string{
+		"agents", "attach", "completion", "cp", "create", "daemon", "diagnose", "env",
+		"exec", "get", "help", "kit", "login", "logout", "ls", "mcp", "move", "policy",
+		"ports", "prune", "reset", "rm", "run", "secret", "settings", "setup", "skills",
+		"start", "stop", "template", "ttl", "tui", "version", "volume", "wait",
+	}
+	got := completionCommands()
+	for _, name := range expected {
+		if !slices.Contains(got, name) {
+			t.Errorf("completion tree lacks top-level command %q", name)
+		}
+	}
+	for _, name := range got {
+		if !slices.Contains(expected, name) {
+			t.Errorf("completion tree contains unexpected command %q", name)
 		}
 	}
 }
@@ -41,6 +98,14 @@ func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
 	for _, expected := range []string{"import", "ls", "list", "set", "set-custom", "rm", "remove", "delete", "unset"} {
 		if !slices.Contains(completionSubcommands[secretCommand], expected) {
 			t.Errorf("secret %s command is missing from completion tree", expected)
+		}
+	}
+}
+
+func TestSetupFlagsAreInCompletionTree(t *testing.T) {
+	for _, expected := range []string{"--format", "--json", "--help", "-h"} {
+		if !slices.Contains(completionTree["setup"], expected) {
+			t.Errorf("setup %s flag is missing from completion tree", expected)
 		}
 	}
 }
@@ -62,13 +127,5 @@ func TestFishCompletionUsesShortFlagSyntax(t *testing.T) {
 	}
 	if strings.Contains(script, "-l t\n") || strings.Contains(script, "-l f\n") {
 		t.Fatalf("short flag is emitted as a long flag: %s", script)
-	}
-}
-
-func TestCompletionRejectsUnknownShell(t *testing.T) {
-	var out bytes.Buffer
-	runner := &Runner{Out: &out, Err: &out}
-	if code := runner.Run(context.Background(), []string{"completion", "tcsh"}); code != 2 {
-		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 }

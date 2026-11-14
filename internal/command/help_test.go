@@ -15,6 +15,7 @@ func TestHelpDoesNotReturnEmptyUsage(t *testing.T) {
 		{"prune", "--help"},
 		{"rm", "--help"},
 		{"completion", "--help"},
+		{"setup", "--help"},
 	} {
 		var out bytes.Buffer
 		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("")}

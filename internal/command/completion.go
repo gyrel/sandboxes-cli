@@ -29,6 +29,7 @@ var completionTree = map[string][]string{
 	mcpCommand:        {commandFlag, mcpArgsFlagName, "--dir", formatFlag, jsonFlag, quietLongFlag, forceFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	commandAgents:     {formatFlag, jsonFlag},
+	skillsCommand:     {formatFlag, jsonFlag, "-q", quietLongFlag, forceFlag, "-f"},
 	completionCommand: {},
 	"help":            {},
 }
@@ -39,6 +40,7 @@ var completionSubcommands = map[string][]string{
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 	commandAgents:     {"ls", commandList},
 	mcpCommand:        {"ls", "add", "call", "rm"},
+	skillsCommand:     {"ls", commandList, commandImport, "rm", commandRemove},
 }
 
 func completionCommands() []string {

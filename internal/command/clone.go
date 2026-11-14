@@ -15,18 +15,24 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 const (
-	cloneSourceGuestPath   = "/run/sandbox/source"
-	cloneGitConfigMaxBytes = 1 << 20
+	cloneSourceGuestPath       = "/run/sandbox/source"
+	cloneGitConfigMaxBytes     = 1 << 20
+	cloneEndpointDialTimeout   = 2 * time.Second
+	cloneEndpointProbeAttempts = 3
+	cloneEndpointProbeBackoff  = 100 * time.Millisecond
 )
 
 var cloneRepositorySlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 type gitConfigCommand func(context.Context, string, ...string) (string, error)
+
+type cloneDialFunc func(context.Context, string, string) (net.Conn, error)
 
 func (r *Runner) gitConfigCommand() gitConfigCommand {
 	if r.gitConfig != nil {
@@ -150,10 +156,52 @@ func (r *Runner) activateCloneSandbox(ctx context.Context, sb *sdk.Sandbox, sour
 	if err != nil {
 		return "", err
 	}
+	if err := r.probeCloneEndpoint(ctx, sb.Name, sb.Clone.GitEndpoint); err != nil {
+		return "", err
+	}
 	if err := reconcileCloneRemote(ctx, workspace.Path, sb.Clone.RemoteName, sb.ID, url, r.gitConfigCommand()); err != nil {
 		return "", err
 	}
 	return workdir, nil
+}
+
+func (r *Runner) cloneEndpointDial() cloneDialFunc {
+	if r.cloneDial != nil {
+		return r.cloneDial
+	}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialer := net.Dialer{Timeout: cloneEndpointDialTimeout}
+		return dialer.DialContext(ctx, network, address)
+	}
+}
+
+func (r *Runner) probeCloneEndpoint(ctx context.Context, sandboxName string, endpoint *sdk.GitEndpoint) error {
+	address := net.JoinHostPort(endpoint.HostIP, strconv.FormatUint(uint64(endpoint.Port), 10))
+	dial := r.cloneEndpointDial()
+	for attempt := 0; attempt < cloneEndpointProbeAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Duration(attempt) * cloneEndpointProbeBackoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+		attemptContext, cancel := context.WithTimeout(ctx, cloneEndpointDialTimeout)
+		conn, err := dial(attemptContext, "tcp", address)
+		cancel()
+		if err == nil {
+			if conn != nil {
+				_ = conn.Close()
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	return fmt.Errorf("the clone endpoint for sandbox %s is not reachable; run 'rsbx stop %s' and 'rsbx start %s' to republish it", sandboxName, sandboxName, sandboxName)
 }
 
 func cloneSourceWorkspaceFromSandbox(sb *sdk.Sandbox) string {

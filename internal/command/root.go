@@ -95,6 +95,7 @@ type Runner struct {
 	NewClient    func(address string) (sdk.Client, error)
 	SecretScreen func() tcell.Screen
 	gitConfig    gitConfigCommand
+	cloneDial    cloneDialFunc
 }
 
 // NewRunner creates a CLI runner.

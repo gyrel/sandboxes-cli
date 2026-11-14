@@ -157,6 +157,7 @@ func runTestRunner(t *testing.T, client sdk.Client, input string) (*Runner, *byt
 	runner := &Runner{
 		Out: &out, Err: &stderr, In: strings.NewReader(input), Socket: "unused",
 		NewClient: func(string) (sdk.Client, error) { return client, nil },
+		cloneDial: testCloneDial(nil),
 	}
 	return runner, &out, &stderr
 }
@@ -281,6 +282,37 @@ func TestRunCloneRefreshesEndpointAfterStartBeforeAttaching(t *testing.T) {
 	}
 	if got := gitConfigValues(t, configPath, "remote.sandbox-dev.url"); len(got) != 1 || got[0] != values[0] {
 		t.Fatalf("stop removed or changed the Rheic-owned remote: %#v", got)
+	}
+}
+
+func TestRunCloneUnreachableEndpointLeavesGitConfigUntouched(t *testing.T) {
+	workspace := initCloneTestRepo(t)
+	t.Chdir(workspace)
+	configPath := filepath.Join(workspace, ".git", "config")
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxes := &runSandbox{}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: sessions}, "")
+	runner.cloneDial = failingCloneDial(nil, errors.New("connection refused"))
+	if code := runner.Run(context.Background(), []string{"run", "--clone", "--name", "dev", "shell", workspace}); code == 0 {
+		t.Fatalf("unreachable clone endpoint unexpectedly succeeded, stdout=%q stderr=%q", out.String(), stderr.String())
+	}
+	want := "the clone endpoint for sandbox dev is not reachable; run 'rsbx stop dev' and 'rsbx start dev' to republish it"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+	if sessions.opened {
+		t.Fatal("agent session opened without a reachable clone endpoint")
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("unreachable clone endpoint changed .git/config")
 	}
 }
 

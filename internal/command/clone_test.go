@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -264,6 +265,184 @@ func TestGitConfigLockRejectsReplacedGitDirectory(t *testing.T) {
 	}
 	if bytes.Equal(before, after) {
 		t.Fatal("replaced Git directory unexpectedly contains the original config")
+	}
+}
+
+func TestActivateCloneSandboxReachableEndpointWritesRemote(t *testing.T) {
+	t.Parallel()
+	root := initCloneTestRepo(t)
+	sb := cloneTestSandbox("demo", 4321)
+	var calls int
+	var address string
+	runner := &Runner{cloneDial: func(_ context.Context, network, target string) (net.Conn, error) {
+		calls++
+		if network != "tcp" {
+			t.Errorf("probe network = %q, want tcp", network)
+		}
+		address = target
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}}
+	workdir, err := runner.activateCloneSandbox(context.Background(), sb, root)
+	if err != nil {
+		t.Fatalf("activateCloneSandbox() error = %v", err)
+	}
+	if workdir != "/workspace/demo" {
+		t.Fatalf("workdir = %q", workdir)
+	}
+	if calls != 1 || address != "127.0.0.1:4321" {
+		t.Fatalf("probe calls=%d address=%q", calls, address)
+	}
+	values := gitConfigValues(t, filepath.Join(root, ".git", "config"), "remote.sandbox-demo.url")
+	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo/.git" {
+		t.Fatalf("managed remote = %#v", values)
+	}
+}
+
+func TestActivateCloneSandboxUnreachableEndpointLeavesConfigUntouched(t *testing.T) {
+	t.Parallel()
+	root := initCloneTestRepo(t)
+	configPath := filepath.Join(root, ".git", "config")
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runner := &Runner{cloneDial: func(context.Context, string, string) (net.Conn, error) {
+		calls++
+		return nil, errors.New("connection refused")
+	}}
+	_, err = runner.activateCloneSandbox(context.Background(), cloneTestSandbox("demo", 4321), root)
+	want := "the clone endpoint for sandbox demo is not reachable; run 'rsbx stop demo' and 'rsbx start demo' to republish it"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if calls != cloneEndpointProbeAttempts {
+		t.Fatalf("probe attempts = %d, want %d", calls, cloneEndpointProbeAttempts)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("unreachable endpoint changed .git/config")
+	}
+}
+
+func TestActivateCloneSandboxUnreachableEndpointPreservesExistingRemote(t *testing.T) {
+	t.Parallel()
+	root := initCloneTestRepo(t)
+	configPath := filepath.Join(root, ".git", "config")
+	first := "git://127.0.0.1:1234/demo/.git"
+	if err := reconcileCloneRemote(context.Background(), root, "sandbox-demo", "sandbox-id", first, runGitConfig); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &Runner{cloneDial: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}}
+	if _, err := runner.activateCloneSandbox(context.Background(), cloneTestSandbox("demo", 5678), root); err == nil {
+		t.Fatal("unreachable endpoint unexpectedly succeeded")
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("unreachable endpoint changed an existing managed remote")
+	}
+	values := gitConfigValues(t, configPath, "remote.sandbox-demo.url")
+	if len(values) != 1 || values[0] != first {
+		t.Fatalf("managed remote = %#v, want %q", values, first)
+	}
+}
+
+func TestActivateCloneSandboxRetriesTransientDialFailure(t *testing.T) {
+	t.Parallel()
+	root := initCloneTestRepo(t)
+	calls := 0
+	runner := &Runner{cloneDial: func(context.Context, string, string) (net.Conn, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("connection reset")
+		}
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}}
+	if _, err := runner.activateCloneSandbox(context.Background(), cloneTestSandbox("demo", 4321), root); err != nil {
+		t.Fatalf("activateCloneSandbox() error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("probe attempts = %d, want 2", calls)
+	}
+	values := gitConfigValues(t, filepath.Join(root, ".git", "config"), "remote.sandbox-demo.url")
+	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo/.git" {
+		t.Fatalf("managed remote = %#v", values)
+	}
+}
+
+func TestActivateCloneSandboxDialTimeoutIsUnreachable(t *testing.T) {
+	t.Parallel()
+	root := initCloneTestRepo(t)
+	configPath := filepath.Join(root, ".git", "config")
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runner := &Runner{cloneDial: func(context.Context, string, string) (net.Conn, error) {
+		calls++
+		return nil, context.DeadlineExceeded
+	}}
+	_, err = runner.activateCloneSandbox(context.Background(), cloneTestSandbox("demo", 4321), root)
+	want := "the clone endpoint for sandbox demo is not reachable; run 'rsbx stop demo' and 'rsbx start demo' to republish it"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if calls != cloneEndpointProbeAttempts {
+		t.Fatalf("probe attempts = %d, want %d", calls, cloneEndpointProbeAttempts)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("dial timeout changed .git/config")
+	}
+}
+
+func cloneTestSandbox(name string, port uint32) *sdk.Sandbox {
+	return &sdk.Sandbox{
+		ID: "sandbox-id", Name: name,
+		Clone: &sdk.CloneInfo{
+			RemoteName: "sandbox-" + name, GuestWorkdir: "/workspace/" + name,
+			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: port, Repository: name},
+		},
+	}
+}
+
+func testCloneDial(calls *int) cloneDialFunc {
+	return func(context.Context, string, string) (net.Conn, error) {
+		if calls != nil {
+			*calls = *calls + 1
+		}
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}
+}
+
+func failingCloneDial(calls *int, err error) cloneDialFunc {
+	return func(context.Context, string, string) (net.Conn, error) {
+		if calls != nil {
+			*calls = *calls + 1
+		}
+		return nil, err
 	}
 }
 

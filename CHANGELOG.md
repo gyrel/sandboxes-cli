@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Validate the daemon-published clone endpoint as a random per-sandbox token
+  followed by the repository (`git://127.0.0.1:<port>/<token>/<repository>`).
+  Reject legacy tokenless, malformed, or non-hex endpoint paths instead of
+  writing an unauthenticated remote. The token is written only into the managed
+  remote URL and is refreshed when the daemon rotates it on start.
+
 ## v0.0.49 — 2026-11-15
 
 - `rsbx rm` now refuses to delete a running or otherwise non-stopped sandbox

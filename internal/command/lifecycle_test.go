@@ -59,7 +59,7 @@ func lifecycleRunner(sandbox *lifecycleSandbox) (*Runner, *bytes.Buffer) {
 }
 
 func TestRemoveRequiresForceWithoutTerminal(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev"}}}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: sdk.StateStopped}}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"rm", "dev"}); code != 1 || len(sandbox.deletes) != 0 {
 		t.Fatalf("exit=%d deletes=%v output=%q", code, sandbox.deletes, out.String())
@@ -69,9 +69,102 @@ func TestRemoveRequiresForceWithoutTerminal(t *testing.T) {
 	}
 }
 
+func TestRemoveRequiresStoppedSandboxesWithoutForce(t *testing.T) {
+	tests := []struct {
+		name        string
+		items       []sdk.Sandbox
+		args        []string
+		confirmed   bool
+		wantCode    int
+		wantDeletes []string
+		wantErrors  []string
+		wantPrompts int
+	}{
+		{
+			name:       "running without force",
+			items:      []sdk.Sandbox{{ID: "sb-run", Name: "running", State: sdk.StateRunning}},
+			args:       []string{"rm", "running"},
+			wantCode:   1,
+			wantErrors: []string{"sandbox running is running; stop it first or pass --force"},
+		},
+		{
+			name:       "other active state without force",
+			items:      []sdk.Sandbox{{ID: "sb-create", Name: "booting", State: sdk.StateCreating}},
+			args:       []string{"rm", "booting"},
+			wantCode:   1,
+			wantErrors: []string{"sandbox booting is creating; wait until it is stopped or pass --force"},
+		},
+		{
+			name:        "running with force",
+			items:       []sdk.Sandbox{{ID: "sb-run", Name: "running", State: sdk.StateRunning}},
+			args:        []string{"rm", "--force", "running"},
+			wantCode:    0,
+			wantDeletes: []string{"sb-run"},
+		},
+		{
+			name: "mixed batch refuses the whole batch",
+			items: []sdk.Sandbox{
+				{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped},
+				{ID: "sb-run", Name: "running", State: sdk.StateRunning},
+			},
+			args:       []string{"rm", "stopped", "running"},
+			wantCode:   1,
+			wantErrors: []string{"sandbox running is running; stop it first or pass --force"},
+		},
+		{
+			name: "multiple running sandboxes are all reported",
+			items: []sdk.Sandbox{
+				{ID: "sb-one", Name: "one", State: sdk.StateRunning},
+				{ID: "sb-two", Name: "two", State: sdk.StateRunning},
+			},
+			args:     []string{"rm", "one", "two"},
+			wantCode: 1,
+			wantErrors: []string{
+				"sandbox one is running; stop it first or pass --force",
+				"sandbox two is running; stop it first or pass --force",
+			},
+		},
+		{
+			name:        "stopped without force deletes after confirmation",
+			items:       []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped}},
+			args:        []string{"rm", "stopped"},
+			confirmed:   true,
+			wantCode:    0,
+			wantDeletes: []string{"sb-stop"},
+			wantPrompts: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sandbox := &lifecycleSandbox{items: tt.items}
+			runner, out := lifecycleRunner(sandbox)
+			prompts := 0
+			runner.removalPrompt = func(int) (bool, error) {
+				prompts++
+				return tt.confirmed, nil
+			}
+			if code := runner.Run(context.Background(), tt.args); code != tt.wantCode {
+				t.Fatalf("exit=%d want=%d output=%q", code, tt.wantCode, out.String())
+			}
+			if got, want := strings.Join(sandbox.deletes, ","), strings.Join(tt.wantDeletes, ","); got != want {
+				t.Fatalf("deletes=%q want=%q", got, want)
+			}
+			if prompts != tt.wantPrompts {
+				t.Fatalf("prompts=%d want=%d", prompts, tt.wantPrompts)
+			}
+			for _, want := range tt.wantErrors {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("output lacks %q: %q", want, out.String())
+				}
+			}
+		})
+	}
+}
+
 func TestRemoveMultipleResolvesNamesAndForces(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
-		{ID: "sb-1", Name: "one"}, {ID: "sb-2", Name: "two"},
+		{ID: "sb-1", Name: "one", State: sdk.StateStopped},
+		{ID: "sb-2", Name: "two", State: sdk.StateStopped},
 	}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"rm", "-f", "one", "two"}); code != 0 {
@@ -83,7 +176,7 @@ func TestRemoveMultipleResolvesNamesAndForces(t *testing.T) {
 }
 
 func TestRemovePartialFailureReturnsOne(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one"}}, deleteErr: errors.New("cannot remove")}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one", State: sdk.StateStopped}}, deleteErr: errors.New("cannot remove")}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"rm", "--force", "one", "missing"}); code != 1 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
@@ -152,7 +245,7 @@ func TestPruneRequiresForceWithoutTerminal(t *testing.T) {
 }
 
 func TestRemoveAllRequiresForceWithoutTerminal(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one"}}}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one", State: sdk.StateStopped}}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"rm", "--all"}); code != 1 || len(sandbox.deletes) != 0 {
 		t.Fatalf("exit=%d deletes=%v output=%q", code, sandbox.deletes, out.String())
@@ -160,7 +253,10 @@ func TestRemoveAllRequiresForceWithoutTerminal(t *testing.T) {
 }
 
 func TestRemoveAllForceDeletesEverySandbox(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one"}, {ID: "sb-2", Name: "two"}}}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
+		{ID: "sb-1", Name: "one", State: sdk.StateStopped},
+		{ID: "sb-2", Name: "two", State: sdk.StateStopped},
+	}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"rm", "--all", "--force"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
@@ -198,7 +294,7 @@ func TestStopJSONAndYAMLFormats(t *testing.T) {
 }
 
 func TestRemoveJSONFormat(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one"}}}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "one", State: sdk.StateStopped}}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"rm", "-f", "--json", "one"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
@@ -272,7 +368,8 @@ func TestFilterStoppedHonorsUntilAndUnknownStopTime(t *testing.T) {
 
 func TestResetRemovesAllSandboxesWithForce(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
-		{ID: "sb-1", Name: "one"}, {ID: "sb-2", Name: "two"},
+		{ID: "sb-1", Name: "one", State: sdk.StateRunning},
+		{ID: "sb-2", Name: "two", State: sdk.StateStopped},
 	}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"reset", "--force"}); code != 0 {

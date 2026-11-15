@@ -4,6 +4,10 @@
 
 ## v0.0.49 — 2026-11-15
 
+- `rsbx rm` now refuses to delete a running or otherwise non-stopped sandbox
+  without `--force`, matching Docker `sbx rm`. When a batch contains an active
+  sandbox, every active name is reported and nothing is deleted; `--force`
+  still removes running sandboxes and keeps the existing private-clone warning.
 - Add `rsbx policy org [--format table|json|yaml]`, a read-only view of the
   effective organization policy bundle. It reports the organization, revision,
   bundle fingerprint, enforcement state, load and expiry times, and parsed

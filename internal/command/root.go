@@ -79,8 +79,11 @@ Flags:
 
 const removeUsage = `usage: rsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all
 
-Remove one or more sandboxes. --force skips confirmation and allows removal of
-a running sandbox. --all removes every sandbox.
+Remove one or more sandboxes. Without --force, every named sandbox must be
+stopped: if any sandbox is running or otherwise not stopped, the whole command
+fails and nothing is removed. Stop those sandboxes first, or pass --force to
+remove them anyway. --force also skips confirmation. --all removes every
+sandbox.
 `
 
 const pruneUsage = `usage: rsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
@@ -103,6 +106,10 @@ type Runner struct {
 	SecretScreen       func() tcell.Screen
 	gitConfig          gitConfigCommand
 	cloneDial          cloneDialFunc
+
+	// removalPrompt overrides interactive removal confirmation in tests. A nil
+	// prompt requires a terminal, like the production path.
+	removalPrompt func(count int) (bool, error)
 
 	// setupCollector overrides read-only host detection in tests. A nil
 	// collector uses the real host.
@@ -1618,50 +1625,108 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	targets, code := r.prepareRemoval(ctx, client, opts)
+	targets, resolveFailed, code := r.prepareRemoval(ctx, client, opts)
 	if code >= 0 {
 		return code
 	}
-	operations, removed, failed := r.deleteSandboxes(ctx, client, targets)
+	operations, removed, deleteFailed := r.deleteSandboxes(ctx, client, targets, opts.force)
 	if code := r.renderRemoval(opts.format, operations, removed); code >= 0 {
 		return code
 	}
-	if failed {
+	if resolveFailed || deleteFailed {
 		return 1
 	}
 	return 0
 }
 
-func (r *Runner) prepareRemoval(ctx context.Context, client sdk.Client, opts removeOptions) ([]string, int) {
+// removalTarget is a sandbox resolved before removal. Resolving the whole batch
+// first lets rm reject every non-stopped sandbox before deleting anything.
+type removalTarget struct {
+	name    string
+	sandbox *sdk.Sandbox
+}
+
+func (r *Runner) prepareRemoval(ctx context.Context, client sdk.Client, opts removeOptions) ([]removalTarget, bool, int) {
 	targets := opts.targets
 	if opts.all {
 		var err error
 		targets, err = allSandboxIDs(ctx, client)
 		if err != nil {
 			r.error(err)
-			return nil, 1
+			return nil, true, 1
 		}
 	}
 	if len(targets) == 0 {
 		if err := renderOperations(r.Out, opts.format, nil); err != nil {
 			r.error(err)
-			return nil, 1
+			return nil, true, 1
 		}
-		return nil, 0
+		return nil, false, 0
+	}
+	resolved, blocked, failed := r.resolveRemovalTargets(ctx, client, targets, !opts.force)
+	if blocked {
+		return nil, true, 1
 	}
 	if opts.force {
-		return targets, -1
+		return resolved, failed, -1
 	}
-	confirmed, err := r.confirmRemoval(len(targets))
+	if len(resolved) == 0 {
+		return nil, failed, -1
+	}
+	confirm := r.confirmRemoval
+	if r.removalPrompt != nil {
+		confirm = r.removalPrompt
+	}
+	confirmed, err := confirm(len(resolved))
 	if err != nil {
 		r.error(err)
-		return nil, 1
+		return nil, true, 1
 	}
 	if !confirmed {
 		_, _ = fmt.Fprintln(r.Out, "Removal canceled")
-		return nil, 0
+		return nil, false, 0
 	}
-	return targets, -1
+	return resolved, failed, -1
+}
+
+// resolveRemovalTargets looks up every target and, when requireStopped is set,
+// reports and collects every sandbox that is not stopped. A blocked batch must
+// not be deleted even partially.
+func (r *Runner) resolveRemovalTargets(ctx context.Context, client sdk.Client, targets []string, requireStopped bool) ([]removalTarget, bool, bool) {
+	resolved := make([]removalTarget, 0, len(targets))
+	blocked, failed := false, false
+	for _, name := range targets {
+		id, err := findExecSandbox(ctx, client, name)
+		if err != nil {
+			r.error(err)
+			failed = true
+			continue
+		}
+		sandbox, err := client.Sandboxes().Get(ctx, id)
+		if err != nil {
+			r.error(err)
+			failed = true
+			continue
+		}
+		if requireStopped && sandbox.State != sdk.StateStopped {
+			r.error(removalStateError(sandbox))
+			blocked = true
+			continue
+		}
+		resolved = append(resolved, removalTarget{name: name, sandbox: sandbox})
+	}
+	return resolved, blocked, failed
+}
+
+func removalStateError(sandbox *sdk.Sandbox) error {
+	switch sandbox.State {
+	case "", sdk.StateUnknown:
+		return fmt.Errorf("sandbox %s is not stopped; stop it first or pass --force", sandbox.Name)
+	case sdk.StateRunning:
+		return fmt.Errorf("sandbox %s is running; stop it first or pass --force", sandbox.Name)
+	default:
+		return fmt.Errorf("sandbox %s is %s; wait until it is stopped or pass --force", sandbox.Name, sandbox.State)
+	}
 }
 
 func (r *Runner) renderRemoval(format string, operations []*sdk.Operation, removed []string) int {
@@ -1714,53 +1779,45 @@ func allSandboxIDs(ctx context.Context, client sdk.Client) ([]string, error) {
 	return ids, nil
 }
 
-func (r *Runner) deleteSandboxes(ctx context.Context, client sdk.Client, targets []string) ([]*sdk.Operation, []string, bool) {
-	return r.deleteSandboxesWithCloneCleanup(ctx, client, targets, false)
+func (r *Runner) deleteSandboxes(ctx context.Context, client sdk.Client, targets []removalTarget, force bool) ([]*sdk.Operation, []string, bool) {
+	return r.deleteResolvedSandboxes(ctx, client, targets, force, false)
 }
 
 // deleteSandboxesBestEffort removes sandboxes and treats managed clone remote
 // cleanup as a warning, so failed cleanup cannot mask successful deletion in
-// the final exit code.
+// the final exit code. It keeps reset's semantics: running sandboxes are
+// deleted because reset is explicitly destructive and confirmed.
 func (r *Runner) deleteSandboxesBestEffort(ctx context.Context, client sdk.Client, targets []string) ([]*sdk.Operation, []string, bool) {
-	return r.deleteSandboxesWithCloneCleanup(ctx, client, targets, true)
+	resolved, _, failed := r.resolveRemovalTargets(ctx, client, targets, false)
+	operations, removed, deleteFailed := r.deleteResolvedSandboxes(ctx, client, resolved, true, true)
+	return operations, removed, failed || deleteFailed
 }
 
-func (r *Runner) deleteSandboxesWithCloneCleanup(ctx context.Context, client sdk.Client, targets []string, warnOnCloneCleanup bool) ([]*sdk.Operation, []string, bool) {
+func (r *Runner) deleteResolvedSandboxes(ctx context.Context, client sdk.Client, targets []removalTarget, force, warnOnCloneCleanup bool) ([]*sdk.Operation, []string, bool) {
 	failed := false
 	operations := make([]*sdk.Operation, 0, len(targets))
 	removed := make([]string, 0, len(targets))
-	for _, name := range targets {
-		id, err := findExecSandbox(ctx, client, name)
-		if err != nil {
-			r.error(err)
-			failed = true
-			continue
-		}
-		sb, getErr := client.Sandboxes().Get(ctx, id)
-		if getErr != nil {
-			r.error(getErr)
-			failed = true
-			continue
-		}
-		if warning := cloneRemovalWarning(sb); warning != "" {
+	for _, target := range targets {
+		sandbox := target.sandbox
+		if warning := cloneRemovalWarning(sandbox); warning != "" {
 			_, _ = fmt.Fprint(r.Err, warning)
 		}
-		op, err := client.Sandboxes().Delete(ctx, id, sdk.DeleteOptions{Force: true})
+		op, err := client.Sandboxes().Delete(ctx, sandbox.ID, sdk.DeleteOptions{Force: force})
 		if err != nil {
 			r.error(err)
 			failed = true
 			continue
 		}
 		if op != nil && op.State == sdk.StateFailed {
-			r.error(fmt.Errorf("remove sandbox %s failed: %s", name, op.Error))
+			r.error(fmt.Errorf("remove sandbox %s failed: %s", target.name, op.Error))
 			failed = true
 			continue
 		}
-		if r.cleanupDeletedCloneRemote(ctx, sb, warnOnCloneCleanup) {
+		if r.cleanupDeletedCloneRemote(ctx, sandbox, warnOnCloneCleanup) {
 			failed = true
 		}
 		operations = append(operations, op)
-		removed = append(removed, name)
+		removed = append(removed, target.name)
 	}
 	return operations, removed, failed
 }

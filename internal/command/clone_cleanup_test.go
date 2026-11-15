@@ -410,3 +410,28 @@ func (s *fakeGitConfigState) run(_ context.Context, _ string, args ...string) (s
 		return "", fmt.Errorf("unexpected Git config invocation: %v", args)
 	}
 }
+
+func TestPruneWarnsBeforeRemovingCloneSandbox(t *testing.T) {
+	t.Parallel()
+	workspace := newCloneCleanupWorkspace(t, true)
+	sb := cloneCleanupSandbox("demo", "sb-demo", workspace)
+	state := newFakeGitConfigState(cloneRemoteValues("sandbox-demo", sb.ID, cloneRemoteOwned))
+	sandboxes := &lifecycleSandbox{items: []sdk.Sandbox{sb}}
+	runner, out, errOut := cloneCleanupRunner(sandboxes, state)
+
+	if code := runner.Run(context.Background(), []string{"prune", "--force"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(sandboxes.deletes) != 1 || sandboxes.deletes[0] != sb.ID {
+		t.Fatalf("deletes=%v", sandboxes.deletes)
+	}
+	for _, part := range []string{
+		"warning: sandbox demo is a private clone",
+		"commits made inside it are lost",
+		"git fetch sandbox-demo",
+	} {
+		if !strings.Contains(errOut.String(), part) {
+			t.Fatalf("stderr=%q, want %q", errOut.String(), part)
+		}
+	}
+}

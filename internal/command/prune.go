@@ -194,6 +194,7 @@ func (r *Runner) deletePrunedSandboxes(ctx context.Context, client sdk.Client, s
 	operations := make([]*sdk.Operation, 0, len(stopped))
 	removed := make([]sdk.Sandbox, 0, len(stopped))
 	for i := range stopped {
+		r.warnCloneRemoval(&stopped[i])
 		op, err := client.Sandboxes().Delete(ctx, stopped[i].ID, sdk.DeleteOptions{Force: true})
 		if err != nil {
 			failures = append(failures, err)

@@ -838,3 +838,210 @@ func TestRunDenyWriteAddsReadOnlyWorkspace(t *testing.T) {
 		t.Fatalf("workspaces=%+v", sandboxes.created.Workspaces)
 	}
 }
+
+func TestRunWithoutPathDerivesAndReusesCurrentWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived := "shell-" + sanitizeNameBase(cwd)
+	sandboxes := &runSandbox{items: []sdk.Sandbox{{
+		ID: "sb-old", Name: derived, State: sdk.StateRunning, Agent: shellAgent,
+		Image: agentImage(shellAgent), Workspace: workspace,
+		Workspaces: []sdk.Workspace{{Path: workspace}},
+	}}}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: sessions}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--detach", "shell"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if sandboxes.createCalls != 0 || sandboxes.startCalls != 0 {
+		t.Fatalf("create=%d start=%d, want reuse", sandboxes.createCalls, sandboxes.startCalls)
+	}
+	if strings.TrimSpace(out.String()) != "sb-old" || sessions.opened {
+		t.Fatalf("stdout=%q opened=%t, want reused sandbox ID", out.String(), sessions.opened)
+	}
+}
+
+func TestRunWithoutPathDerivesNameForNewSandbox(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxes := &runSandbox{}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: &fakeSessions{}}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--detach", "shell"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	want := "shell-" + sanitizeNameBase(cwd)
+	if sandboxes.createCalls != 1 || sandboxes.created.Name != want {
+		t.Fatalf("create=%d name=%q, want %q", sandboxes.createCalls, sandboxes.created.Name, want)
+	}
+}
+
+func TestRunDerivedReuseRequiresMatchingAgentImageAndWorkspaces(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*sdk.Sandbox, string)
+	}{
+		{name: "agent differs", mutate: func(sb *sdk.Sandbox, _ string) { sb.Agent = "codex" }},
+		{name: "image differs", mutate: func(sb *sdk.Sandbox, _ string) { sb.Image = "other/image:latest" }},
+		{name: "workspace differs", mutate: func(sb *sdk.Sandbox, other string) {
+			sb.Workspace = other
+			sb.Workspaces = []sdk.Workspace{{Path: other}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			other := t.TempDir()
+			t.Chdir(workspace)
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			derived := "shell-" + sanitizeNameBase(cwd)
+			sb := sdk.Sandbox{
+				ID: "sb-old", Name: derived, State: sdk.StateRunning, Agent: shellAgent,
+				Image: agentImage(shellAgent), Workspace: cwd,
+				Workspaces: []sdk.Workspace{{Path: cwd}},
+			}
+			tt.mutate(&sb, other)
+			sandboxes := &runSandbox{items: []sdk.Sandbox{sb}}
+			runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: &fakeSessions{}}, "")
+			if code := runner.Run(context.Background(), []string{"run", "--detach", "shell"}); code != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+			if sandboxes.createCalls != 1 {
+				t.Fatalf("create=%d, want a fresh sandbox", sandboxes.createCalls)
+			}
+			if sandboxes.created.Name == derived || !strings.HasPrefix(sandboxes.created.Name, "shell-") {
+				t.Fatalf("new name=%q, want a fresh shell-* name instead of %q", sandboxes.created.Name, derived)
+			}
+		})
+	}
+}
+
+func TestWorkspaceNameBaseDefaultsToCurrentDirectory(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "My Project")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if got := workspaceNameBase(nil); got != "my-project" {
+		t.Fatalf("workspaceNameBase(nil)=%q, want %q", got, "my-project")
+	}
+	invalid := []string{"/", "/tmp/..", "/a/---"}
+	for _, path := range invalid {
+		if got := sanitizeNameBase(path); got != "" {
+			t.Errorf("sanitizeNameBase(%q)=%q, want empty", path, got)
+		}
+	}
+}
+
+func TestRunNamedReuseWarnsOnImageDifference(t *testing.T) {
+	sandboxes := &runSandbox{items: []sdk.Sandbox{{
+		ID: "sb-old", Name: "dev", State: sdk.StateRunning, Agent: shellAgent, Image: "old/image:latest",
+	}}}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: &fakeSessions{}}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "dev", "--detach", "--image", "new/image:latest", "shell"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if sandboxes.createCalls != 0 || sandboxes.startCalls != 0 {
+		t.Fatalf("create=%d start=%d, want reuse", sandboxes.createCalls, sandboxes.startCalls)
+	}
+	for _, part := range []string{"warning:", "old/image:latest", "new/image:latest", "keeping the existing image"} {
+		if !strings.Contains(stderr.String(), part) {
+			t.Fatalf("stderr=%q, want %q", stderr.String(), part)
+		}
+	}
+}
+
+func TestRunNamedReuseRejectsDifferentAgent(t *testing.T) {
+	sandboxes := &runSandbox{items: []sdk.Sandbox{{
+		ID: "sb-old", Name: "dev", State: sdk.StateRunning, Agent: "codex", Image: agentImage("codex"),
+	}}}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: sessions}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "dev", "--detach", "shell"}); code != 1 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if sandboxes.createCalls != 0 || sandboxes.startCalls != 0 || sessions.opened {
+		t.Fatalf("mismatched agent was reused: create=%d start=%d opened=%t", sandboxes.createCalls, sandboxes.startCalls, sessions.opened)
+	}
+	for _, part := range []string{"agent", "codex", "shell", "--replace"} {
+		if !strings.Contains(stderr.String(), part) {
+			t.Fatalf("stderr=%q, want %q", stderr.String(), part)
+		}
+	}
+}
+
+func TestRunReplaceRecreatesNamedSandboxWithDifferentAgent(t *testing.T) {
+	sandboxes := &runSandbox{items: []sdk.Sandbox{{
+		ID: "sb-old", Name: "dev", State: sdk.StateRunning, Agent: "codex", Image: agentImage("codex"),
+	}}}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: &fakeSessions{}}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "dev", "--detach", "--replace", "shell"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if sandboxes.deleteCalls != 1 || sandboxes.deleteID != "sb-old" {
+		t.Fatalf("delete calls=%d id=%q", sandboxes.deleteCalls, sandboxes.deleteID)
+	}
+	if sandboxes.createCalls != 1 || sandboxes.created.Name != "dev" || sandboxes.created.Agent != shellAgent {
+		t.Fatalf("create=%d request=%#v", sandboxes.createCalls, sandboxes.created)
+	}
+	for _, part := range []string{"warning: replacing sandbox dev", "codex", "shell"} {
+		if !strings.Contains(stderr.String(), part) {
+			t.Fatalf("stderr=%q, want %q", stderr.String(), part)
+		}
+	}
+}
+
+func TestRunReplaceRequiresName(t *testing.T) {
+	called := false
+	runner := &Runner{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, NewClient: func(string) (sdk.Client, error) {
+		called = true
+		return runClient{}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"run", "--replace", "--detach", "shell"}); code != 2 || called {
+		t.Fatalf("exit=%d client-called=%t", code, called)
+	}
+}
+
+func TestRunRMWarnsBeforeRemovingCloneSandbox(t *testing.T) {
+	workspace := initCloneTestRepo(t)
+	t.Chdir(workspace)
+	canonical, err := canonicalCloneSourcePath(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clone := &sdk.CloneInfo{
+		RemoteName: "sandbox-dev", GuestWorkdir: "/workspace/private",
+		GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 12345, Repository: cloneTestEndpointPath("repo")},
+	}
+	sandboxes := &runSandbox{items: []sdk.Sandbox{{
+		ID: "sb-run", Name: "dev", State: sdk.StateRunning, Agent: shellAgent, Image: agentImage(shellAgent),
+		Workspace:  canonical,
+		Workspaces: []sdk.Workspace{{Path: canonical, ReadOnly: true, GuestPath: cloneSourceGuestPath}},
+		Clone:      clone,
+	}}}
+	state := newFakeGitConfigState(cloneRemoteValues("sandbox-dev", "sb-run", cloneRemoteOwned))
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: &fakeSessions{}}, "")
+	runner.gitConfig = state.run
+	if code := runner.Run(context.Background(), []string{"run", "--clone", "--rm", "--name", "dev", "shell", "--", "-c", "true"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if sandboxes.deleteCalls != 1 {
+		t.Fatalf("delete calls=%d", sandboxes.deleteCalls)
+	}
+	for _, part := range []string{"warning: sandbox dev is a private clone", "commits made inside it are lost"} {
+		if !strings.Contains(stderr.String(), part) {
+			t.Fatalf("stderr=%q, want %q", stderr.String(), part)
+		}
+	}
+}

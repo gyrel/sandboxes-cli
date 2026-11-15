@@ -7,6 +7,15 @@
   Reject legacy tokenless, malformed, or non-hex endpoint paths instead of
   writing an unauthenticated remote. The token is written only into the managed
   remote URL and is refreshed when the daemon rotates it on start.
+- `rsbx run` now derives `<agent>-<workspace-basename>` from the current
+  directory when no PATH is given, and reuses that sandbox only when its agent,
+  image, and workspaces match. A mismatch creates a fresh sandbox instead of
+  silently reusing the name.
+- Reusing a named sandbox with a different agent is now a hard error unless the
+  new `--replace` flag is set, which deletes and recreates the sandbox. A
+  different image keeps the existing image and prints a warning on stderr.
+- `rsbx prune` and `rsbx run --rm` now print the private-clone commit-loss
+  warning used by `rsbx rm`, as does `run --replace` when it removes a clone.
 
 ## v0.0.49 — 2026-11-15
 

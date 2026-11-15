@@ -319,7 +319,16 @@ func TestWorkspaceNameBase(t *testing.T) {
 			t.Fatalf("sanitizeNameBase(%q)=%q want %q", path, got, want)
 		}
 	}
-	if got := workspaceNameBase(nil); got != "" {
-		t.Fatalf("empty paths = %q", got)
+	if got := workspaceNameBase(nil); got != sanitizeNameBase(mustWorkingDirectory(t)) {
+		t.Fatalf("empty paths = %q, want current directory basename", got)
 	}
+}
+
+func mustWorkingDirectory(t *testing.T) string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return directory
 }

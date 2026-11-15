@@ -94,6 +94,22 @@ func TestPolicyLogRejectsBadFlags(t *testing.T) {
 	}
 }
 
+func TestPolicyLogReportsOversizedAuditRecord(t *testing.T) {
+	state := t.TempDir()
+	writeAuditFixture(t, filepath.Join(state, "run"), "dev", strings.Repeat("x", 1<<20)+"\n")
+	var out, errOut bytes.Buffer
+	runner := &Runner{Out: &out, Err: &errOut, Socket: filepath.Join(state, "sandboxesd.sock")}
+	if code := runner.Run(context.Background(), []string{"policy", "log", "dev"}); code != 1 {
+		t.Fatalf("expected read failure, exit=%d output=%q error=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "read policy log") {
+		t.Fatalf("missing read error: %q", errOut.String())
+	}
+	if strings.Contains(out.String(), "No policy log entries") {
+		t.Fatalf("read failure reported as empty audit log: %q", out.String())
+	}
+}
+
 func TestPolicyInspectMatchesRuleIDBeforeSandbox(t *testing.T) {
 	rule := policyRuleOutput{RuleID: "rule-xyz", Scope: "global", ResourceType: "network", Action: "allow", Protocol: "tcp", CIDR: "1.1.1.1/32", Port: 443}
 	var out bytes.Buffer

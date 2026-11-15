@@ -68,7 +68,7 @@ func (s *runSandbox) Create(_ context.Context, req sdk.CreateRequest) (*sdk.Oper
 		item.Clone = &sdk.CloneInfo{
 			GuestWorkdir: "/workspace/private",
 			RemoteName:   "sandbox-" + req.Name,
-			GitEndpoint:  &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 49152, Repository: "repo"},
+			GitEndpoint:  &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 49152, Repository: cloneTestEndpointPath("repo")},
 		}
 	}
 	s.items = append(s.items, item)
@@ -105,7 +105,7 @@ func (s *runSandbox) Start(_ context.Context, id string) (*sdk.Operation, error)
 		if s.items[i].ID == id {
 			s.items[i].State = sdk.StateRunning
 			if s.items[i].Clone != nil {
-				s.items[i].Clone.GitEndpoint = &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 49152, Repository: "repo"}
+				s.items[i].Clone.GitEndpoint = &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 49152, Repository: cloneTestEndpointPath("repo")}
 			}
 			s.startCalls++
 			return &sdk.Operation{ID: "op-start", State: sdk.StateDone}, nil
@@ -260,7 +260,7 @@ func TestRunCloneRefreshesEndpointAfterStartBeforeAttaching(t *testing.T) {
 		Workspaces: []sdk.Workspace{{Path: canonical, ReadOnly: true, GuestPath: cloneSourceGuestPath}},
 		Clone: &sdk.CloneInfo{
 			RemoteName: "sandbox-dev", GuestWorkdir: "/workspace/private",
-			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 12345, Repository: "repo"},
+			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 12345, Repository: cloneTestEndpointPath("repo")},
 		},
 	}}}
 	sessions := &fakeSessions{}
@@ -274,7 +274,7 @@ func TestRunCloneRefreshesEndpointAfterStartBeforeAttaching(t *testing.T) {
 	}
 	configPath := filepath.Join(workspace, ".git", "config")
 	values := gitConfigValues(t, configPath, "remote.sandbox-dev.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:49152/repo" {
+	if len(values) != 1 || values[0] != cloneTestEndpointURL(49152, "repo") {
 		t.Fatalf("host remote did not refresh from post-start endpoint: %#v", values)
 	}
 	if err := runner.reconcileCloneLifecycle(context.Background(), client, "sb-run", false); err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -15,26 +16,37 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
+// testCloneToken is a fixed, well-formed sandbox token used by clone tests.
+var testCloneToken = strings.Repeat("a", 64)
+
+func cloneTestEndpointPath(repository string) string {
+	return testCloneToken + "/" + repository
+}
+
+func cloneTestEndpointURL(port uint32, repository string) string {
+	return fmt.Sprintf("git://127.0.0.1:%d/%s", port, cloneTestEndpointPath(repository))
+}
+
 func TestValidateCloneInfo(t *testing.T) {
 	t.Parallel()
 	sb := &sdk.Sandbox{
 		ID: "id-1", Name: "demo",
 		Clone: &sdk.CloneInfo{
 			RemoteName: "sandbox-demo", GuestWorkdir: "/workspace/demo",
-			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 4321, Repository: "demo"},
+			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 4321, Repository: cloneTestEndpointPath("demo")},
 		},
 	}
 	workdir, url, err := validateCloneInfo(sb)
-	if err != nil || workdir != "/workspace/demo" || url != "git://127.0.0.1:4321/demo" {
+	if err != nil || workdir != "/workspace/demo" || url != cloneTestEndpointURL(4321, "demo") {
 		t.Fatalf("validateCloneInfo() = %q, %q, %v", workdir, url, err)
 	}
 	badCases := []*sdk.Sandbox{
 		{ID: "x", Name: "demo"},
 		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "origin", GuestWorkdir: "/workspace", GitEndpoint: sb.Clone.GitEndpoint}},
 		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace/../etc", GitEndpoint: sb.Clone.GitEndpoint}},
-		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace", GitEndpoint: &sdk.GitEndpoint{HostIP: "0.0.0.0", Port: 1, Repository: "repo"}}},
-		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace", GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 0, Repository: "repo"}}},
-		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace", GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "../repo"}}},
+		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace", GitEndpoint: &sdk.GitEndpoint{HostIP: "0.0.0.0", Port: 1, Repository: cloneTestEndpointPath("repo")}}},
+		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace", GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 0, Repository: cloneTestEndpointPath("repo")}}},
+		{ID: "x", Name: "demo", Clone: &sdk.CloneInfo{RemoteName: "sandbox-demo", GuestWorkdir: "/workspace", GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath("../repo")}}},
 	}
 	for i, bad := range badCases {
 		if _, _, err := validateCloneInfo(bad); err == nil {
@@ -52,29 +64,33 @@ func TestCloneEndpointURLShape(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name:     "repository path has no .git suffix",
-			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 4321, Repository: "demo"},
-			want:     "git://127.0.0.1:4321/demo",
+			name:     "token and repository path",
+			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 4321, Repository: cloneTestEndpointPath("demo")},
+			want:     cloneTestEndpointURL(4321, "demo"),
 		},
 		{
 			name:     "low port and punctuated repository",
-			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "my.repo_1"},
-			want:     "git://127.0.0.1:1/my.repo_1",
+			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath("my.repo_1")},
+			want:     cloneTestEndpointURL(1, "my.repo_1"),
 		},
 		{
 			name:     "highest port",
-			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 65535, Repository: "r"},
-			want:     "git://127.0.0.1:65535/r",
+			endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 65535, Repository: cloneTestEndpointPath("r")},
+			want:     cloneTestEndpointURL(65535, "r"),
 		},
 		{name: "missing endpoint", wantErr: true},
-		{name: "non-loopback host", endpoint: &sdk.GitEndpoint{HostIP: "192.0.2.10", Port: 1, Repository: "r"}, wantErr: true},
-		{name: "zero port", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 0, Repository: "r"}, wantErr: true},
-		{name: "port above range", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 65536, Repository: "r"}, wantErr: true},
-		{name: "dot repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "."}, wantErr: true},
-		{name: "traversal repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "../r"}, wantErr: true},
-		{name: "empty repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: ""}, wantErr: true},
-		{name: "repository with slash", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "a/b"}, wantErr: true},
-		{name: "repository with newline", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "r\nevil"}, wantErr: true},
+		{name: "non-loopback host", endpoint: &sdk.GitEndpoint{HostIP: "192.0.2.10", Port: 1, Repository: cloneTestEndpointPath("r")}, wantErr: true},
+		{name: "zero port", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 0, Repository: cloneTestEndpointPath("r")}, wantErr: true},
+		{name: "port above range", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 65536, Repository: cloneTestEndpointPath("r")}, wantErr: true},
+		{name: "legacy tokenless repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "r"}, wantErr: true},
+		{name: "short token", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: testCloneToken[:63] + "/r"}, wantErr: true},
+		{name: "uppercase token", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: strings.ToUpper(testCloneToken) + "/r"}, wantErr: true},
+		{name: "empty token", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: "/r"}, wantErr: true},
+		{name: "dot repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath(".")}, wantErr: true},
+		{name: "traversal repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath("../r")}, wantErr: true},
+		{name: "empty repository", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath("")}, wantErr: true},
+		{name: "repository with slash", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath("a/b")}, wantErr: true},
+		{name: "repository with newline", endpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: 1, Repository: cloneTestEndpointPath("r\nevil")}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -369,14 +385,14 @@ func TestReconcileCloneRemoteSerializesConcurrentGitConfigWriter(t *testing.T) {
 		}
 		return runGitConfig(ctx, path, args...)
 	}
-	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", "git://127.0.0.1:4321/demo", run); err != nil {
+	if err := reconcileCloneRemote(ctx, root, "sandbox-demo", "sandbox-id", cloneTestEndpointURL(4321, "demo"), run); err != nil {
 		t.Fatal(err)
 	}
 	if concurrentErr == nil {
 		t.Fatal("concurrent Git config writer was not blocked by the config lock")
 	}
 	values := gitConfigValues(t, configPath, "remote.sandbox-demo.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo" {
+	if len(values) != 1 || values[0] != cloneTestEndpointURL(4321, "demo") {
 		t.Fatalf("unexpected remote after serialized update: %#v", values)
 	}
 }
@@ -511,7 +527,7 @@ func TestActivateCloneSandboxReachableEndpointWritesRemote(t *testing.T) {
 	}
 	configPath := filepath.Join(root, ".git", "config")
 	values := gitConfigValues(t, configPath, "remote.sandbox-demo.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo" {
+	if len(values) != 1 || values[0] != cloneTestEndpointURL(4321, "demo") {
 		t.Fatalf("managed remote = %#v", values)
 	}
 	refspecs := gitConfigValues(t, configPath, "remote.sandbox-demo.fetch")
@@ -604,7 +620,7 @@ func TestActivateCloneSandboxRetriesTransientDialFailure(t *testing.T) {
 		t.Fatalf("probe attempts = %d, want 2", calls)
 	}
 	values := gitConfigValues(t, filepath.Join(root, ".git", "config"), "remote.sandbox-demo.url")
-	if len(values) != 1 || values[0] != "git://127.0.0.1:4321/demo" {
+	if len(values) != 1 || values[0] != cloneTestEndpointURL(4321, "demo") {
 		t.Fatalf("managed remote = %#v", values)
 	}
 }
@@ -644,7 +660,7 @@ func cloneTestSandbox(name string, port uint32) *sdk.Sandbox {
 		ID: "sandbox-id", Name: name,
 		Clone: &sdk.CloneInfo{
 			RemoteName: "sandbox-" + name, GuestWorkdir: "/workspace/" + name,
-			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: port, Repository: name},
+			GitEndpoint: &sdk.GitEndpoint{HostIP: "127.0.0.1", Port: port, Repository: cloneTestEndpointPath(name)},
 		},
 	}
 }

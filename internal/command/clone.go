@@ -28,7 +28,10 @@ const (
 	cloneEndpointProbeBackoff  = 100 * time.Millisecond
 )
 
-var cloneRepositorySlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+var (
+	cloneRepositorySlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	cloneEndpointTokenPattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 type gitConfigCommand func(context.Context, string, ...string) (string, error)
 
@@ -132,13 +135,19 @@ func cloneEndpointURL(endpoint *sdk.GitEndpoint) (string, error) {
 	if endpoint == nil {
 		return "", errors.New("daemon did not publish a clone Git endpoint; refusing to continue")
 	}
-	if endpoint.HostIP != loopbackHost || net.ParseIP(endpoint.HostIP) == nil || endpoint.Port == 0 || endpoint.Port > 65535 || !cloneRepositorySlugPattern.MatchString(endpoint.Repository) || endpoint.Repository == "." || endpoint.Repository == ".." {
+	if endpoint.HostIP != loopbackHost || net.ParseIP(endpoint.HostIP) == nil || endpoint.Port == 0 || endpoint.Port > 65535 {
 		return "", errors.New("daemon returned an unsafe clone Git endpoint")
 	}
-	// The managed forward serves the clone's Git directory, so the exported
-	// path is the repository name without a '/.git' suffix, matching the URL
-	// shape published by Docker sbx v0.50.1.
-	url := "git://" + net.JoinHostPort(endpoint.HostIP, strconv.FormatUint(uint64(endpoint.Port), 10)) + "/" + endpoint.Repository
+	token, repository, found := strings.Cut(endpoint.Repository, "/")
+	if !found || !cloneEndpointTokenPattern.MatchString(token) ||
+		!cloneRepositorySlugPattern.MatchString(repository) || repository == "." || repository == ".." {
+		return "", errors.New("daemon returned an unsafe clone Git endpoint")
+	}
+	// The managed forward serves the clone's Git directory under a random
+	// per-sandbox token, so the exported path is <token>/<repository>. The
+	// token is a bearer credential: it is written only into this remote URL and
+	// is rotated by the daemon on every start.
+	url := "git://" + net.JoinHostPort(endpoint.HostIP, strconv.FormatUint(uint64(endpoint.Port), 10)) + "/" + token + "/" + repository
 	return url, nil
 }
 

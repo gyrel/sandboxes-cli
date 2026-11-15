@@ -280,7 +280,7 @@ func dashboardKeyAction(event *tcell.EventKey, model *dashboardModel, ctx contex
 func refreshDashboard(ctx context.Context, client sdk.Client, model *dashboardModel) {
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	items, err := collectSandboxes(callCtx, client, dashboardPageSize)
+	items, err := collectSandboxes(callCtx, client, dashboardPageSize, 0)
 	if err != nil {
 		model.err = err.Error()
 		return

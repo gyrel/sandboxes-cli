@@ -156,18 +156,7 @@ func (r *Runner) policyReset(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) confirmResetPolicy(count int) (bool, error) {
-	if _, err := fmt.Fprintf(r.Err, "Remove all %d custom global policy rule(s)? Sandbox rules are kept. [y/N] ", count); err != nil {
-		return false, err
-	}
-	var answer string
-	if _, err := fmt.Fscanln(r.In, &answer); err != nil {
-		if errors.Is(err, io.EOF) {
-			return false, nil
-		}
-		return false, err
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	return answer == answerYes || answer == answerShortYes, nil
+	return r.confirmDestructive("policy reset", fmt.Sprintf("Remove all %d custom global policy rule(s)? Sandbox rules are kept.", count))
 }
 
 func (r *Runner) policyUnsupported(name, reason string) int {

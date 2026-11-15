@@ -263,7 +263,8 @@ does not diagnose containerd, image, gateway, or credential state yet.
 `--json`; structured output carries operation records (or sandbox candidates
 for `prune --dry-run`).
 
-`rsbx ls` retrieves all pages; `--limit` controls the page size. `--format`
+`rsbx ls` retrieves all pages; `--limit N` caps the number of returned
+sandboxes (1-1000), and every sandbox is listed without it. `--format`
 accepts `table`, `json` or `yaml`; `--json` is the JSON shorthand, and `-q`
 prints names only. JSON/YAML include `name`, `id`, `agent`, `status`, `image`,
 `agent`, `status`, `last_used_at`, `workspaces`, `detached`, `cpus`, `memory_mib`,

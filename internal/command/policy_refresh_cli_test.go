@@ -64,7 +64,8 @@ func runPolicyRPC(t *testing.T, fake *policyRefreshFake, stdin string, args ...s
 	t.Helper()
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(stdin), Socket: t.TempDir() + "/sandboxesd.sock",
-		NewClient: func(string) (sdk.Client, error) { return fake, nil }}
+		confirmTerminal: func() bool { return true },
+		NewClient:       func(string) (sdk.Client, error) { return fake, nil }}
 	return &out, runner.Run(context.Background(), append([]string{"policy"}, args...))
 }
 
@@ -98,6 +99,33 @@ func TestPolicyResetRequiresConfirmationAndKeepsSandboxRules(t *testing.T) {
 	out, code = runPolicyRPC(t, fake, "", "reset", "--force")
 	if code != 0 || fake.resetCalled != 2 {
 		t.Fatalf("exit=%d resetCalled=%d output=%q", code, fake.resetCalled, out.String())
+	}
+}
+
+func TestPolicyResetRequiresTerminalWithoutForce(t *testing.T) {
+	fake := &policyRefreshFake{allow: []sdk.NetworkRule{{Protocol: "tcp", CIDR: "192.0.2.0/24"}}}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("y\n"), Socket: t.TempDir() + "/sandboxesd.sock",
+		NewClient: func(string) (sdk.Client, error) { return fake, nil }}
+	if code := runner.Run(context.Background(), []string{"policy", "reset"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if fake.resetCalled != 0 {
+		t.Fatalf("reset called without a terminal: %d", fake.resetCalled)
+	}
+	if !strings.Contains(out.String(), "use --force") {
+		t.Fatalf("missing force guidance: %q", out.String())
+	}
+}
+
+func TestPolicyResetEmptyLineCancels(t *testing.T) {
+	fake := &policyRefreshFake{allow: []sdk.NetworkRule{{Protocol: "tcp", CIDR: "192.0.2.0/24"}}}
+	out, code := runPolicyRPC(t, fake, "\n", "reset")
+	if code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if fake.resetCalled != 0 || !strings.Contains(out.String(), "reset canceled") {
+		t.Fatalf("resetCalled=%d output=%q", fake.resetCalled, out.String())
 	}
 }
 

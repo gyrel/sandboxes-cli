@@ -53,14 +53,14 @@ func TestRemoveAcceptsInterspersedFlags(t *testing.T) {
 		{
 			name:       "unknown flag before arguments still errors",
 			args:       []string{"rm", "--bogus", "one"},
-			wantCode:   2,
-			wantOutput: []string{"rsbx rm: flag provided but not defined: -bogus"},
+			wantCode:   1,
+			wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx rm --help"},
 		},
 		{
 			name:       "unknown flag after arguments still errors",
 			args:       []string{"rm", "one", "--bogus"},
-			wantCode:   2,
-			wantOutput: []string{"rsbx rm: flag provided but not defined: -bogus"},
+			wantCode:   1,
+			wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx rm --help"},
 		},
 	}
 	for _, tt := range tests {

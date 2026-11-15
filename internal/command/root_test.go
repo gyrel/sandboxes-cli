@@ -91,7 +91,7 @@ func TestListFollowsPagesAndRejectsCycles(t *testing.T) {
 		runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{sandbox: pagedSandbox{cycle: cycle}}, nil
 		}}
-		code := runner.Run(context.Background(), []string{"ls", "--limit", "1"})
+		code := runner.Run(context.Background(), []string{"ls"})
 		if cycle {
 			if code != 1 || !strings.Contains(out.String(), "invalid sandbox pagination") {
 				t.Fatalf("cycle: exit %d, output %q", code, out.String())
@@ -101,6 +101,93 @@ func TestListFollowsPagesAndRejectsCycles(t *testing.T) {
 		if code != 0 || !strings.Contains(out.String(), "first") || !strings.Contains(out.String(), "second") {
 			t.Fatalf("missing page: exit %d, output %q", code, out.String())
 		}
+	}
+}
+
+func TestListLimitCapsReturnedRows(t *testing.T) {
+	for _, tt := range []struct {
+		limit string
+		want  []string
+		skip  []string
+	}{
+		{limit: "1", want: []string{"first"}, skip: []string{"second"}},
+		{limit: "2", want: []string{"first", "second"}},
+	} {
+		var out bytes.Buffer
+		runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{sandbox: pagedSandbox{}}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"ls", "-q", "--limit", tt.limit}); code != 0 {
+			t.Fatalf("--limit %s: exit=%d output=%q", tt.limit, code, out.String())
+		}
+		for _, want := range tt.want {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("--limit %s: output lacks %q: %q", tt.limit, want, out.String())
+			}
+		}
+		for _, skip := range tt.skip {
+			if strings.Contains(out.String(), skip) {
+				t.Fatalf("--limit %s: output includes %q: %q", tt.limit, skip, out.String())
+			}
+		}
+	}
+}
+
+func TestSocketFlagAcceptedBeforeAndAfterSubcommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "before", args: []string{"--socket", "/tmp/before.sock", "version"}, want: "/tmp/before.sock"},
+		{name: "after", args: []string{"version", "--socket", "/tmp/after.sock"}, want: "/tmp/after.sock"},
+		{name: "after equals", args: []string{"version", "--socket=/tmp/equals.sock"}, want: "/tmp/equals.sock"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			var got string
+			runner := &Runner{Out: &out, Err: &out, Socket: "default", NewClient: func(address string) (sdk.Client, error) {
+				got = address
+				return versionFakeClient{err: errors.New("dial failed")}, nil
+			}}
+			if code := runner.Run(context.Background(), tt.args); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, out.String())
+			}
+			if got != tt.want {
+				t.Fatalf("socket address=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSocketFlagAfterSubcommandDoesNotBecomeTarget(t *testing.T) {
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev"}}}
+	runner, out := lifecycleRunner(sandbox)
+	var got string
+	runner.NewClient = func(address string) (sdk.Client, error) {
+		got = address
+		return fakeClient{sandbox: sandbox}, nil
+	}
+	if code := runner.Run(context.Background(), []string{"stop", "dev", "--socket", "/tmp/stop.sock"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if strings.Join(sandbox.stops, ",") != "sb-1" {
+		t.Fatalf("stops=%v output=%q", sandbox.stops, out.String())
+	}
+	if got != "/tmp/stop.sock" {
+		t.Fatalf("socket address=%q", got)
+	}
+}
+
+func TestSocketFlagMissingValueAfterSubcommand(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, Socket: "default"}
+	if code := runner.Run(context.Background(), []string{"version", "--socket"}); code != 2 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "flag needs an argument") {
+		t.Fatalf("output=%q", out.String())
 	}
 }
 

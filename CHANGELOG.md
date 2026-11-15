@@ -18,6 +18,17 @@
   warning used by `rsbx rm`, as does `run --replace` when it removes a clone.
 - `rsbx run --docker` now parses and forwards the dedicated Docker profile instead of rejecting the flag documented in its help.
 - `rsbx run --deny-write PATH` now keeps the default current-directory workspace (or the explicit workspace set) and adds PATH as a read-only mount, rather than replacing the workspace set. A path inside a workspace becomes a read-only subpath mount; equal or enclosing paths are rejected as overlapping mounts.
+- Destructive `reset` and `policy reset` confirmations now require a terminal
+  (or `--force`) and treat an empty answer as cancel, matching `rm` and
+  `prune`.
+- `rsbx ls --limit N` now caps the number of returned sandboxes instead of
+  only setting the daemon page size; without it every sandbox is listed.
+- `rsbx rm` now reports unknown flags through the shared error contract
+  (`error: unknown flag`, exit 1) like other commands.
+- `--socket` is accepted before or after the subcommand, and
+  `rsbx help COMMAND` prints that command's help instead of top-level usage.
+- The development version fallback is now 0.0.50, with a test that fails when
+  it falls behind the latest changelog release.
 
 ## v0.0.49 — 2026-11-15
 

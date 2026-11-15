@@ -31,6 +31,43 @@ func TestHelpDoesNotReturnEmptyUsage(t *testing.T) {
 	}
 }
 
+func TestHelpSubcommandPrintsCommandUsage(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "run", want: "usage: rsbx run"},
+		{command: "rm", want: "usage: rsbx rm"},
+		{command: "ls", want: "usage: rsbx ls"},
+		{command: "stop", want: "usage: rsbx stop"},
+		{command: "version", want: "usage: rsbx version"},
+		{command: "policy", want: "Usage: rsbx policy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			var out bytes.Buffer
+			runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("")}
+			if code := runner.Run(context.Background(), []string{"help", tt.command}); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, out.String())
+			}
+			if !strings.Contains(out.String(), tt.want) {
+				t.Fatalf("help %s output=%q", tt.command, out.String())
+			}
+		})
+	}
+}
+
+func TestHelpWithoutCommandPrintsTopLevelUsage(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("")}
+	if code := runner.Run(context.Background(), []string{"help"}); code != 0 {
+		t.Fatalf("exit=%d", code)
+	}
+	if !strings.Contains(out.String(), "Sandbox commands:") || !strings.Contains(out.String(), "--socket PATH") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
 func TestRootHelpListsCommandsAndSocket(t *testing.T) {
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out}

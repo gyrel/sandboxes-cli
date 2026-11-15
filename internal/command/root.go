@@ -127,6 +127,11 @@ type Runner struct {
 	// prompt requires a terminal, like the production path.
 	removalPrompt func(count int) (bool, error)
 
+	// confirmTerminal overrides the terminal check for destructive
+	// confirmations in tests. A nil override requires a real terminal, like the
+	// production path.
+	confirmTerminal func() bool
+
 	// setupCollector overrides read-only host detection in tests. A nil
 	// collector uses the real host.
 	setupCollector func(context.Context) setupReport
@@ -151,18 +156,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // Run executes the command tree and returns a process exit code.
 func (r *Runner) Run(ctx context.Context, args []string) int {
-	global := flag.NewFlagSet("rsbx", flag.ContinueOnError)
-	global.SetOutput(io.Discard)
-	socket := global.String("socket", r.Socket, "local daemon endpoint")
-	if err := global.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			r.usage()
-			return 0
-		}
-		return r.flagParseFailure("", err)
+	rest, code, done := r.parseGlobalArgs(args)
+	if done {
+		return code
 	}
-	r.Socket = *socket
-	rest := global.Args()
 	if len(rest) == 0 {
 		r.usage()
 		return 2
@@ -173,8 +170,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 
 	switch rest[0] {
 	case helpCommand, helpShort, helpFlag:
-		r.usage()
-		return 0
+		return r.help(ctx, rest[1:])
 	case "version":
 		return r.version(ctx, rest[1:])
 	case commandCreate:
@@ -196,6 +192,71 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		r.usage()
 		return 2
 	}
+}
+
+// parseGlobalArgs extracts the global flags before dispatch. It reports
+// done=true when the caller should return code.
+func (r *Runner) parseGlobalArgs(args []string) (rest []string, code int, done bool) {
+	socketValue, args, err := extractSocketFlag(args, r.Socket)
+	if err != nil {
+		return nil, r.flagParseFailure("", err), true
+	}
+	global := flag.NewFlagSet("rsbx", flag.ContinueOnError)
+	global.SetOutput(io.Discard)
+	socket := global.String("socket", socketValue, "local daemon endpoint")
+	if err := global.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			r.usage()
+			return nil, 0, true
+		}
+		return nil, r.flagParseFailure("", err), true
+	}
+	r.Socket = *socket
+	return global.Args(), 0, false
+}
+
+// help prints top-level usage or, with a command name, that command's help.
+// Subcommands implement --help, so dispatch through Run to keep one handler.
+func (r *Runner) help(ctx context.Context, args []string) int {
+	if len(args) == 0 || args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag {
+		r.usage()
+		return 0
+	}
+	return r.Run(ctx, []string{args[0], helpFlag})
+}
+
+// extractSocketFlag removes the global --socket flag from any position so it
+// is accepted both before and after the subcommand. A literal -- ends flag
+// parsing, keeping everything after it positional. The last value wins, as it
+// does in the standard flag package.
+func extractSocketFlag(args []string, fallback string) (string, []string, error) {
+	socket := fallback
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			filtered = append(filtered, args[i:]...)
+			break
+		}
+		if arg == "--socket" || arg == "-socket" {
+			if i+1 >= len(args) {
+				return socket, filtered, errors.New("flag needs an argument: --socket")
+			}
+			i++
+			socket = args[i]
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "--socket="); ok {
+			socket = value
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "-socket="); ok {
+			socket = value
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return socket, filtered, nil
 }
 
 // flagParseFailure normalizes stdlib flag parse errors to the shared CLI
@@ -1650,8 +1711,11 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprint(r.Out, removeUsage)
 		return 0
 	}
+	if parseErr, ok := asFlagParseError(err); ok {
+		return r.flagParseFailure("rm", parseErr.err)
+	}
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "rsbx rm: %v\n", err)
+		r.error(err)
 		return 2
 	}
 	client, err := r.client()
@@ -1790,7 +1854,7 @@ func parseRemoveOptions(args []string) (removeOptions, bool, error) {
 		if errors.Is(err, flag.ErrHelp) {
 			return removeOptions{}, true, nil
 		}
-		return removeOptions{}, false, err
+		return removeOptions{}, false, flagParseError{err: err}
 	}
 	if (*all && fs.NArg() != 0) || (!*all && fs.NArg() < 1) {
 		return removeOptions{}, false, errors.New("usage: rsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all")
@@ -1803,7 +1867,7 @@ func parseRemoveOptions(args []string) (removeOptions, bool, error) {
 }
 
 func allSandboxIDs(ctx context.Context, client sdk.Client) ([]string, error) {
-	items, err := collectSandboxes(ctx, client, 200)
+	items, err := collectSandboxes(ctx, client, sandboxPageSize, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1856,19 +1920,39 @@ func (r *Runner) deleteResolvedSandboxes(ctx context.Context, client sdk.Client,
 }
 
 func (r *Runner) confirmRemoval(count int) (bool, error) {
-	file, ok := r.In.(*os.File)
-	if !ok || !term.IsTerminal(int(file.Fd())) {
-		return false, errors.New("removal confirmation requires a terminal; use --force to skip confirmation")
+	if r.removalPrompt != nil {
+		return r.removalPrompt(count)
 	}
-	if _, err := fmt.Fprintf(r.Err, "Remove %d sandbox(es)? [y/N] ", count); err != nil {
-		return false, fmt.Errorf("write removal prompt: %w", err)
+	return r.confirmDestructive("removal", fmt.Sprintf("Remove %d sandbox(es)?", count))
+}
+
+// confirmDestructive requires a terminal before prompting and treats an empty
+// answer, or anything other than y/yes, as no. Callers skip it with --force.
+func (r *Runner) confirmDestructive(subject, prompt string) (bool, error) {
+	if !r.stdinIsTerminal() {
+		return false, fmt.Errorf("%s confirmation requires a terminal; use --force to skip confirmation", subject)
+	}
+	if _, err := fmt.Fprintf(r.Err, "%s [y/N] ", prompt); err != nil {
+		return false, fmt.Errorf("write %s prompt: %w", subject, err)
 	}
 	answer, err := bufio.NewReader(r.In).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("read removal confirmation: %w", err)
+		return false, fmt.Errorf("read %s confirmation: %w", subject, err)
 	}
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == answerShortYes || answer == answerYes, nil
+	return affirmativeAnswer(answer), nil
+}
+
+func (r *Runner) stdinIsTerminal() bool {
+	if r.confirmTerminal != nil {
+		return r.confirmTerminal()
+	}
+	file, ok := r.In.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+func affirmativeAnswer(answer string) bool {
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == answerShortYes || answer == answerYes
 }
 
 func (r *Runner) wait(ctx context.Context, args []string) int {
@@ -1918,15 +2002,13 @@ Flags:
 
 func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(r.Err)
-	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), lifecycleUsage(name))
-	}
+	fs.SetOutput(io.Discard)
 	grace := fs.Duration("grace", 0, "grace period")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{graceFlag: true, formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprint(r.Out, lifecycleUsage(name))
 			return 0
 		}
 		return r.flagParseFailure(name, err)

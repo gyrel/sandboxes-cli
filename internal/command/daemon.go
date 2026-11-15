@@ -78,7 +78,7 @@ func (r *Runner) daemonStatus(args []string) int {
 			out.State = "ok"
 			out.Version = "v" + info.Version
 			out.API = info.APIVersion
-			if items, listErr := collectSandboxes(context.Background(), client, 1000); listErr == nil {
+			if items, listErr := collectSandboxes(context.Background(), client, 1000, 0); listErr == nil {
 				out.Total = len(items)
 				for i := range items {
 					switch items[i].State {

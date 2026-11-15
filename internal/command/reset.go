@@ -6,13 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 )
 
 const resetUsage = `Usage: rsbx reset [--force] [--format table|json|yaml]
 
 Remove every sandbox owned by the connected daemon. Settings, images and the
-daemon state directory are not deleted. --force skips confirmation.
+daemon state directory are not deleted. Confirmation requires a terminal and
+an empty answer cancels; --force skips confirmation.
 `
 
 // reset removes all sandboxes. It intentionally does not delete daemon state,
@@ -94,16 +94,5 @@ func (r *Runner) reset(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) confirmReset(count int) (bool, error) {
-	if _, err := fmt.Fprintf(r.Err, "Remove all %d sandbox(es)? Settings and images are kept. [y/N] ", count); err != nil {
-		return false, err
-	}
-	var answer string
-	if _, err := fmt.Fscanln(r.In, &answer); err != nil {
-		if errors.Is(err, io.EOF) {
-			return false, nil
-		}
-		return false, err
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	return answer == answerShortYes || answer == answerYes, nil
+	return r.confirmDestructive("reset", fmt.Sprintf("Remove all %d sandbox(es)? Settings and images are kept.", count))
 }

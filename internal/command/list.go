@@ -18,7 +18,8 @@ import (
 const listUsage = `usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]
 
 List sandboxes. table is the default; --json is equivalent to --format json;
--q prints only names. JSON/YAML fields include name, id, agent, status,
+-q prints only names. --limit N returns at most N sandboxes (1-1000); without
+it every sandbox is listed. JSON/YAML fields include name, id, agent, status,
 last_used_at, workspaces, created_at and detached. Flags may appear in any
 order; use -- to end flag parsing.
 
@@ -29,6 +30,10 @@ Examples:
   rsbx ls --limit 10 --format yaml
 `
 
+// sandboxPageSize is the daemon page size used when listing sandboxes. It is
+// independent of --limit, which caps the number of returned rows.
+const sandboxPageSize = 200
+
 const (
 	listFormatTable = "table"
 	listFormatJSON  = "json"
@@ -36,7 +41,7 @@ const (
 )
 
 type listOptions struct {
-	limit  int
+	limit  int // 0 means no limit
 	format string
 	quiet  bool
 }
@@ -81,7 +86,7 @@ func (r *Runner) list(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	items, err := collectSandboxes(ctx, client, opts.limit)
+	items, err := collectSandboxes(ctx, client, sandboxPageSize, opts.limit)
 	if err != nil {
 		r.error(err)
 		return 1
@@ -102,7 +107,7 @@ func (r *Runner) list(ctx context.Context, args []string) int {
 func parseListOptions(args []string) (listOptions, bool, error) {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	limit := fs.Int("limit", 50, "page size")
+	limit := fs.Int("limit", 0, "maximum number of sandboxes to return (1-1000; default all)")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	quiet := fs.Bool("q", false, "only display sandbox names")
@@ -112,6 +117,10 @@ func parseListOptions(args []string) (listOptions, bool, error) {
 			return listOptions{}, true, nil
 		}
 		return listOptions{}, false, flagParseError{err: err}
+	}
+	limitValue, ok := parseListLimit(fs, limit)
+	if !ok {
+		return listOptions{}, false, errors.New("--limit must be between 1 and 1000")
 	}
 	if fs.NArg() != 0 {
 		return listOptions{}, false, errors.New("usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]")
@@ -129,22 +138,45 @@ func parseListOptions(args []string) (listOptions, bool, error) {
 	if *quiet && selected != listFormatTable {
 		return listOptions{}, false, errors.New("--quiet cannot be combined with a non-table format")
 	}
-	if *limit <= 0 || *limit > 1000 {
-		return listOptions{}, false, errors.New("--limit must be between 1 and 1000")
-	}
-	return listOptions{limit: *limit, format: selected, quiet: *quiet}, false, nil
+	return listOptions{limit: limitValue, format: selected, quiet: *quiet}, false, nil
 }
 
-func collectSandboxes(ctx context.Context, client sdk.Client, limit int) ([]sdk.Sandbox, error) {
-	items := make([]sdk.Sandbox, 0, limit)
+// parseListLimit reports the result cap. An unset flag means no cap; an
+// explicit value must be between 1 and 1000.
+func parseListLimit(fs *flag.FlagSet, limit *int) (int, bool) {
+	limitSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "limit" {
+			limitSet = true
+		}
+	})
+	if !limitSet {
+		return 0, true
+	}
+	if *limit <= 0 || *limit > 1000 {
+		return 0, false
+	}
+	return *limit, true
+}
+
+// collectSandboxes fetches every page with pageSize rows per request. A
+// positive limit stops fetching once that many rows are collected.
+func collectSandboxes(ctx context.Context, client sdk.Client, pageSize, limit int) ([]sdk.Sandbox, error) {
+	if pageSize <= 0 {
+		pageSize = sandboxPageSize
+	}
+	items := make([]sdk.Sandbox, 0, pageSize)
 	seen := make(map[string]struct{})
 	token := ""
 	for pages := 0; pages < 10000; pages++ {
-		page, err := client.Sandboxes().List(ctx, sdk.ListOptions{PageSize: limit, PageToken: token})
+		page, err := client.Sandboxes().List(ctx, sdk.ListOptions{PageSize: pageSize, PageToken: token})
 		if err != nil {
 			return nil, err
 		}
 		items = append(items, page.Items...)
+		if limit > 0 && len(items) >= limit {
+			return items[:limit], nil
+		}
 		if page.NextPageToken == "" {
 			return items, nil
 		}

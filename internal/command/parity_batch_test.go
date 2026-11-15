@@ -29,6 +29,29 @@ func TestLsUnknownFlagUsesSharedErrorContract(t *testing.T) {
 	}
 }
 
+// TestRmUnknownFlagUsesSharedErrorContract covers CLI-10.
+func TestRmUnknownFlagUsesSharedErrorContract(t *testing.T) {
+	var out, stderr bytes.Buffer
+	called := false
+	runner := &Runner{Out: &out, Err: &stderr, NewClient: func(string) (sdk.Client, error) {
+		called = true
+		return runClient{}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"rm", "--bogus"}); code != 1 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if called {
+		t.Fatal("rm dialed the daemon for an unknown flag")
+	}
+	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") ||
+		!strings.Contains(stderr.String(), "  try: rsbx rm --help") {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Fatalf("raw stdlib error leaked: %q", stderr.String())
+	}
+}
+
 // TestStopAndRmHumanOutput covers PARITY P-23.
 func TestStopAndRmHumanOutput(t *testing.T) {
 	sandboxes := &runSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: sdk.StateRunning}}}

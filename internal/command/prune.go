@@ -1,19 +1,15 @@
 package command
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
-
-	"golang.org/x/term"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
@@ -44,7 +40,7 @@ func (r *Runner) prune(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	items, err := collectSandboxes(ctx, client, 200)
+	items, err := collectSandboxes(ctx, client, sandboxPageSize, 0)
 	if err != nil {
 		r.error(err)
 		return 1
@@ -233,17 +229,5 @@ func formatStoppedAge(stopped time.Time) string {
 }
 
 func (r *Runner) confirmPrune(count int) (bool, error) {
-	file, ok := r.In.(*os.File)
-	if !ok || !term.IsTerminal(int(file.Fd())) {
-		return false, errors.New("prune confirmation requires a terminal; use --force to skip confirmation")
-	}
-	if _, err := fmt.Fprintf(r.Err, "Remove %d stopped sandbox(es)? [y/N] ", count); err != nil {
-		return false, fmt.Errorf("write prune prompt: %w", err)
-	}
-	answer, err := bufio.NewReader(r.In).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("read prune confirmation: %w", err)
-	}
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	return answer == answerShortYes || answer == answerYes, nil
+	return r.confirmDestructive("prune", fmt.Sprintf("Remove %d stopped sandbox(es)?", count))
 }

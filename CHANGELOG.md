@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.0.49 — 2026-11-15
+
 - Add `rsbx policy org [--format table|json|yaml]`, a read-only view of the
   effective organization policy bundle. It reports the organization, revision,
   bundle fingerprint, enforcement state, load and expiry times, and parsed

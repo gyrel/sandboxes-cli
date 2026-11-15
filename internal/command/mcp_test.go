@@ -132,7 +132,7 @@ func TestReorderFlagArgsPreservesExistingPositionalsAndAgentArgs(t *testing.T) {
 		want   []string
 	}{
 		{name: "flags after positional", args: []string{"sandbox", "--format", "json", "--quiet"}, values: map[string]bool{"--format": true}, want: []string{"--format", "json", "--quiet", "sandbox"}},
-		{name: "agent args after separator", args: []string{"--name", "sample", "agent", ".", "--", "--help", "-x"}, values: map[string]bool{"--name": true}, want: []string{"--name", "sample", "agent", ".", "--help", "-x"}},
+		{name: "agent args after separator stay positional", args: []string{"--name", "sample", "agent", ".", "--", "--help", "-x"}, values: map[string]bool{"--name": true}, want: []string{"--name", "sample", "--", "agent", ".", "--help", "-x"}},
 		{name: "equals values remain intact", args: []string{"sandbox", "--args={\"x\":1}"}, values: map[string]bool{"--args": true}, want: []string{"--args={\"x\":1}", "sandbox"}},
 	}
 	for _, tc := range cases {

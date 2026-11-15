@@ -79,11 +79,27 @@ Flags:
 
 const removeUsage = `usage: rsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all
 
-Remove one or more sandboxes. Without --force, every named sandbox must be
+Remove one or more sandboxes. Flags may appear before, between or after sandbox
+names; use -- to end flag parsing. Without --force, every named sandbox must be
 stopped: if any sandbox is running or otherwise not stopped, the whole command
 fails and nothing is removed. Stop those sandboxes first, or pass --force to
 remove them anyway. --force also skips confirmation. --all removes every
 sandbox.
+
+Examples:
+  rsbx rm --force api
+  rsbx rm api --force
+  rsbx rm api --force worker
+  rsbx rm --force -- --literal-name
+`
+
+const getUsage = `usage: rsbx get SANDBOX
+
+Show one sandbox by name or ID. Use -- to end flag parsing.
+
+Examples:
+  rsbx get api
+  rsbx get -- --literal-name
 `
 
 const pruneUsage = `usage: rsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
@@ -888,15 +904,20 @@ func removeAccountInventory(ctx context.Context, accounts sdk.AccountService, pr
 }
 
 // reorderFlagArgs moves flags and their values before positionals so the
-// standard library flag parser accepts the Docker sbx flag-after-argument
-// grammar. It never interprets values as flags.
+// standard library flag parser accepts the Docker sbx interspersed grammar:
+// flags may appear before, between, or after positional arguments. A literal
+// "--" ends flag parsing; it is preserved so tokens after it stay positional
+// even when they look like flags. The helper never interprets flag values as
+// flags.
 func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 	flags := make([]string, 0, len(args))
 	positionals := make([]string, 0, len(args))
+	endOfFlags := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
 			positionals = append(positionals, args[i+1:]...)
+			endOfFlags = true
 			break
 		}
 		if !strings.HasPrefix(arg, "-") || arg == "-" {
@@ -913,7 +934,12 @@ func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 			flags = append(flags, args[i])
 		}
 	}
-	return append(flags, positionals...)
+	reordered := make([]string, 0, len(flags)+len(positionals)+1)
+	reordered = append(reordered, flags...)
+	if endOfFlags {
+		reordered = append(reordered, "--")
+	}
+	return append(reordered, positionals...)
 }
 
 func (r *Runner) unsupportedFamily(name string) int {
@@ -1570,8 +1596,17 @@ func applyCreateCloneMode(ctx context.Context, clone bool, workspaces []sdk.Work
 }
 
 func (r *Runner) get(ctx context.Context, args []string) int {
-	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx get <id>")
+	fs := flag.NewFlagSet("get", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprint(r.Out, getUsage)
+			return 0
+		}
+		return r.flagParseFailure(commandGet, err)
+	}
+	if fs.NArg() != 1 {
+		_, _ = fmt.Fprint(r.Err, getUsage)
 		return 2
 	}
 	client, err := r.client()
@@ -1580,7 +1615,7 @@ func (r *Runner) get(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	id, err := findExecSandbox(ctx, client, args[0])
+	id, err := findExecSandbox(ctx, client, fs.Arg(0))
 	if err != nil {
 		r.error(err)
 		return 1
@@ -1751,7 +1786,7 @@ func parseRemoveOptions(args []string) (removeOptions, bool, error) {
 	all := fs.Bool("all", false, "remove all sandboxes")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return removeOptions{}, true, nil
 		}
@@ -1861,20 +1896,45 @@ func (r *Runner) wait(ctx context.Context, args []string) int {
 	return 0
 }
 
+func lifecycleUsage(name string) string {
+	verb := "Start"
+	if name == stopCommand {
+		verb = "Stop"
+	}
+	return fmt.Sprintf(`usage: rsbx %s [--format table|json|yaml] [--json] [flags] SANDBOX...
+
+%s one or more sandboxes. Flags may appear before, between or after sandbox
+names; use -- to end flag parsing.
+
+Examples:
+  rsbx %s --format json api
+  rsbx %s api --format json
+  rsbx %s api --format json worker
+
+Flags:
+      --grace DURATION            stop grace period
+      --format table|json|yaml    output format
+      --json                      output in JSON format
+`, name, verb, name, name, name)
+}
+
 func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(r.Err)
+	fs.Usage = func() {
+		_, _ = fmt.Fprint(fs.Output(), lifecycleUsage(name))
+	}
 	grace := fs.Duration("grace", 0, "grace period")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{graceFlag: true, formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure(name, err)
 	}
 	if fs.NArg() < 1 {
-		_, _ = fmt.Fprintf(r.Err, "usage: rsbx %s [--format table|json|yaml] [--json] [flags] SANDBOX...\n", name)
+		_, _ = fmt.Fprint(r.Err, lifecycleUsage(name))
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)

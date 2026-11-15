@@ -19,7 +19,15 @@ const listUsage = `usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--li
 
 List sandboxes. table is the default; --json is equivalent to --format json;
 -q prints only names. JSON/YAML fields include name, id, agent, status,
-last_used_at, workspaces, created_at and detached.`
+last_used_at, workspaces, created_at and detached. Flags may appear in any
+order; use -- to end flag parsing.
+
+Examples:
+  rsbx ls
+  rsbx ls --json
+  rsbx ls -q --limit 100
+  rsbx ls --limit 10 --format yaml
+`
 
 const (
 	listFormatTable = "table"
@@ -99,7 +107,7 @@ func parseListOptions(args []string) (listOptions, bool, error) {
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	quiet := fs.Bool("q", false, "only display sandbox names")
 	fs.BoolVar(quiet, "quiet", false, "only display sandbox names")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{limitFlag: true, formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return listOptions{}, true, nil
 		}

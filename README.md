@@ -9,10 +9,12 @@ Status: pre-alpha.
 
 The canonical Go module path is now `github.com/rheic/sandboxes-cli` (previously `github.com/quoiner/sandboxes-cli`). Update imports and `go.mod` requirements when moving to a release that includes this change. The old module path is not kept as a compatibility alias.
 
-Command-line and terminal client. Uses sandboxes-go-sdk; does not import daemon
-internals. The read-only dashboard uses `github.com/gdamore/tcell/v3` as its
-terminal runtime. Bubble Tea is not used. TUI remains a thin view/input layer;
-non-interactive commands retain stable text and JSON output.
+Command-line and terminal client. Uses sandboxes-go-sdk for sandbox operations
+and the sandboxes-api contract directly for the read-only organization policy
+view; it never imports daemon internals. The read-only dashboard uses
+`github.com/gdamore/tcell/v3` as its terminal runtime. Bubble Tea is not used.
+TUI remains a thin view/input layer; non-interactive commands retain stable text
+and JSON output.
 
 ## Install (macOS/Linux, no manual approval)
 
@@ -161,7 +163,13 @@ prefix) add create-time IPv4 egress rules; the default remains deny.
 `--policy-profile deny-all|balanced|sbx-compat` selects an egress preset
 (balanced: 80/443 + DNS; sbx-compat: all IPv4 network); the global default is
 `deny-all` and settings can change it. `rsbx policy ls [SANDBOX]` lists global
-and sandbox rules with `rule_id`, scope, action, protocol, target and port.
+and sandbox rules with `rule_id`, scope, origin, action, protocol, target and
+port; when the daemon has an organization bundle loaded, its rules are appended
+with origin `org`. `rsbx policy org [--format table|json|yaml]` shows the
+effective organization policy: organization, bundle schema version and
+revision, payload fingerprint, enforcement state, load/expiry times, and every
+network rule marked `enforced` or `advisory`. A missing bundle prints an empty
+state. The command never returns signatures, tokens or other secret material.
 `policy allow|deny|rm network [--sandbox NAME] TARGET` accepts an IPv4 CIDR or
 a domain (`example.com`, `*.example.com`, `**.example.com`, single-label
 `?`/`[]` globs), with an optional `:PORT`; deny wins across scopes and global

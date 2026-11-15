@@ -27,6 +27,7 @@ type policyRuleOutput struct {
 	ResourceType string `json:"resource_type" yaml:"resource_type"`
 	Action       string `json:"action" yaml:"action"`
 	Provenance   string `json:"provenance" yaml:"provenance"`
+	Origin       string `json:"origin" yaml:"origin"`
 	Protocol     string `json:"protocol" yaml:"protocol"`
 	CIDR         string `json:"cidr,omitempty" yaml:"cidr,omitempty"`
 	Domain       string `json:"domain,omitempty" yaml:"domain,omitempty"`
@@ -63,6 +64,8 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		return r.policyInit(ctx, args[1:])
 	case "profile":
 		return r.policyProfile(ctx, args[1:])
+	case orgScope:
+		return r.policyOrg(ctx, args[1:])
 	case "log":
 		return r.policyLog(ctx, args[1:])
 	case "refresh":
@@ -499,6 +502,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		}
 		rules = append(rules, policyRules(sb)...)
 	}
+	rules = r.appendOrgPolicyRules(ctx, rules)
 	if err := renderPolicyRules(r.Out, selected, rules); err != nil {
 		r.error(err)
 		return 1
@@ -642,13 +646,13 @@ func policyRules(sb *sdk.Sandbox) []policyRuleOutput {
 	for _, workspace := range sb.Workspaces {
 		readID := filesystemRuleID(workspace.Path, "read")
 		out = append(out, policyRuleOutput{RuleID: readID, Scope: sandboxPrefix, ResourceType: filesystemKeyword,
-			Action: actionAllow, Provenance: workspaceLabel, Path: workspace.Path, Access: "read"})
+			Action: actionAllow, Provenance: workspaceLabel, Origin: originLocal, Path: workspace.Path, Access: "read"})
 		action := actionAllow
 		if workspace.ReadOnly {
 			action = actionDeny
 		}
 		out = append(out, policyRuleOutput{RuleID: filesystemRuleID(workspace.Path, "write"), Scope: sandboxPrefix, ResourceType: filesystemKeyword,
-			Action: action, Provenance: workspaceLabel, Path: workspace.Path, Access: "write"})
+			Action: action, Provenance: workspaceLabel, Origin: originLocal, Path: workspace.Path, Access: "write"})
 	}
 	return out
 }
@@ -735,7 +739,7 @@ func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOu
 				protocol = tcpProtocol
 			}
 			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, Scope: scope, ResourceType: networkKeyword,
-				Action: action, Provenance: "user", Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
+				Action: action, Provenance: "user", Origin: originLocal, Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
 		}
 	}
 	appendRules("allow", allow)
@@ -774,14 +778,14 @@ func renderPolicyRules(out io.Writer, format string, rules []policyRuleOutput) e
 						_, _ = fmt.Fprintln(tw)
 					}
 					_, _ = fmt.Fprintln(tw, "NETWORK")
-					_, _ = fmt.Fprintln(tw, "RULE ID\tSCOPE\tACTION\tPROTOCOL\tTARGET\tPORT")
+					_, _ = fmt.Fprintln(tw, "RULE ID\tSCOPE\tORIGIN\tACTION\tPROTOCOL\tTARGET\tPORT")
 					printedNetwork = true
 				}
 				target := rule.CIDR
 				if rule.Domain != "" {
 					target = rule.Domain
 				}
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n", rule.RuleID, rule.Scope, rule.Action, rule.Protocol, target, rule.Port)
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n", rule.RuleID, rule.Scope, rule.Origin, rule.Action, rule.Protocol, target, rule.Port)
 			}
 		}
 		return tw.Flush()
@@ -852,6 +856,8 @@ Commands:
                                           evaluate a guest workspace path
   init allow-all|balanced|deny-all        set the global default profile
   profile [ls]                            show the global default and available profiles
+  org [--format table|json|yaml]          show the effective organization policy,
+                                          enforced vs advisory rules, or an empty state
 
 policy refresh/reset/approval need daemon support and fail closed.
 Default is deny-all.

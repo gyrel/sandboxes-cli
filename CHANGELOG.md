@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Add `rsbx policy org [--format table|json|yaml]`, a read-only view of the
+  effective organization policy bundle. It reports the organization, revision,
+  bundle fingerprint, enforcement state, load and expiry times, and parsed
+  network rules marked `enforced` or `advisory`. A missing bundle prints a clear
+  empty state instead of failing.
+- `rsbx policy ls` now prints an `origin` column and best-effort appends
+  organization rules when a bundle is loaded, keeping local rules marked
+  `local`.
+- Consume `github.com/rheic/sandboxes-api` v0.0.26 directly for the additive
+  `GetOrgPolicy` RPC. The CLI still uses `sandboxes-go-sdk` for all other
+  commands. Downstream builds must bump the API contract; until the API release
+  tag exists, this module cannot build standalone without a local replace.
+
 ## v0.0.44 — 2026-11-11
 
 - Rebuild the alpha from its immutable tag so release provenance identifies the exact source commit.

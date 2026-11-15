@@ -48,6 +48,8 @@ const (
 	commandSetCustom  = "set-custom"
 	schemeHTTPS       = "https"
 	reasonDefaultDeny = "default deny"
+	orgScope          = "org"
+	originLocal       = "local"
 )
 
 const createUsage = `usage: rsbx create [AGENT] [PATH...] [--name NAME] [flags]
@@ -89,14 +91,18 @@ Remove stopped sandboxes. --dry-run lists candidates without removing them;
 
 // Runner executes commands against a local daemon.
 type Runner struct {
-	Out          io.Writer
-	Err          io.Writer
-	In           io.Reader
-	Socket       string
-	NewClient    func(address string) (sdk.Client, error)
-	SecretScreen func() tcell.Screen
-	gitConfig    gitConfigCommand
-	cloneDial    cloneDialFunc
+	Out       io.Writer
+	Err       io.Writer
+	In        io.Reader
+	Socket    string
+	NewClient func(address string) (sdk.Client, error)
+	// NewOrgPolicyClient reads the read-only organization policy view. It is a
+	// separate RPC client because the SDK release predates the additive API
+	// contract; tests inject a fake here.
+	NewOrgPolicyClient func(address string) (orgPolicyClient, error)
+	SecretScreen       func() tcell.Screen
+	gitConfig          gitConfigCommand
+	cloneDial          cloneDialFunc
 
 	// setupCollector overrides read-only host detection in tests. A nil
 	// collector uses the real host.
@@ -106,11 +112,12 @@ type Runner struct {
 // NewRunner creates a CLI runner.
 func NewRunner(out, errOut io.Writer) *Runner {
 	return &Runner{
-		Out:       out,
-		Err:       errOut,
-		In:        os.Stdin,
-		Socket:    defaultSocket(),
-		NewClient: func(address string) (sdk.Client, error) { return sdk.New(sdk.Config{Address: address}) },
+		Out:                out,
+		Err:                errOut,
+		In:                 os.Stdin,
+		Socket:             defaultSocket(),
+		NewClient:          func(address string) (sdk.Client, error) { return sdk.New(sdk.Config{Address: address}) },
+		NewOrgPolicyClient: newOrgPolicyClient,
 	}
 }
 

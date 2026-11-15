@@ -16,6 +16,8 @@
   different image keeps the existing image and prints a warning on stderr.
 - `rsbx prune` and `rsbx run --rm` now print the private-clone commit-loss
   warning used by `rsbx rm`, as does `run --replace` when it removes a clone.
+- `rsbx run --docker` now parses and forwards the dedicated Docker profile instead of rejecting the flag documented in its help.
+- `rsbx run --deny-write PATH` now keeps the default current-directory workspace (or the explicit workspace set) and adds PATH as a read-only mount, rather than replacing the workspace set. A path inside a workspace becomes a read-only subpath mount; equal or enclosing paths are rejected as overlapping mounts.
 
 ## v0.0.49 — 2026-11-15
 

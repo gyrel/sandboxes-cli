@@ -609,7 +609,7 @@ func TestRunHelpExitsZero(t *testing.T) {
 		t.Fatalf("unexpected help: %q", out.String())
 	}
 	for _, expected := range []string{
-		"[PATH...]", "--kit FILE", "--deny-write PATH", "HOST_IP:]HOST_PORT", "tcp6|udp6",
+		"[PATH...]", "--kit FILE", "--deny-write PATH", "--docker", "HOST_IP:]HOST_PORT", "tcp6|udp6",
 		"cloud sandboxes and remote/OCI kits are not supported", "it reuses automatically",
 		"Agent arguments after -- are passed to the agent", "rsbx run --new --name clean-shell --detach shell",
 	} {
@@ -826,16 +826,118 @@ func TestRunPassesProxyReferenceOnlyAsNonSecretCreateMetadata(t *testing.T) {
 	}
 }
 
-func TestRunDenyWriteAddsReadOnlyWorkspace(t *testing.T) {
+func TestRunDockerFlagRequestsDockerProfile(t *testing.T) {
 	workspace := t.TempDir()
 	sandboxes := &runSandbox{}
 	sessions := &fakeSessions{}
 	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: sessions}, "")
-	if code := runner.Run(context.Background(), []string{"run", "--name", "deny", "--deny-write", workspace, "shell"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"run", "--name", "docker-run", "--docker", "shell", workspace}); code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
-	if len(sandboxes.created.Workspaces) != 1 || !sandboxes.created.Workspaces[0].ReadOnly {
-		t.Fatalf("workspaces=%+v", sandboxes.created.Workspaces)
+	if !sandboxes.created.Privileged {
+		t.Fatal("run --docker did not request the privileged Docker profile")
+	}
+}
+
+func TestRunDenyWriteKeepsDefaultWorkspace(t *testing.T) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	denied := filepath.Join(workspace, "protected")
+	if err := os.Mkdir(denied, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sandboxes := &runSandbox{}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: sessions}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "deny", "--deny-write", denied, "shell"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	created := sandboxes.created.Workspaces
+	if len(created) != 2 {
+		t.Fatalf("workspaces=%+v", created)
+	}
+	if created[0].Path != workspace || created[0].ReadOnly {
+		t.Fatalf("default workspace was not kept: %+v", created[0])
+	}
+	if created[1].Path != denied || !created[1].ReadOnly {
+		t.Fatalf("deny-write submount missing: %+v", created[1])
+	}
+	if sandboxes.created.Workspace != workspace {
+		t.Fatalf("compat workspace=%q", sandboxes.created.Workspace)
+	}
+}
+
+func TestRunDenyWriteKeepsExplicitWorkspaceSet(t *testing.T) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	explicit, denied := t.TempDir(), t.TempDir()
+	sandboxes := &runSandbox{}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{sandboxes: sandboxes, sessions: sessions}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "deny-explicit", "shell", explicit, "--deny-write", denied}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	created := sandboxes.created.Workspaces
+	if len(created) != 2 {
+		t.Fatalf("workspaces=%+v", created)
+	}
+	if created[0].Path != explicit || created[0].ReadOnly {
+		t.Fatalf("explicit workspace was not kept: %+v", created[0])
+	}
+	if created[1].Path != denied || !created[1].ReadOnly {
+		t.Fatalf("deny-write mount missing: %+v", created[1])
+	}
+	if sandboxes.created.Workspace != explicit {
+		t.Fatalf("compat workspace=%q", sandboxes.created.Workspace)
+	}
+}
+
+func TestRunDenyWriteRejectsWorkspaceOverlap(t *testing.T) {
+	workspace := t.TempDir()
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		args    []string
+		message string
+	}{
+		{
+			name:    "same path",
+			args:    []string{"run", "--name", "deny", "shell", workspace, "--deny-write", workspace},
+			message: "overlaps workspace",
+		},
+		{
+			name:    "read-only parent",
+			args:    []string{"run", "--name", "deny", "shell", child, "--deny-write", parent},
+			message: "contains workspace",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			var stderr bytes.Buffer
+			runner := &Runner{Out: &bytes.Buffer{}, Err: &stderr, NewClient: func(string) (sdk.Client, error) {
+				called = true
+				return runClient{}, nil
+			}}
+			if code := runner.Run(context.Background(), test.args); code != 2 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			if called {
+				t.Fatal("client connected before rejecting the workspace overlap")
+			}
+			if !strings.Contains(stderr.String(), test.message) {
+				t.Fatalf("stderr=%q, want %q", stderr.String(), test.message)
+			}
+		})
 	}
 }
 

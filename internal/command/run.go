@@ -25,7 +25,8 @@ Create a local sandbox, start it, and attach to an agent. This command uses the
 local Rheic daemon; cloud sandboxes and remote/OCI kits are not supported here.
 The default workspace is the current directory. Pass additional workspace paths
 after PATH; append :ro to make a workspace read-only. A single-file read-only
-workspace is supported. Agent arguments after -- are passed to the agent.
+workspace is supported. --deny-write keeps the selected workspaces and adds PATH
+as a read-only subpath mount. Agent arguments after -- are passed to the agent.
 
 Without --name, the sandbox name is <agent>-<workspace-basename>. The default
 workspace is the current directory, so the basename is taken from the current
@@ -57,7 +58,7 @@ Flags:
       --image REF                 image reference override for a new sandbox
   -t, --template REF              container image for a new sandbox (alias for --image)
       --kit FILE                  apply a local kit definition
-      --deny-write PATH           mount PATH read-only (repeatable)
+      --deny-write PATH           keep selected workspaces and add PATH read-only (repeatable)
   -p, --publish PORT_SPEC         publish a guest TCP/UDP port on host loopback
                                   repeatable; accepts [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
       --allow-network CIDR[:PORT] allow egress CIDR rule (repeatable; optional udp: prefix)
@@ -285,11 +286,68 @@ func prepareRunKitOptions(ctx context.Context, opts *runOptions, agent *string, 
 		}
 		workspacesExplicit = true
 	}
-	for _, target := range opts.denyWrite {
-		workspacePaths = append(workspacePaths, target+":ro")
-		workspacesExplicit = true
+	if len(opts.denyWrite) == 0 {
+		return workspacePaths, workspacesExplicit, nil
 	}
+	// --deny-write adds read-only mounts to the selected workspace set. Without
+	// an explicit positional or kit workspace, the default current directory
+	// stays in the set instead of being replaced by the read-only path.
+	if len(workspacePaths) == 0 {
+		workspacePaths = []string{"."}
+	}
+	denyWorkspaces, err := runDenyWriteWorkspaces(workspacePaths, opts.denyWrite)
+	if err != nil {
+		return nil, false, err
+	}
+	workspacePaths = append(workspacePaths, denyWorkspaces...)
+	workspacesExplicit = true
 	return workspacePaths, workspacesExplicit, nil
+}
+
+// runDenyWriteWorkspaces validates --deny-write targets against the selected
+// workspace set and returns them as read-only workspace specs. A target inside
+// a writable workspace is a read-only submount; an equal or parent target would
+// overlap an existing mount and is rejected.
+func runDenyWriteWorkspaces(workspacePaths, denyWrites []string) ([]string, error) {
+	bases := make([]sdk.Workspace, 0, len(workspacePaths))
+	for _, spec := range workspacePaths {
+		workspace, err := parseWorkspaceSpec(spec)
+		if err != nil {
+			return nil, err
+		}
+		bases = append(bases, workspace)
+	}
+	seen := make(map[string]struct{}, len(denyWrites))
+	specs := make([]string, 0, len(denyWrites))
+	for _, target := range denyWrites {
+		readOnly, err := parseWorkspaceSpec(target + ":ro")
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[readOnly.Path]; exists {
+			return nil, fmt.Errorf("--deny-write %s is specified more than once", target)
+		}
+		seen[readOnly.Path] = struct{}{}
+		for _, base := range bases {
+			if readOnly.Path == base.Path {
+				return nil, fmt.Errorf("--deny-write %s overlaps workspace %s; mount the path once, without --deny-write", target, base.Path)
+			}
+			if workspaceContains(readOnly.Path, base.Path) {
+				return nil, fmt.Errorf("--deny-write %s contains workspace %s; a read-only mount cannot contain another workspace", target, base.Path)
+			}
+		}
+		specs = append(specs, target+":ro")
+	}
+	return specs, nil
+}
+
+// workspaceContains reports whether child is strictly inside parent.
+func workspaceContains(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil || rel == "." || rel == ".." {
+		return false
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func usesOpenAIOAuthReference(env []string) bool {
@@ -774,6 +832,9 @@ func parseRunValueFlag(args []string, index int, arg string, opts *runOptions) (
 		return 1, true, nil
 	case replaceFlag:
 		opts.replace = true
+		return 1, true, nil
+	case dockerFlag:
+		opts.privileged = true
 		return 1, true, nil
 	}
 	return parseRunValuedFlag(args, index, arg, opts)

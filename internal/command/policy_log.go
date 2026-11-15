@@ -104,8 +104,10 @@ func (r *Runner) readAuditDecisions(_ context.Context, filter []string) ([]egres
 		if err != nil {
 			return nil, 0, fmt.Errorf("open policy log: %w", err)
 		}
-		parsed, bad := parseAuditFile(file, sandbox)
-		_ = file.Close()
+		parsed, bad, readErr := parseAuditFile(file, sandbox)
+		if err := errors.Join(readErr, file.Close()); err != nil {
+			return nil, 0, fmt.Errorf("read policy log for sandbox %q: %w", sandbox, err)
+		}
 		decisions = append(decisions, parsed...)
 		malformed += bad
 	}
@@ -115,7 +117,7 @@ func (r *Runner) readAuditDecisions(_ context.Context, filter []string) ([]egres
 	return decisions, malformed, nil
 }
 
-func parseAuditFile(reader io.Reader, fallbackSandbox string) ([]egressDecision, int) {
+func parseAuditFile(reader io.Reader, fallbackSandbox string) ([]egressDecision, int, error) {
 	var decisions []egressDecision
 	malformed := 0
 	scanner := bufio.NewScanner(reader)
@@ -135,7 +137,10 @@ func parseAuditFile(reader io.Reader, fallbackSandbox string) ([]egressDecision,
 		}
 		decisions = append(decisions, decision)
 	}
-	return decisions, malformed
+	if err := scanner.Err(); err != nil {
+		return nil, malformed, err
+	}
+	return decisions, malformed, nil
 }
 
 func (r *Runner) renderPolicyLogTable(decisions []egressDecision, malformed int) int {

@@ -1834,9 +1834,7 @@ func (r *Runner) deleteResolvedSandboxes(ctx context.Context, client sdk.Client,
 	removed := make([]string, 0, len(targets))
 	for _, target := range targets {
 		sandbox := target.sandbox
-		if warning := cloneRemovalWarning(sandbox); warning != "" {
-			_, _ = fmt.Fprint(r.Err, warning)
-		}
+		r.warnCloneRemoval(sandbox)
 		op, err := client.Sandboxes().Delete(ctx, sandbox.ID, sdk.DeleteOptions{Force: force})
 		if err != nil {
 			r.error(err)

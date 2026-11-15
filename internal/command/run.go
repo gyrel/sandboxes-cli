@@ -27,10 +27,16 @@ The default workspace is the current directory. Pass additional workspace paths
 after PATH; append :ro to make a workspace read-only. A single-file read-only
 workspace is supported. Agent arguments after -- are passed to the agent.
 
-Without --name, the sandbox name is <agent>-<workspace-basename>. An existing
-sandbox with that name is reused: on a terminal, rsbx asks first; without a
-terminal, it reuses automatically. --new always creates a fresh sandbox.
-With --name, rsbx reuses and restarts that sandbox unless --new is also set.
+Without --name, the sandbox name is <agent>-<workspace-basename>. The default
+workspace is the current directory, so the basename is taken from the current
+directory when PATH is omitted. An existing sandbox with that name is reused
+only when its agent, image, and workspaces match: on a terminal, rsbx asks
+first; without a terminal, it reuses automatically. Otherwise rsbx creates a
+fresh sandbox. --new always creates a fresh sandbox. With --name, rsbx reuses
+and restarts that sandbox unless --new is also set. A different existing agent
+is refused; a different image keeps the existing image with a warning.
+--replace deletes and recreates an existing --name sandbox instead of reusing
+it, including when the requested agent differs.
 With --detach, rsbx creates or starts the sandbox, prints its ID, and exits.
 --rm removes the sandbox after the attached agent session exits.
 --clone uses a read-only host Git source and a private in-guest clone. The
@@ -45,6 +51,7 @@ Agents:
 Flags:
       --name NAME   sandbox name; reuse and restart it when it already exists
       --new         always create a new sandbox instead of reusing the named one
+      --replace     delete and recreate an existing --name sandbox before running
       --clone       run on a private in-guest clone of the host Git repository
   -d, --detach      create and start without attaching
       --image REF                 image reference override for a new sandbox
@@ -70,6 +77,7 @@ Examples:
   rsbx run shell -- --version
   rsbx run --name dev-shell --detach shell
   rsbx run --new --name clean-shell --detach shell
+  rsbx run --replace --name dev-shell --detach shell
 `
 
 	shellAgent        = "shell"
@@ -81,6 +89,7 @@ Examples:
 	detachShort       = "-d"
 	nameFlag          = "--name"
 	newFlag           = "--new"
+	replaceFlag       = "--replace"
 	imageFlag         = "--image"
 	templateShort     = "-t"
 	templateFlag      = "--template"
@@ -153,6 +162,7 @@ type runResources struct {
 type runOptions struct {
 	name             string
 	new              bool
+	replace          bool
 	image            string
 	publish          []string
 	allow            []string
@@ -597,6 +607,7 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 	}
 	code := r.execSessionMode(ctx, client, sandbox.ID, runArgv(agent, agentArgs), execOptions{workdir: cloneWorkdir, env: resources.env}, interactive, tty, closeOnEOF)
 	if opts.remove {
+		r.warnCloneRemoval(sandbox)
 		if err := r.removeRunSandbox(ctx, client, sandbox); err != nil {
 			r.error(err)
 			return 1
@@ -760,6 +771,9 @@ func parseRunValueFlag(args []string, index int, arg string, opts *runOptions) (
 		return 1, true, nil
 	case newFlag:
 		opts.new = true
+		return 1, true, nil
+	case replaceFlag:
+		opts.replace = true
 		return 1, true, nil
 	}
 	return parseRunValuedFlag(args, index, arg, opts)
@@ -932,6 +946,9 @@ func parseRunPositionals(positionals []string) (agent string, paths []string, ex
 
 //nolint:gocritic // runOptions is an immutable value object.
 func validateRunRequest(opts runOptions, agent string) error {
+	if opts.replace && opts.name == "" {
+		return errors.New("--replace requires --name")
+	}
 	if agent != "" {
 		return validateRunAgent(agent)
 	}
@@ -1006,12 +1023,12 @@ func checkReusedWorkspaceMode(sandbox *sdk.Sandbox, requested []sdk.Workspace, c
 //nolint:gocritic // runOptions is an immutable value object.
 func (r *Runner) reuseOrCreateSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, explicit bool, resources runResources) (*sdk.Sandbox, bool, []sdk.Workspace, error) {
 	if opts.name != "" {
-		reused, requested, found, err := r.reuseNamedRunSandbox(ctx, client, opts, paths, explicit)
+		reused, requested, found, err := r.reuseNamedRunSandbox(ctx, client, opts, agent, paths, explicit)
 		if err != nil || found {
 			return reused, false, requested, err
 		}
 	} else if !opts.new {
-		reused, found, err := r.findDerivedReuse(ctx, client, agent, paths)
+		reused, found, err := r.findDerivedReuse(ctx, client, agent, opts.image, paths, opts.clone)
 		if err != nil || found {
 			return reused, false, nil, err
 		}
@@ -1025,25 +1042,74 @@ func (r *Runner) reuseOrCreateSandbox(ctx context.Context, client sdk.Client, op
 }
 
 // reuseNamedRunSandbox reuses an existing sandbox selected by --name unless
-// --new asks for a fresh one.
+// --new asks for a fresh one. --replace deliberately deletes the existing
+// sandbox first, which is the only way to reuse a name with another agent.
 //
 //nolint:gocritic // runOptions is an immutable value object.
-func (r *Runner) reuseNamedRunSandbox(ctx context.Context, client sdk.Client, opts runOptions, paths []string, explicit bool) (*sdk.Sandbox, []sdk.Workspace, bool, error) {
+func (r *Runner) reuseNamedRunSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, explicit bool) (*sdk.Sandbox, []sdk.Workspace, bool, error) {
 	existing, requested, found, err := r.findRunReuse(ctx, client, opts.name, paths, explicit)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if found && !opts.new {
-		return existing, requested, true, nil
+	if !found {
+		return nil, nil, false, nil
 	}
-	return nil, nil, false, nil
+	if opts.new && !opts.replace {
+		return nil, nil, false, nil
+	}
+	differences, agentMismatch := describeRunReuseDifferences(existing, agent, opts.image)
+	if agentMismatch && !opts.replace {
+		return nil, nil, false, fmt.Errorf("sandbox %s uses agent %q but the requested agent is %q; refusing to reuse it (use --new to create a separate sandbox or --replace to delete and recreate %s)", existing.Name, existing.Agent, agent, existing.Name)
+	}
+	if opts.replace {
+		r.warnRunReplacement(existing, differences)
+		r.warnCloneRemoval(existing)
+		if err := r.removeRunSandbox(ctx, client, existing); err != nil {
+			return nil, nil, false, fmt.Errorf("replace sandbox %s: %w", existing.Name, err)
+		}
+		return nil, nil, false, nil
+	}
+	if len(differences) > 0 {
+		_, _ = fmt.Fprintf(r.Err, "warning: sandbox %s already uses %s; keeping the existing image (use --replace to recreate it)\n", existing.Name, strings.Join(differences, ", "))
+	}
+	return existing, requested, true, nil
+}
+
+// describeRunReuseDifferences reports agent and image differences that matter
+// for a named reuse. Empty daemon values are treated as unknown, not as a
+// mismatch, so older sandboxes remain reusable.
+func describeRunReuseDifferences(sandbox *sdk.Sandbox, agent, image string) ([]string, bool) {
+	if sandbox == nil {
+		return nil, false
+	}
+	differences := make([]string, 0, 2)
+	agentMismatch := false
+	if agent != "" && sandbox.Agent != "" && sandbox.Agent != agent {
+		differences = append(differences, fmt.Sprintf("agent %q (requested %q)", sandbox.Agent, agent))
+		agentMismatch = true
+	}
+	if image != "" && sandbox.Image != "" && sandbox.Image != image {
+		differences = append(differences, fmt.Sprintf("image %q (requested %q)", sandbox.Image, image))
+	}
+	return differences, agentMismatch
+}
+
+// warnRunReplacement explains why --replace is about to delete a named sandbox.
+// The replacement warning is advisory and never changes the exit code.
+func (r *Runner) warnRunReplacement(sandbox *sdk.Sandbox, differences []string) {
+	if len(differences) > 0 {
+		_, _ = fmt.Fprintf(r.Err, "warning: replacing sandbox %s because it uses %s\n", sandbox.Name, strings.Join(differences, ", "))
+		return
+	}
+	_, _ = fmt.Fprintf(r.Err, "warning: replacing sandbox %s because --replace is set\n", sandbox.Name)
 }
 
 // findDerivedReuse implements the Docker sbx baseline naming: a run without
-// --name targets <agent>-<workspace-basename>. On a terminal the CLI asks
-// before reusing it; without a terminal the existing sandbox is reused so
+// --name targets <agent>-<workspace-basename>. The sandbox is reused only when
+// its agent, image, and workspaces match the request. On a terminal the CLI
+// asks before reusing it; without a terminal the matching sandbox is reused so
 // scripts stay deterministic.
-func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent string, paths []string) (*sdk.Sandbox, bool, error) {
+func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent, image string, paths []string, clone bool) (*sdk.Sandbox, bool, error) {
 	base := workspaceNameBase(paths)
 	if base == "" {
 		return nil, false, nil
@@ -1060,6 +1126,10 @@ func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent 
 	if err != nil || !found {
 		return nil, false, err
 	}
+	matches, err := derivedReuseMatches(existing, agent, image, paths, clone)
+	if err != nil || !matches {
+		return nil, false, err
+	}
 	reuse, err := r.confirmRunReuse(existing)
 	if err != nil {
 		return nil, false, err
@@ -1068,6 +1138,65 @@ func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent 
 		return nil, false, nil
 	}
 	return existing, true, nil
+}
+
+// derivedReuseMatches validates the same identity fields used by a named
+// reuse. Workspace paths are compared after resolving symlinks because the
+// daemon may store the canonical path while the request uses a symlinked one.
+func derivedReuseMatches(sandbox *sdk.Sandbox, agent, image string, paths []string, clone bool) (bool, error) {
+	if !runIdentityMatches(sandbox, agent, image) {
+		return false, nil
+	}
+	requested, err := resolveWorkspaces(paths, true)
+	if err != nil {
+		return false, err
+	}
+	return runWorkspacesMatch(sandbox, requested, clone), nil
+}
+
+// runIdentityMatches treats empty daemon agent or image values as unknown so
+// sandboxes created by older daemons remain reusable.
+func runIdentityMatches(sandbox *sdk.Sandbox, agent, image string) bool {
+	if sandbox == nil {
+		return false
+	}
+	if agent != "" && sandbox.Agent != "" && sandbox.Agent != agent {
+		return false
+	}
+	return image == "" || sandbox.Image == "" || sandbox.Image == image
+}
+
+func runWorkspacesMatch(sandbox *sdk.Sandbox, requested []sdk.Workspace, clone bool) bool {
+	existing := sandbox.Workspaces
+	if len(existing) == 0 && sandbox.Workspace != "" {
+		existing = []sdk.Workspace{{Path: sandbox.Workspace}}
+	}
+	if len(existing) != len(requested) {
+		return false
+	}
+	for i := range existing {
+		if canonicalWorkspacePath(existing[i].Path) != canonicalWorkspacePath(requested[i].Path) {
+			return false
+		}
+		if !clone && existing[i].ReadOnly != requested[i].ReadOnly {
+			return false
+		}
+	}
+	return true
+}
+
+// canonicalWorkspacePath resolves an absolute, symlink-free path when the host
+// path exists. A missing path falls back to its cleaned absolute form so the
+// comparison never turns a workspace mismatch into a different failure.
+func canonicalWorkspacePath(path string) string {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	if canonical, err := filepath.EvalSymlinks(absolute); err == nil {
+		return filepath.Clean(canonical)
+	}
+	return filepath.Clean(absolute)
 }
 
 // confirmRunReuse prompts on a terminal; non-terminal input deterministically
@@ -1089,10 +1218,11 @@ func (r *Runner) confirmRunReuse(sandbox *sdk.Sandbox) (bool, error) {
 }
 
 // workspaceNameBase derives a DNS-safe sandbox name base from the first
-// workspace path, like the Docker sbx baseline shell-<workspace-basename>.
+// workspace path, like the Docker sbx baseline shell-<workspace-basename>. An
+// omitted path means the default workspace, the current directory.
 func workspaceNameBase(paths []string) string {
 	if len(paths) == 0 {
-		return ""
+		paths = []string{"."}
 	}
 	absolute, err := filepath.Abs(paths[0])
 	if err != nil {

@@ -331,6 +331,15 @@ func cloneRemovalWarning(sb *sdk.Sandbox) string {
 	return fmt.Sprintf(cloneRemovalWarningFormat, sanitizeTerminalText(name), sb.Clone.RemoteName, namespace, namespace)
 }
 
+// warnCloneRemoval prints the advisory commit-loss warning before a clone
+// sandbox is removed. Every removal path uses this helper so rm, prune,
+// --replace, and run --rm stay consistent.
+func (r *Runner) warnCloneRemoval(sb *sdk.Sandbox) {
+	if warning := cloneRemovalWarning(sb); warning != "" {
+		_, _ = fmt.Fprint(r.Err, warning)
+	}
+}
+
 func cleanupCloneSandbox(ctx context.Context, client sdk.Client, op *sdk.Operation, sandbox *sdk.Sandbox, run gitConfigCommand) error {
 	if op == nil || op.Kind != "create" {
 		return errors.New("cannot clean up clone sandbox because create operation did not prove ownership")

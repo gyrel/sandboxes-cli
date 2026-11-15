@@ -133,7 +133,12 @@ host component is missing.
 `--name NAME`; a missing PATH creates a mountless sandbox, and PATHs accept the
 `:ro` suffix. The legacy `create NAME` and repeated `--workspace` forms remain
 supported. `rsbx run` creates a sandbox (or reuses `--name`), starts it if needed, and
-attaches an interactive shell. The default workspace is the current directory;
+attaches an interactive shell. Without `--name`, the name is
+`<agent>-<workspace-basename>`, using the current directory when PATH is
+omitted; it is reused only when the agent, image, and workspaces match.
+Reusing a `--name` sandbox with a different agent is refused unless `--replace`
+deletes and recreates it, while a different image keeps the existing image with
+a warning. The default workspace is the current directory;
 multiple PATH arguments may follow the agent, with an optional `:ro` suffix.
 `--deny-write PATH` adds a read-only subpath mount, so a writable parent can
 hold a protected child. `--detach` creates and starts without attaching

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -139,13 +140,17 @@ func TestPortsCommandListsPorts(t *testing.T) {
 
 type portUpdateClient struct {
 	fakeClient
-	base  *lifecycleSandbox
-	ports []sdk.Port
+	base                *lifecycleSandbox
+	ports               []sdk.Port
+	updates             int
+	startedBeforeUpdate bool
 }
 
 func (p *portUpdateClient) PortService() sdk.PortService { return p }
 
 func (p *portUpdateClient) UpdatePorts(_ context.Context, _ string, ports []sdk.Port) (*sdk.Sandbox, error) {
+	p.updates++
+	p.startedBeforeUpdate = p.base != nil && len(p.base.starts) > 0
 	p.ports = append([]sdk.Port(nil), ports...)
 	if p.base != nil && len(p.base.items) > 0 {
 		p.base.items[0].Ports = p.ports
@@ -199,7 +204,207 @@ func TestPortsDynamicEphemeralPublish(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "8080", "dev"}); code != 0 {
 		t.Fatalf("guest-only unpublish exit=%d output=%q", code, out.String())
 	}
-	if len(client.ports) != 0 || !strings.Contains(out.String(), "Unpublish requested for port") {
+	if len(client.ports) != 0 || out.String() != "Unpublish requested for all host ports -> 8080\n" {
 		t.Fatalf("ports=%+v output=%q", client.ports, out.String())
+	}
+}
+
+func TestPortsGuestOnlyUnpublishRepeatIsIdempotentNoOp(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{
+		ID: "sb-1", Name: "dev", State: sdk.StateStopped,
+		Ports: []sdk.Port{{Host: 49153, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"}},
+	}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "8080", "dev"}); code != 0 {
+		t.Fatalf("unpublish exit=%d output=%q", code, out.String())
+	}
+	if client.updates != 1 || len(client.ports) != 0 {
+		t.Fatalf("updates=%d ports=%+v", client.updates, client.ports)
+	}
+	if len(base.starts) != 0 || base.items[0].State != sdk.StateStopped {
+		t.Fatalf("starts=%+v state=%q", base.starts, base.items[0].State)
+	}
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "8080", "dev"}); code != 0 {
+		t.Fatalf("repeat unpublish exit=%d output=%q", code, out.String())
+	}
+	if out.String() != "Unpublish requested for all host ports -> 8080\n" {
+		t.Fatalf("repeat output=%q", out.String())
+	}
+	if client.updates != 1 || len(client.ports) != 0 {
+		t.Fatalf("repeat updates=%d ports=%+v", client.updates, client.ports)
+	}
+	if len(base.starts) != 0 || base.items[0].State != sdk.StateStopped {
+		t.Fatalf("repeat starts=%+v state=%q", base.starts, base.items[0].State)
+	}
+}
+
+func TestPortsPublishStartsStoppedSandboxBeforeUpdate(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: sdk.StateStopped}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--publish", "18090:8080", "dev"}); code != 0 {
+		t.Fatalf("publish exit=%d output=%q", code, out.String())
+	}
+	if len(base.starts) != 1 || base.starts[0] != "sb-1" {
+		t.Fatalf("starts=%+v", base.starts)
+	}
+	if client.updates != 1 || !client.startedBeforeUpdate {
+		t.Fatalf("updates=%d startedBeforeUpdate=%v", client.updates, client.startedBeforeUpdate)
+	}
+	if len(client.ports) != 1 || client.ports[0].Host != 18090 || client.ports[0].Guest != 8080 {
+		t.Fatalf("ports=%+v", client.ports)
+	}
+}
+
+func TestPortsPublishRunningSandboxDoesNotStart(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: sdk.StateRunning}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--publish", "18090:8080", "dev"}); code != 0 {
+		t.Fatalf("publish exit=%d output=%q", code, out.String())
+	}
+	if len(base.starts) != 0 {
+		t.Fatalf("starts=%+v", base.starts)
+	}
+	if client.updates != 1 || client.startedBeforeUpdate {
+		t.Fatalf("updates=%d startedBeforeUpdate=%v", client.updates, client.startedBeforeUpdate)
+	}
+	if len(client.ports) != 1 || client.ports[0].Host != 18090 {
+		t.Fatalf("ports=%+v", client.ports)
+	}
+}
+
+func TestPortsUnpublishStoppedSandboxDoesNotStart(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{
+		ID: "sb-1", Name: "dev", State: sdk.StateStopped,
+		Ports: []sdk.Port{{Host: 18090, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"}},
+	}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "18090:8080", "dev"}); code != 0 {
+		t.Fatalf("unpublish exit=%d output=%q", code, out.String())
+	}
+	if len(base.starts) != 0 {
+		t.Fatalf("starts=%+v", base.starts)
+	}
+	if client.updates != 1 || client.startedBeforeUpdate {
+		t.Fatalf("updates=%d startedBeforeUpdate=%v", client.updates, client.startedBeforeUpdate)
+	}
+	if len(client.ports) != 0 {
+		t.Fatalf("ports=%+v", client.ports)
+	}
+}
+
+func TestPortsGuestOnlyUnpublishRemovesAllHostPorts(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{
+		ID: "sb-1", Name: "dev", State: sdk.StateStopped,
+		Ports: []sdk.Port{
+			{Host: 49153, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"},
+			{Host: 49154, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"},
+			{Host: 49155, Guest: 8080, Protocol: "udp", HostIP: "127.0.0.1"},
+			{Host: 49156, Guest: 8080, Protocol: "tcp", HostIP: "::1"},
+			{Host: 49157, Guest: 9090, Protocol: "tcp", HostIP: "127.0.0.1"},
+		},
+	}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "8080", "dev"}); code != 0 {
+		t.Fatalf("unpublish exit=%d output=%q", code, out.String())
+	}
+	if out.String() != "Unpublish requested for all host ports -> 8080\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(base.starts) != 0 {
+		t.Fatalf("starts=%+v", base.starts)
+	}
+	if len(client.ports) != 3 ||
+		client.ports[0].Host != 49155 || client.ports[0].Protocol != "udp" ||
+		client.ports[1].Host != 49156 || portHostIP(client.ports[1]) != "::1" ||
+		client.ports[2].Host != 49157 || client.ports[2].Guest != 9090 {
+		t.Fatalf("ports=%+v", client.ports)
+	}
+}
+
+func TestPortsExplicitUnpublishRemovesOnlyRequestedHostPort(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{
+		ID: "sb-1", Name: "dev", State: sdk.StateStopped,
+		Ports: []sdk.Port{
+			{Host: 49153, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"},
+			{Host: 49154, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"},
+			{Host: 49155, Guest: 8080, Protocol: "udp", HostIP: "127.0.0.1"},
+			{Host: 49156, Guest: 9090, Protocol: "tcp", HostIP: "127.0.0.1"},
+		},
+	}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "49153:8080", "dev"}); code != 0 {
+		t.Fatalf("unpublish exit=%d output=%q", code, out.String())
+	}
+	if out.String() != "Unpublish requested for port 127.0.0.1:49153 -> 8080\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(base.starts) != 0 {
+		t.Fatalf("starts=%+v", base.starts)
+	}
+	if len(client.ports) != 3 ||
+		client.ports[0].Host != 49154 ||
+		client.ports[1].Host != 49155 || client.ports[1].Protocol != "udp" ||
+		client.ports[2].Host != 49156 || client.ports[2].Guest != 9090 {
+		t.Fatalf("ports=%+v", client.ports)
+	}
+}
+
+func TestPortsUnpublishOverlappingFlagsRemoveEachPortOnce(t *testing.T) {
+	base := &lifecycleSandbox{items: []sdk.Sandbox{{
+		ID: "sb-1", Name: "dev",
+		Ports: []sdk.Port{
+			{Host: 49153, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"},
+			{Host: 49154, Guest: 8080, Protocol: "tcp", HostIP: "127.0.0.1"},
+		},
+	}}}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--unpublish", "8080", "--unpublish", "49153:8080", "dev"}); code != 0 {
+		t.Fatalf("unpublish exit=%d output=%q", code, out.String())
+	}
+	if out.String() != "Unpublish requested for all host ports -> 8080\nUnpublish requested for port 127.0.0.1:49153 -> 8080\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if len(client.ports) != 0 {
+		t.Fatalf("ports=%+v", client.ports)
+	}
+}
+
+func TestPortsPublishStoppedSandboxStartFailureSkipsUpdate(t *testing.T) {
+	base := &lifecycleSandbox{
+		items:    []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: sdk.StateStopped}},
+		startErr: errors.New("start failed"),
+	}
+	client := &portUpdateClient{fakeClient: fakeClient{sandbox: base}, base: base}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"ports", "--publish", "18090:8080", "dev"}); code != 1 {
+		t.Fatalf("publish exit=%d output=%q", code, out.String())
+	}
+	if len(base.starts) != 1 || base.starts[0] != "sb-1" {
+		t.Fatalf("starts=%+v", base.starts)
+	}
+	if client.updates != 0 || len(client.ports) != 0 {
+		t.Fatalf("updates=%d ports=%+v", client.updates, client.ports)
+	}
+	if len(base.items[0].Ports) != 0 {
+		t.Fatalf("sandbox ports changed: %+v", base.items[0].Ports)
+	}
+	if !strings.Contains(out.String(), "start failed") {
+		t.Fatalf("output=%q", out.String())
 	}
 }

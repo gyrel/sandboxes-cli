@@ -43,7 +43,7 @@ func (r *Runner) cp(ctx context.Context, args []string) int {
 	follow := fs.Bool("L", false, "follow a top-level source symbolic link")
 	fs.BoolVar(follow, "follow-link", false, "follow a top-level source symbolic link")
 	fs.Usage = func() { _, _ = fmt.Fprint(r.Err, cpUsage) }
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -255,6 +255,9 @@ func copyGuestToHost(ctx context.Context, client sdk.Client, sandboxID, guestSou
 	extractDone := make(chan error, 1)
 	go func() {
 		err := extractCopyTar(reader, hostTarget, base)
+		if err == nil {
+			err = drainCopyArchiveTail(reader)
+		}
 		_ = reader.CloseWithError(err)
 		extractDone <- err
 		if err != nil {
@@ -277,6 +280,20 @@ func copyGuestToHost(ctx context.Context, client sdk.Client, sandboxID, guestSou
 	}
 	if code != 0 {
 		return fmt.Errorf("guest tar failed with exit %d: %s", code, strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
+// GNU tar pads its archive to a record boundary after the end markers. Drain
+// that bounded tail before closing the pipe so the streaming sender can finish.
+func drainCopyArchiveTail(r io.Reader) error {
+	const maxTail = 1 << 20
+	n, err := io.Copy(io.Discard, io.LimitReader(r, maxTail+1))
+	if err != nil {
+		return err
+	}
+	if n > maxTail {
+		return errors.New("archive trailing data exceeds limit")
 	}
 	return nil
 }

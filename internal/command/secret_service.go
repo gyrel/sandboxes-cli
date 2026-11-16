@@ -693,7 +693,8 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		out = append(out, serviceSecretOutput{Type: "service", Service: item.Service, Scope: string(item.Scope), SandboxName: item.SandboxName, State: storedSecretDisplay})
 	}
 	if lister, ok := sdk.RegistryCredentialList(client); ok {
@@ -702,7 +703,8 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 			r.error(regErr)
 			return 1
 		}
-		for _, item := range registries {
+		for i := range registries {
+			item := &registries[i]
 			out = append(out, serviceSecretOutput{Type: "registry", Service: item.Registry, Username: item.Username, Scope: item.Scope, SandboxName: item.SandboxName, State: storedSecretDisplay})
 		}
 	} else {

@@ -15,6 +15,8 @@ func TestHelpDoesNotReturnEmptyUsage(t *testing.T) {
 		{"prune", "--help"},
 		{"rm", "--help"},
 		{"completion", "--help"},
+		{"daemon", "--help"},
+		{"daemon", "log-level", "--help"},
 		{"setup", "--help"},
 	} {
 		var out bytes.Buffer

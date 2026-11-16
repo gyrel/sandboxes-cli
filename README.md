@@ -66,6 +66,40 @@ declarations remain unsupported and fail closed.
 `env apply` and `env ls` are not Docker `sbx` commands; Rheic keeps the upstream
 `create` name for provisioning.
 
+## Daemon lifecycle
+
+`rsbx daemon` mirrors the local `sbx daemon` grammar:
+
+```sh
+rsbx daemon start --detach
+rsbx daemon status
+rsbx daemon status --json
+rsbx daemon log-level
+rsbx daemon log-level set general debug
+rsbx daemon log-level set all info
+rsbx daemon log-level warn       # shorthand for all categories
+rsbx daemon restart --detach
+rsbx daemon stop
+```
+
+`start` and `restart` accept `--detach`/`-d` and `--policy
+allow-all|balanced|deny-all`. The daemon state directory and log path are
+derived from `--socket`. Set `SANDBOXES_DAEMON_BINARY` when `sandboxesd` is not
+on `PATH` or beside `rsbx`. A foreground start runs until the daemon exits;
+`--detach` writes output to `<state>/daemon.log`.
+
+`status --json` uses the sbx field names `status`, `socket` and `logs`, and adds
+`pid`, `version`, `api_version`, `sandboxes`, `running`, `stopped` and `error`
+when available. `status` exits 0 for running or stopped and 1 when the endpoint
+is unreachable or the control record is ambiguous.
+
+`stop` and `restart` never signal a PID whose identity is not proven. The CLI
+checks the daemon's installation identifier, state directory, socket and
+process start identity before signaling; a reused PID, malformed record or
+foreign state directory fails closed. `log-level` accepts `general`, `proxy`
+and `all` targets and `debug`, `info`, `warn`, `error` levels. Changes are
+persisted and picked up by a running daemon without a restart.
+
 ## Commands
 
 ```sh
@@ -95,6 +129,11 @@ rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --dry-run
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --dry-run --filter until=168h
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --force
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" diagnose
+rsbx daemon start --detach
+rsbx daemon status --json
+rsbx daemon log-level set general debug
+rsbx daemon restart --detach
+rsbx daemon stop
 rsbx setup                         # experimental read-only host check
 rsbx setup --format json
 rsbx completion bash > /tmp/rsbx-completion.bash

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed
+
+- `daemon stop` now stops a daemon that was started outside
+  `rsbx daemon start` when its identity can be proven from the live socket
+  peer: the peer PID, its process start identity, and a `sandboxesd` executable
+  or matching `--socket` argument. It no longer reports `Stopped daemon` while
+  the external process keeps running. If the live process cannot be proven, or
+  a control record names a different live process, stop refuses without
+  signaling and explains how to stop the daemon manually.
+- `daemon status` reports a live daemon as running even when no CLI control
+  record exists, and continues to report a stopped daemon as stopped. A live
+  process whose endpoint is unreachable is reported as running with the error
+  and exit status 1, but without a version or API line. Version and API
+  information still come only from the live daemon.
+
 ## v0.0.54 — 2026-11-16
 
 ### Changed

@@ -90,15 +90,24 @@ on `PATH` or beside `rsbx`. A foreground start runs until the daemon exits;
 
 `status --json` uses the sbx field names `status`, `socket` and `logs`, and adds
 `pid`, `version`, `api_version`, `sandboxes`, `running`, `stopped` and `error`
-when available. `status` exits 0 for running or stopped and 1 when the endpoint
-is unreachable or the control record is ambiguous.
+when available. `status` reports a live daemon as running, including one started
+outside the CLI, and a stopped one as stopped. If the process is alive but its
+endpoint is unreachable, status still reports running with the error and exits 1,
+but omits version and API details. `version` and `api_version` come only from the
+live daemon's version request; a stored record is never used as a substitute.
+`status` exits 0 for running or stopped and 1 when the endpoint is unreachable
+or ownership is ambiguous.
 
 `stop` and `restart` never signal a PID whose identity is not proven. The CLI
-checks the daemon's installation identifier, state directory, socket and
-process start identity before signaling; a reused PID, malformed record or
-foreign state directory fails closed. `log-level` accepts `general`, `proxy`
-and `all` targets and `debug`, `info`, `warn`, `error` levels. Changes are
-persisted and picked up by a running daemon without a restart.
+first checks the daemon's installation identifier, state directory, socket and
+process start identity. If the record is missing or stale, it can still stop an
+externally started daemon after proving the live socket peer: the peer PID, its
+process start identity, and a `sandboxesd` executable or matching `--socket`
+argument must all agree. A reused PID, mismatched record, foreign installation
+or unprovable live process fails closed with an actionable error instead of
+reporting success. `log-level` accepts `general`, `proxy` and `all` targets and
+`debug`, `info`, `warn`, `error` levels. Changes are persisted and picked up by
+a running daemon without a restart.
 
 ## Commands
 

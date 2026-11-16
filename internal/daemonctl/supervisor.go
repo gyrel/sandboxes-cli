@@ -425,6 +425,9 @@ func (s *Supervisor) Inspect() Inspection {
 	if socketPathExists(s.Scope.Socket) {
 		return Inspection{State: StateAmbiguous, Err: fmt.Errorf("%w: %w", ErrAmbiguousState, liveErr)}
 	}
+	if recordMissing {
+		return Inspection{State: StateStopped}
+	}
 	return Inspection{State: StateAmbiguous, Err: err}
 }
 

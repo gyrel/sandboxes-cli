@@ -18,6 +18,7 @@ type lifecycleSandbox struct {
 	starts    []string
 	stops     []string
 	deletes   []string
+	startErr  error
 	deleteErr error
 }
 
@@ -36,6 +37,9 @@ func (s *lifecycleSandbox) Get(_ context.Context, id string) (*sdk.Sandbox, erro
 
 func (s *lifecycleSandbox) Start(_ context.Context, id string) (*sdk.Operation, error) {
 	s.starts = append(s.starts, id)
+	if s.startErr != nil {
+		return nil, s.startErr
+	}
 	return &sdk.Operation{ID: "op-start", State: sdk.StateDone}, nil
 }
 func (s *lifecycleSandbox) Stop(_ context.Context, id string, _ sdk.StopOptions) (*sdk.Operation, error) {

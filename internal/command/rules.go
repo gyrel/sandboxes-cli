@@ -10,18 +10,6 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-type ruleOutput struct {
-	RuleID       string `json:"rule_id" yaml:"rule_id"`
-	Scope        string `json:"scope" yaml:"scope"`
-	ResourceType string `json:"resource_type" yaml:"resource_type"`
-	Action       string `json:"action" yaml:"action"`
-	Provenance   string `json:"provenance" yaml:"provenance"`
-	Protocol     string `json:"protocol" yaml:"protocol"`
-	CIDR         string `json:"cidr,omitempty" yaml:"cidr,omitempty"`
-	Domain       string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	Port         uint16 `json:"port" yaml:"port"`
-}
-
 func parseNetworkRule(value string) (sdk.NetworkRule, error) {
 	protocol := tcpProtocol
 	if strings.HasPrefix(value, "udp:") {
@@ -121,19 +109,6 @@ func resolveNetworkRules(values []string) ([]sdk.NetworkRule, error) {
 	return rules, nil
 }
 
-func rulesFor(sb *sdk.Sandbox) (allow, deny []ruleOutput) {
-	convert := func(rules []sdk.NetworkRule) []ruleOutput {
-		out := make([]ruleOutput, 0, len(rules))
-		for i := range rules {
-			out = append(out, ruleOutput{RuleID: rules[i].RuleID, Scope: sandboxPrefix, ResourceType: "network",
-				Action: actionAllow, Provenance: "user", Protocol: rules[i].Protocol, CIDR: rules[i].CIDR,
-				Domain: rules[i].Domain, Port: rules[i].Port})
-		}
-		return out
-	}
-	return convert(sb.Allow), convert(sb.Deny)
-}
-
 func formatRules(rules []sdk.NetworkRule) string {
 	if len(rules) == 0 {
 		return "-"
@@ -155,14 +130,4 @@ func formatRules(rules []sdk.NetworkRule) string {
 		parts = append(parts, fmt.Sprintf("%s:%s%s", protocol, target, port))
 	}
 	return strings.Join(parts, ", ")
-}
-
-func allowRules(sb *sdk.Sandbox) []ruleOutput {
-	allow, _ := rulesFor(sb)
-	return allow
-}
-
-func denyRules(sb *sdk.Sandbox) []ruleOutput {
-	_, deny := rulesFor(sb)
-	return deny
 }

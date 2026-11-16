@@ -312,8 +312,10 @@ embedded. Warnings and skipped checks exit 0; a signed-out daemon is a warning
 because the installation is unconfigured rather than broken. Only failed
 checks, such as an unreachable daemon or an unwritable state directory, exit 1.
 `rsbx stop`/`start`, `rm` and `prune` accept `--format table|json|yaml` and
-`--json`; structured output carries operation records (or sandbox candidates
-for `prune --dry-run`). `rsbx start` verifies that the daemon can back the
+`--json`. `rm`, `stop` and actual `prune` removals emit the sbx action records
+`{action, resource, name}`; `prune --dry-run` emits the sbx envelope
+`{"would_remove":[{name,agent,stopped_at,workspaces}],"skipped_unknown_stop":[]}`.
+`rsbx start` keeps operation records and verifies that the daemon can back the
 running state with a runtime. If the daemon is state-only, start fails with an
 actionable error and restores the sandbox to stopped instead of reporting a
 running sandbox that `exec`, `cp` or `attach` cannot use.
@@ -321,10 +323,9 @@ running sandbox that `exec`, `cp` or `attach` cannot use.
 `rsbx ls` retrieves all pages; `--limit N` caps the number of returned
 sandboxes (1-1000), and every sandbox is listed without it. `--format`
 accepts `table`, `json` or `yaml`; `--json` is the JSON shorthand, and `-q`
-prints names only. JSON/YAML include `name`, `id`, `agent`, `status`, `image`,
-`agent`, `status`, `last_used_at`, `workspaces`, `detached`, `cpus`, `memory_mib`,
-`generation`, `created_at` and `updated_at`. The table is Docker-like:
-`SANDBOX AGENT STATUS PORTS WORKSPACE CREATED`.
+prints names only. JSON/YAML use the sbx schema: `name`, `id`, `agent`,
+`status`, `last_used_at`, `workspaces` and `created_at`. The table is
+Docker-like: `SANDBOX AGENT STATUS PORTS WORKSPACE CREATED`.
 The local store may not record an agent yet, so `agent` can be empty. `rsbx get`
 resolves a name or ID. Docker `sbx` has no `get` command; it is a Rheic
 extension. Its default

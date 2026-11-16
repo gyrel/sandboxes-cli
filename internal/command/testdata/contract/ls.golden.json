@@ -1,0 +1,24 @@
+[
+  {
+    "name": "matrix-20261115-1025",
+    "id": "<ID>",
+    "agent": "codex",
+    "status": "running",
+    "last_used_at": "<TIMESTAMP>",
+    "workspaces": [
+      "/private/tmp/rheic-sbx-matrix-20261115/repo"
+    ],
+    "created_at": "<TIMESTAMP>"
+  },
+  {
+    "name": "my-sandbox",
+    "id": "<ID>",
+    "agent": "codex",
+    "status": "stopped",
+    "last_used_at": "<TIMESTAMP>",
+    "workspaces": [
+      "/Users/vladimirzikman/Workspace/opensource/sandboxes"
+    ],
+    "created_at": "<TIMESTAMP>"
+  }
+]

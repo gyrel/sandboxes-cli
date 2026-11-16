@@ -27,6 +27,14 @@
   `summary` schema, and the advertised `--format github-issue` output produces a
   Markdown issue body with the JSON report embedded. Hard failures, such as an
   unreachable daemon or an unwritable state directory, still exit 1.
+- Align `--json` output with Docker `sbx` for `ls`, `rm`, `stop` and `prune`.
+  `ls` now emits only `name`, `id`, `agent`, `status`, `last_used_at`,
+  `workspaces` and `created_at`; `rm` and `stop` emit arrays of
+  `{action, resource, name}` records; and `prune --dry-run` emits
+  `{"would_remove":[{name,agent,stopped_at,workspaces}],"skipped_unknown_stop":[]}`
+  while actual prune removals use the same action records as `rm`. Human table
+  output is unchanged. Structured `start` output still carries operation
+  records.
 - Accept interspersed flags for `ports`, `policy`, `secret`, `settings`, `cp`,
   `exec`, `get`, `wait`, `agents`, `mcp`, `env`, `kit` and `template`: flags now
   work before, between and after positional arguments, and a literal `--` ends

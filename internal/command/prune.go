@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+	"gopkg.in/yaml.v3"
 )
 
 type pruneOptions struct {
@@ -45,26 +47,27 @@ func (r *Runner) prune(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	stopped := filterStopped(items, opts.until)
+	stopped, skippedUnknownStop := selectPruneCandidates(items, opts.until)
 	if opts.dryRun {
-		return r.pruneDryRun(opts, stopped)
+		return r.pruneDryRun(opts, stopped, skippedUnknownStop)
 	}
 	return r.pruneRemove(ctx, client, opts, stopped)
 }
 
-func (r *Runner) pruneDryRun(opts pruneOptions, stopped []sdk.Sandbox) int {
-	if len(stopped) == 0 {
-		if opts.format == listFormatTable {
+func (r *Runner) pruneDryRun(opts pruneOptions, stopped []sdk.Sandbox, skippedUnknownStop []string) int {
+	if opts.format == listFormatTable {
+		if len(stopped) == 0 {
 			_, _ = fmt.Fprintln(r.Out, "No stopped sandboxes")
 			return 0
 		}
-		return pruneRender(r, opts.format, nil, nil)
-	}
-	if opts.format == listFormatTable {
 		printPruneCandidates(r.Out, stopped)
 		return 0
 	}
-	return pruneRender(r, opts.format, nil, stopped)
+	if err := renderPruneDryRun(r.Out, opts.format, stopped, skippedUnknownStop); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
 }
 
 func (r *Runner) pruneRemove(ctx context.Context, client sdk.Client, opts pruneOptions, stopped []sdk.Sandbox) int {
@@ -73,7 +76,11 @@ func (r *Runner) pruneRemove(ctx context.Context, client sdk.Client, opts pruneO
 			_, _ = fmt.Fprintln(r.Out, "No stopped sandboxes")
 			return 0
 		}
-		return pruneRender(r, opts.format, nil, nil)
+		if err := renderMutations(r.Out, opts.format, nil); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
 	}
 	if !opts.force {
 		confirmed, err := r.confirmPrune(len(stopped))
@@ -86,12 +93,17 @@ func (r *Runner) pruneRemove(ctx context.Context, client sdk.Client, opts pruneO
 			return 0
 		}
 	}
-	removed, operations, failures := r.deletePrunedSandboxes(ctx, client, stopped)
+	removed, failures := r.deletePrunedSandboxes(ctx, client, stopped)
+	names := make([]string, 0, len(removed))
+	for i := range removed {
+		names = append(names, removed[i].Name)
+	}
 	if opts.format == listFormatTable {
 		_, _ = fmt.Fprintf(r.Out, "Removed %d stopped sandboxes:\n", len(removed))
 		printPruneTable(r.Out, removed)
-	} else if code := pruneRender(r, opts.format, operations, nil); code != 0 {
-		return code
+	} else if err := renderMutations(r.Out, opts.format, sandboxMutations("removed", names)); err != nil {
+		r.error(err)
+		return 1
 	}
 	if failures != nil {
 		r.error(failures)
@@ -133,32 +145,80 @@ func parsePruneOptions(args []string) (pruneOptions, bool, error) {
 	return pruneOptions{dryRun: *dryRun, force: *force, format: selected, until: untilPtr}, false, nil
 }
 
-func pruneRender(r *Runner, format string, operations []*sdk.Operation, sandboxes []sdk.Sandbox) int {
-	var err error
-	if sandboxes != nil {
-		err = renderSandboxes(r.Out, format, sandboxes)
-	} else {
-		err = renderOperations(r.Out, format, operations)
-	}
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
+// pruneCandidateOutput mirrors one sbx prune --dry-run candidate.
+type pruneCandidateOutput struct {
+	Name       string   `json:"name" yaml:"name"`
+	Agent      string   `json:"agent,omitempty" yaml:"agent,omitempty"`
+	StoppedAt  string   `json:"stopped_at,omitempty" yaml:"stopped_at,omitempty"`
+	Workspaces []string `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
 }
 
-func filterStopped(items []sdk.Sandbox, until *time.Time) []sdk.Sandbox {
+// pruneDryRunOutput mirrors the sbx prune --dry-run envelope.
+type pruneDryRunOutput struct {
+	WouldRemove        []pruneCandidateOutput `json:"would_remove" yaml:"would_remove"`
+	SkippedUnknownStop []string               `json:"skipped_unknown_stop" yaml:"skipped_unknown_stop"`
+}
+
+func pruneCandidateFor(sb *sdk.Sandbox) pruneCandidateOutput {
+	var workspaces []string
+	if len(sb.Workspaces) > 0 {
+		workspaces = workspacePaths(sb.Workspaces)
+	} else if sb.Workspace != "" {
+		workspaces = []string{sb.Workspace}
+	}
+	return pruneCandidateOutput{
+		Name:       sb.Name,
+		Agent:      sb.Agent,
+		StoppedAt:  listTime(sb.StoppedAt),
+		Workspaces: workspaces,
+	}
+}
+
+func renderPruneDryRun(out io.Writer, format string, stopped []sdk.Sandbox, skippedUnknownStop []string) error {
+	output := pruneDryRunOutput{
+		WouldRemove:        make([]pruneCandidateOutput, 0, len(stopped)),
+		SkippedUnknownStop: append([]string{}, skippedUnknownStop...),
+	}
+	for i := range stopped {
+		output.WouldRemove = append(output.WouldRemove, pruneCandidateFor(&stopped[i]))
+	}
+	switch format {
+	case listFormatJSON:
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(output)
+	case listFormatYAML:
+		data, err := yaml.Marshal(output)
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(data)
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q for structured prune output", format)
+	}
+}
+
+// selectPruneCandidates returns stopped sandboxes with known stop times and
+// names the sandboxes whose stop time the daemon could not report. Like sbx,
+// unknown stop times are left alone because their age cannot be established.
+func selectPruneCandidates(items []sdk.Sandbox, until *time.Time) ([]sdk.Sandbox, []string) {
 	stopped := make([]sdk.Sandbox, 0, len(items))
+	skipped := make([]string, 0)
 	for i := range items {
 		if items[i].State != sdk.StateStopped {
 			continue
 		}
-		if until != nil && (items[i].StoppedAt.IsZero() || !items[i].StoppedAt.Before(*until)) {
+		if items[i].StoppedAt.IsZero() {
+			skipped = append(skipped, items[i].Name)
+			continue
+		}
+		if until != nil && !items[i].StoppedAt.Before(*until) {
 			continue
 		}
 		stopped = append(stopped, items[i])
 	}
-	return stopped
+	return stopped, skipped
 }
 
 func parsePruneFilter(value string, now time.Time) (time.Time, bool, error) {
@@ -185,9 +245,8 @@ func parsePruneFilter(value string, now time.Time) (time.Time, bool, error) {
 	return time.Time{}, false, errors.New("prune filter must be an RFC3339 timestamp, Unix seconds, or a non-negative duration")
 }
 
-func (r *Runner) deletePrunedSandboxes(ctx context.Context, client sdk.Client, stopped []sdk.Sandbox) ([]sdk.Sandbox, []*sdk.Operation, error) {
+func (r *Runner) deletePrunedSandboxes(ctx context.Context, client sdk.Client, stopped []sdk.Sandbox) ([]sdk.Sandbox, error) {
 	var failures []error
-	operations := make([]*sdk.Operation, 0, len(stopped))
 	removed := make([]sdk.Sandbox, 0, len(stopped))
 	for i := range stopped {
 		r.warnCloneRemoval(&stopped[i])
@@ -200,11 +259,10 @@ func (r *Runner) deletePrunedSandboxes(ctx context.Context, client sdk.Client, s
 			failures = append(failures, fmt.Errorf("prune sandbox %s failed: %s", stopped[i].Name, op.Error))
 			continue
 		}
-		operations = append(operations, op)
 		removed = append(removed, stopped[i])
 		r.cleanupDeletedCloneRemote(ctx, &stopped[i], true)
 	}
-	return removed, operations, errors.Join(failures...)
+	return removed, errors.Join(failures...)
 }
 
 func printPruneCandidates(out io.Writer, items []sdk.Sandbox) {

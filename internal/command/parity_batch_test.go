@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rheic/sandboxes-cli/internal/version"
 
@@ -71,26 +72,26 @@ func TestStopAndRmHumanOutput(t *testing.T) {
 	}
 }
 
-// TestStopJSONKeepsOperationRecords pins the machine contract for P-23.
-func TestStopJSONKeepsOperationRecords(t *testing.T) {
+// TestStopJSONKeepsActionRecords pins the sbx-compatible machine contract.
+func TestStopJSONKeepsActionRecords(t *testing.T) {
 	sandboxes := &runSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: sdk.StateRunning}}}
 	runner, out, _ := runTestRunner(t, runClient{sandboxes: sandboxes}, "")
 	if code := runner.Run(context.Background(), []string{"stop", "--format", "json", "dev"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	var ops []operationOutput
-	if err := json.Unmarshal(out.Bytes(), &ops); err != nil {
+	var records []mutationOutput
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
 		t.Fatalf("json %q: %v", out.String(), err)
 	}
-	if len(ops) != 1 || ops[0].Kind == "" {
-		t.Fatalf("ops=%+v", ops)
+	if len(records) != 1 || records[0].Action != "stopped" || records[0].Resource != "sandbox" || records[0].Name != "dev" {
+		t.Fatalf("records=%+v", records)
 	}
 }
 
 // TestPruneDryRunNarrative covers PARITY P-36.
 func TestPruneDryRunNarrative(t *testing.T) {
 	sandboxes := &runSandbox{items: []sdk.Sandbox{
-		{ID: "sb-1", Name: "old", State: sdk.StateStopped, Agent: "shell", Workspace: "/work/old"},
+		{ID: "sb-1", Name: "old", State: sdk.StateStopped, Agent: "shell", Workspace: "/work/old", StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
 		{ID: "sb-2", Name: "live", State: sdk.StateRunning},
 	}}
 	runner, out, _ := runTestRunner(t, runClient{sandboxes: sandboxes}, "")
@@ -109,7 +110,7 @@ func TestPruneDryRunNarrative(t *testing.T) {
 // TestPruneRemovesWithNarrative covers the non-dry-run table rendering.
 func TestPruneRemovesWithNarrative(t *testing.T) {
 	sandboxes := &runSandbox{items: []sdk.Sandbox{
-		{ID: "sb-1", Name: "old", State: sdk.StateStopped, Agent: "shell"},
+		{ID: "sb-1", Name: "old", State: sdk.StateStopped, Agent: "shell", StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
 	}}
 	runner, out, _ := runTestRunner(t, runClient{sandboxes: sandboxes}, "")
 	if code := runner.Run(context.Background(), []string{"prune", "--force"}); code != 0 {

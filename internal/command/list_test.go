@@ -44,16 +44,15 @@ func TestListJSONMatchesDocumentedFields(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &items); err != nil {
 		t.Fatalf("invalid JSON %q: %v", out.String(), err)
 	}
-	if len(items) != 2 || items[0].Name != "one" || items[0].Status != sdk.StateRunning || items[0].PolicyProfile != "balanced" ||
+	if len(items) != 2 || items[0].Name != "one" || items[0].Status != sdk.StateRunning ||
 		len(items[0].Workspaces) != 1 || items[0].Workspaces[0] != "/workspace" ||
-		len(items[0].Ports) != 1 || items[0].Ports[0].HostPort != 8080 ||
-		items[0].Agent != "shell" || !items[0].Detached ||
+		items[0].Agent != "shell" ||
 		items[0].LastUsedAt != "2026-10-31T01:02:05Z" ||
 		items[0].CreatedAt != "2026-10-31T01:02:03.000000004Z" {
 		t.Fatalf("unexpected JSON items: %#v", items)
 	}
-	if items[1].Workspaces == nil || len(items[1].Workspaces) != 0 {
-		t.Fatalf("mountless workspaces must be an empty array: %#v", items[1].Workspaces)
+	if len(items[1].Workspaces) != 0 {
+		t.Fatalf("mountless workspaces must be omitted: %#v", items[1].Workspaces)
 	}
 }
 

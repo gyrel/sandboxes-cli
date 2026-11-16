@@ -80,11 +80,12 @@ type launcher interface {
 // Supervisor controls one local daemon installation. It is the only component
 // that starts or signals a daemon process.
 type Supervisor struct {
-	Scope       Scope
-	Binary      string
-	Inspector   ProcessInspector
-	WaitTimeout time.Duration
-	launcher    launcher
+	Scope             Scope
+	Binary            string
+	Inspector         ProcessInspector
+	EndpointInspector EndpointInspector
+	WaitTimeout       time.Duration
+	launcher          launcher
 }
 
 // New creates a supervisor for the installation selected by --socket.
@@ -94,10 +95,11 @@ func New(socket string) (*Supervisor, error) {
 		return nil, err
 	}
 	return &Supervisor{
-		Scope:       scope,
-		Inspector:   SystemInspector{},
-		WaitTimeout: defaultWaitTimeout,
-		launcher:    osLauncher{},
+		Scope:             scope,
+		Inspector:         SystemInspector{},
+		EndpointInspector: SystemEndpointInspector{},
+		WaitTimeout:       defaultWaitTimeout,
+		launcher:          osLauncher{},
 	}, nil
 }
 
@@ -273,22 +275,13 @@ func (s *Supervisor) waitForRecord(ctx context.Context, waited <-chan error) (Re
 // Stop signals the proven daemon process and waits for it to exit.
 func (s *Supervisor) Stop(ctx context.Context) error {
 	record, err := LoadVerified(s.Scope, s.Inspector)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrNoRecord):
-			if socketPathExists(s.Scope.Socket) {
-				return fmt.Errorf("%w: endpoint exists without a verified control record; the daemon may have been started externally, stop it manually after verifying its identity", ErrAmbiguousState)
-			}
-			return nil
-		case errors.Is(err, ErrProcessNotFound):
-			if socketPathExists(s.Scope.Socket) {
-				return fmt.Errorf("%w: endpoint exists but the recorded process is gone; a daemon may have been started externally, stop it manually after verifying its identity", ErrAmbiguousState)
-			}
-			return nil
-		default:
-			return fmt.Errorf("refusing to stop daemon: %w", err)
-		}
+	if err == nil {
+		return s.stopRecorded(ctx, record)
 	}
+	return s.stopUnrecorded(ctx, err)
+}
+
+func (s *Supervisor) stopRecorded(ctx context.Context, record Record) error {
 	proc, err := s.launcher.Find(record.PID)
 	if err != nil {
 		return fmt.Errorf("%w: find daemon PID %d: %w", ErrIdentityUnverifiable, record.PID, err)
@@ -298,6 +291,47 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	if err := Verify(record, s.Scope, record.InstallationID, s.Inspector); err != nil {
 		return fmt.Errorf("refusing to stop daemon: %w", err)
 	}
+	return s.signalAndWait(ctx, record, proc)
+}
+
+func (s *Supervisor) stopUnrecorded(ctx context.Context, cause error) error {
+	record, err := s.liveEndpointIdentity()
+	if err != nil {
+		return s.stopEndpointError(cause, err)
+	}
+	proc, err := s.launcher.Find(record.PID)
+	if err != nil {
+		return fmt.Errorf("%w: find endpoint PID %d: %w", ErrIdentityUnverifiable, record.PID, err)
+	}
+	if err := s.verifyStartIdentity(record.PID, record.ProcessStartID); err != nil {
+		return fmt.Errorf("refusing to stop daemon: %w", err)
+	}
+	// Re-read the endpoint owner immediately before signaling so a replaced
+	// socket cannot make an earlier proof name a different process.
+	current, err := s.liveEndpointIdentity()
+	if err != nil {
+		return fmt.Errorf("refusing to stop daemon: %w", err)
+	}
+	if current.PID != record.PID || current.ProcessStartID != record.ProcessStartID {
+		return fmt.Errorf("%w: endpoint ownership changed before signaling", ErrIdentityMismatch)
+	}
+	return s.signalAndWait(ctx, record, proc)
+}
+
+func (s *Supervisor) stopEndpointError(cause, liveErr error) error {
+	if errors.Is(liveErr, ErrEndpointNotRunning) {
+		if errors.Is(cause, ErrNoRecord) || errors.Is(cause, ErrProcessNotFound) {
+			return nil
+		}
+		return fmt.Errorf("refusing to stop daemon: %w", cause)
+	}
+	if errors.Is(cause, ErrInvalidRecord) {
+		return fmt.Errorf("refusing to stop daemon: %w", cause)
+	}
+	return fmt.Errorf("%w: daemon at %s was started outside 'rsbx daemon start' and its identity cannot be verified; inspect the process that owns the socket, stop it manually with SIGTERM, and verify the endpoint before removing it: %w", ErrAmbiguousState, s.Scope.Socket, liveErr)
+}
+
+func (s *Supervisor) signalAndWait(ctx context.Context, record Record, proc process) error {
 	if err := signalStop(proc); err != nil {
 		return fmt.Errorf("stop daemon PID %d: %w", record.PID, err)
 	}
@@ -367,26 +401,28 @@ func (s *Supervisor) Restart(ctx context.Context, opts StartOptions) (StartResul
 	return s.Start(ctx, opts)
 }
 
-// Inspect classifies the local daemon without signaling it.
+// Inspect classifies the local daemon without signaling it. A fully verified
+// control record is preferred; otherwise the live socket peer is used as proof
+// for a daemon that was started outside the CLI.
 func (s *Supervisor) Inspect() Inspection {
 	record, err := LoadVerified(s.Scope, s.Inspector)
 	if err == nil {
 		return Inspection{State: StateRunning, PID: record.PID, Record: record}
 	}
-	switch {
-	case errors.Is(err, ErrProcessNotFound):
-		if socketPathExists(s.Scope.Socket) {
-			return Inspection{State: StateAmbiguous, Err: fmt.Errorf("%w: endpoint exists but the recorded process is gone", ErrAmbiguousState)}
+	live, liveErr := s.liveEndpointIdentity()
+	if liveErr == nil {
+		return Inspection{State: StateRunning, PID: live.PID, Record: live}
+	}
+	if errors.Is(liveErr, ErrEndpointNotRunning) {
+		if errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) {
+			return Inspection{State: StateStopped}
 		}
-		return Inspection{State: StateStopped}
-	case errors.Is(err, ErrNoRecord):
-		if socketPathExists(s.Scope.Socket) {
-			return Inspection{State: StateAmbiguous, Err: fmt.Errorf("%w: socket %s exists without a verified control record", ErrAmbiguousState, s.Scope.Socket)}
-		}
-		return Inspection{State: StateStopped}
-	default:
 		return Inspection{State: StateAmbiguous, Err: err}
 	}
+	if socketPathExists(s.Scope.Socket) {
+		return Inspection{State: StateAmbiguous, Err: fmt.Errorf("%w: %w", ErrAmbiguousState, liveErr)}
+	}
+	return Inspection{State: StateAmbiguous, Err: err}
 }
 
 // Levels returns the persisted log levels of a running daemon.

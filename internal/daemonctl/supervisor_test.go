@@ -16,6 +16,9 @@ type fakeInspector struct {
 	identities map[int]string
 	errors     map[int]error
 	transient  map[int][]error
+	executable string
+	args       []string
+	commandErr error
 }
 
 func (f *fakeInspector) StartIdentity(pid int) (string, error) {
@@ -31,6 +34,16 @@ func (f *fakeInspector) StartIdentity(pid int) (string, error) {
 		return "", ErrProcessNotFound
 	}
 	return identity, nil
+}
+
+func (f *fakeInspector) Command(pid int) (string, []string, error) {
+	if f.commandErr != nil {
+		return "", nil, f.commandErr
+	}
+	if _, ok := f.identities[pid]; !ok {
+		return "", nil, ErrProcessNotFound
+	}
+	return f.executable, append([]string(nil), f.args...), nil
 }
 
 func newFakeInspector() *fakeInspector {
@@ -370,6 +383,192 @@ func TestStopAndRestartRefuseUnverifiedEndpoint(t *testing.T) {
 				t.Fatalf("endpoint was removed: %v", err)
 			}
 		})
+	}
+}
+
+type fakeEndpointInspector struct {
+	pid int
+	err error
+}
+
+func (f fakeEndpointInspector) PeerPID(string) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	return f.pid, nil
+}
+
+func TestStopExternalDaemonWithLiveIdentity(t *testing.T) {
+	supervisor, launcher, inspector := testSupervisor(t)
+	supervisor.EndpointInspector = fakeEndpointInspector{pid: 7000}
+	inspector.identities[7000] = "fixture:external"
+	inspector.executable = "sandboxesd"
+	proc := &fakeProcess{pid: 7000, done: make(chan struct{})}
+	proc.onSignal = func() {
+		delete(inspector.identities, 7000)
+		_ = os.Remove(supervisor.Scope.Socket)
+		close(proc.done)
+	}
+	launcher.processes[7000] = proc
+	if err := os.WriteFile(supervisor.Scope.Socket, []byte("live endpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() = %v", err)
+	}
+	if proc.signals+proc.kills != 1 {
+		t.Fatalf("signals=%d kills=%d", proc.signals, proc.kills)
+	}
+	if _, err := ReadRecord(supervisor.Scope.StateDir); !errors.Is(err, ErrNoRecord) {
+		t.Fatalf("Stop() published a control record: %v", err)
+	}
+}
+
+func TestStopExternalDaemonAcceptsRenamedBinaryWithMatchingSocket(t *testing.T) {
+	supervisor, launcher, inspector := testSupervisor(t)
+	supervisor.EndpointInspector = fakeEndpointInspector{pid: 7000}
+	inspector.identities[7000] = "fixture:external"
+	inspector.executable = "/opt/bin/sbx-daemon"
+	inspector.args = []string{"sbx-daemon", "--state", supervisor.Scope.StateDir, "--socket", supervisor.Scope.Socket}
+	proc := &fakeProcess{pid: 7000, done: make(chan struct{})}
+	proc.onSignal = func() {
+		delete(inspector.identities, 7000)
+		_ = os.Remove(supervisor.Scope.Socket)
+		close(proc.done)
+	}
+	launcher.processes[7000] = proc
+	if err := os.WriteFile(supervisor.Scope.Socket, []byte("live endpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() = %v", err)
+	}
+	if proc.signals+proc.kills != 1 {
+		t.Fatalf("signals=%d kills=%d", proc.signals, proc.kills)
+	}
+}
+
+func TestStopExternalDaemonIgnoresStaleControlRecord(t *testing.T) {
+	supervisor, launcher, inspector := testSupervisor(t)
+	writeLiveRecord(t, supervisor.Scope, inspector, 6000, "fixture:stale")
+	delete(inspector.identities, 6000)
+	supervisor.EndpointInspector = fakeEndpointInspector{pid: 7000}
+	inspector.identities[7000] = "fixture:external"
+	inspector.executable = "sandboxesd"
+	proc := &fakeProcess{pid: 7000, done: make(chan struct{})}
+	proc.onSignal = func() {
+		delete(inspector.identities, 7000)
+		_ = os.Remove(supervisor.Scope.Socket)
+		close(proc.done)
+	}
+	launcher.processes[7000] = proc
+	if err := os.WriteFile(supervisor.Scope.Socket, []byte("live endpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() = %v", err)
+	}
+	if proc.signals+proc.kills != 1 {
+		t.Fatalf("signals=%d kills=%d", proc.signals, proc.kills)
+	}
+}
+
+func TestStopExternalDaemonRefusesUnprovableIdentity(t *testing.T) {
+	tests := []struct {
+		name      string
+		endpoint  EndpointInspector
+		identity  string
+		inspector func(*fakeInspector)
+		want      string
+	}{
+		{
+			name:     "endpoint peer unavailable",
+			endpoint: fakeEndpointInspector{err: errors.New("permission denied")},
+			want:     "started outside 'rsbx daemon start'",
+		},
+		{
+			name:      "process identity unavailable",
+			endpoint:  fakeEndpointInspector{pid: 7000},
+			inspector: func(f *fakeInspector) { f.errors[7000] = errors.New("permission denied") },
+			want:      "cannot be verified",
+		},
+		{
+			name:      "endpoint process is not sandboxesd",
+			endpoint:  fakeEndpointInspector{pid: 7000},
+			identity:  "fixture:external",
+			inspector: func(f *fakeInspector) { f.executable = "/usr/bin/python3" },
+			want:      "not a sandboxesd daemon",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			supervisor, launcher, inspector := testSupervisor(t)
+			supervisor.EndpointInspector = tt.endpoint
+			if tt.identity != "" {
+				inspector.identities[7000] = tt.identity
+			}
+			if tt.inspector != nil {
+				tt.inspector(inspector)
+			}
+			if err := os.WriteFile(supervisor.Scope.Socket, []byte("live endpoint"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := supervisor.Stop(context.Background())
+			if !errors.Is(err, ErrAmbiguousState) && !errors.Is(err, ErrIdentityUnverifiable) {
+				t.Fatalf("Stop() = %v, want a refusal", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Stop() = %q, want %q", err, tt.want)
+			}
+			if len(launcher.events) != 0 {
+				t.Fatalf("launcher was touched: %v", launcher.events)
+			}
+			if _, statErr := os.Stat(supervisor.Scope.Socket); statErr != nil {
+				t.Fatalf("endpoint was removed: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestStopExternalDaemonRefusesControlRecordMismatch(t *testing.T) {
+	supervisor, launcher, inspector := testSupervisor(t)
+	writeLiveRecord(t, supervisor.Scope, inspector, 7000, "fixture:old")
+	inspector.identities[7000] = "fixture:new"
+	supervisor.EndpointInspector = fakeEndpointInspector{pid: 7000}
+	if err := os.WriteFile(supervisor.Scope.Socket, []byte("live endpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := supervisor.Stop(context.Background())
+	if !errors.Is(err, ErrAmbiguousState) {
+		t.Fatalf("Stop() = %v, want ambiguous state", err)
+	}
+	if len(launcher.events) != 0 {
+		t.Fatalf("launcher was touched: %v", launcher.events)
+	}
+}
+
+func TestInspectRecognizesExternalAndUnprovableEndpoints(t *testing.T) {
+	supervisor, _, inspector := testSupervisor(t)
+	supervisor.EndpointInspector = fakeEndpointInspector{pid: 7000}
+	inspector.identities[7000] = "fixture:external"
+	inspector.executable = "sandboxesd"
+	if err := os.WriteFile(supervisor.Scope.Socket, []byte("live endpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if inspection := supervisor.Inspect(); inspection.State != StateRunning || inspection.PID != 7000 {
+		t.Fatalf("external inspection = %+v", inspection)
+	}
+	inspector.executable = "/usr/bin/python3"
+	if inspection := supervisor.Inspect(); inspection.State != StateAmbiguous {
+		t.Fatalf("unprovable inspection = %+v", inspection)
+	}
+	delete(inspector.identities, 7000)
+	if err := os.Remove(supervisor.Scope.Socket); err != nil {
+		t.Fatal(err)
+	}
+	supervisor.EndpointInspector = fakeEndpointInspector{err: ErrEndpointNotRunning}
+	if inspection := supervisor.Inspect(); inspection.State != StateStopped {
+		t.Fatalf("stopped inspection = %+v", inspection)
 	}
 }
 

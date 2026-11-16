@@ -194,7 +194,13 @@ func TestDaemonGrammarAndExitCodes(t *testing.T) {
 }
 
 func TestDaemonStatusJSONUsesSbxFieldNames(t *testing.T) {
-	supervisor := &fakeDaemonSupervisor{inspection: daemonctl.Inspection{State: daemonctl.StateRunning, PID: 9000}}
+	supervisor := &fakeDaemonSupervisor{inspection: daemonctl.Inspection{
+		State: daemonctl.StateRunning,
+		PID:   9000,
+		Record: daemonctl.Record{
+			Version: "v0.0.1-recorded",
+		},
+	}}
 	var out bytes.Buffer
 	runner := &Runner{
 		Out: &out, Err: &out, In: strings.NewReader(""), Socket: "/state/sandboxesd.sock",
@@ -226,6 +232,22 @@ func TestDaemonStatusJSONUsesSbxFieldNames(t *testing.T) {
 	}
 }
 
+func TestDaemonStopNeverReportsSuccessWhenIdentityIsUnproven(t *testing.T) {
+	supervisor := &fakeDaemonSupervisor{stopErr: errors.New("daemon state is ambiguous: daemon at /state/sandboxesd.sock was started outside 'rsbx daemon start' and its identity cannot be verified")}
+	runner, out := daemonRunner(supervisor)
+	if code := runner.Run(context.Background(), []string{"daemon", "stop"}); code != 1 {
+		t.Fatalf("exit=%d want=1 output=%q", code, out.String())
+	}
+	if strings.Contains(out.String(), "Stopped daemon") {
+		t.Fatalf("refused stop reported success: %q", out.String())
+	}
+	for _, want := range []string{"stop daemon:", "started outside 'rsbx daemon start'", "cannot be verified"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output lacks %q: %q", want, out.String())
+		}
+	}
+}
+
 func TestDaemonStatusUnavailableFailsClosed(t *testing.T) {
 	supervisor := &fakeDaemonSupervisor{inspection: daemonctl.Inspection{State: daemonctl.StateAmbiguous, Err: errors.New("PID was reused")}}
 	runner, out := daemonRunner(supervisor)
@@ -238,6 +260,44 @@ func TestDaemonStatusUnavailableFailsClosed(t *testing.T) {
 	}
 	if decoded["status"] != "unavailable" || !strings.Contains(decoded["error"].(string), "PID was reused") {
 		t.Fatalf("JSON = %#v", decoded)
+	}
+}
+
+func TestDaemonStatusReportsLiveProcessWhenEndpointIsUnreachable(t *testing.T) {
+	supervisor := &fakeDaemonSupervisor{inspection: daemonctl.Inspection{
+		State:  daemonctl.StateRunning,
+		PID:    9000,
+		Record: daemonctl.Record{Version: "v0.0.1-recorded"},
+	}}
+	runner, out := daemonRunner(supervisor)
+	if code := runner.Run(context.Background(), []string{"daemon", "status"}); code != 1 {
+		t.Fatalf("exit=%d want=1 output=%q", code, out.String())
+	}
+	for _, want := range []string{"Status:  running", "PID:     9000", "endpoint is unreachable"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output lacks %q: %q", want, out.String())
+		}
+	}
+	for _, unwanted := range []string{"Version:", "Sandboxes:", "v0.0.1-recorded"} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Fatalf("unreachable status reported %q: %q", unwanted, out.String())
+		}
+	}
+}
+
+func TestDaemonStatusStoppedOmitsRecordedVersion(t *testing.T) {
+	supervisor := &fakeDaemonSupervisor{inspection: daemonctl.Inspection{
+		State:  daemonctl.StateStopped,
+		Record: daemonctl.Record{Version: "v0.0.1-recorded"},
+	}}
+	runner, out := daemonRunner(supervisor)
+	if code := runner.Run(context.Background(), []string{"daemon", "status"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	for _, unwanted := range []string{"Version:", "v0.0.1-recorded"} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Fatalf("stopped status reported %q: %q", unwanted, out.String())
+		}
 	}
 }
 

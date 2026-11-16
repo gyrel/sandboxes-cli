@@ -36,9 +36,9 @@ Commands:
 
 The daemon state directory and log path are derived from --socket. The CLI
 starts sandboxesd with --state and --socket; set SANDBOXES_DAEMON_BINARY when
-sandboxesd is not on PATH. stop and restart refuse to signal a PID unless its
-recorded process start identity and installation match the selected state
-directory.
+sandboxesd is not on PATH. stop and restart verify the recorded process, or an
+externally started daemon through its live socket peer, before signaling. They
+never signal a PID whose identity cannot be proven.
 
 Log levels: debug, info, warn, error
 Targets:    general, proxy, all
@@ -67,9 +67,11 @@ Flags:
 
 const daemonStopUsage = `Usage: rsbx daemon stop [flags]
 
-Stop the local daemon. A stopped daemon is not an error. If the endpoint has
-no verified control record, stop the external daemon manually after verifying
-its identity. Stale endpoints must be verified before manual removal.
+Stop the local daemon. A stopped daemon is not an error. A daemon started
+outside 'rsbx daemon start' is stopped only after its identity is proven from
+the control record or the live socket peer. If identity cannot be proven, stop
+refuses and explains how to stop the daemon manually. Stale endpoints must be
+verified before manual removal.
 
 Flags:
   -h, --help   Show this help
@@ -104,8 +106,10 @@ Flags:
 
 const daemonStatusUsage = `Usage: rsbx daemon status [flags]
 
-Show daemon status. JSON uses the sbx field names status, socket and logs, plus
-pid, version, api_version, sandboxes, running, stopped and error when available.
+Show daemon status from the live endpoint. JSON uses the sbx field names
+status, socket and logs, plus pid, version, api_version, sandboxes, running,
+stopped and error when available. version and api_version are reported only
+when the live daemon answers the version request.
 
 Flags:
       --format string   Output format: table, json or yaml
@@ -388,6 +392,9 @@ func (r *Runner) collectDaemonStatus(ctx context.Context) (daemonStatusOutput, i
 		out = r.classifyUnreachable(out, err)
 	}
 	if out.Status == sandboxStateRunning {
+		if out.Error != "" {
+			return out, 1
+		}
 		return out, 0
 	}
 	if out.Status == sandboxStateStopped {
@@ -436,7 +443,7 @@ func (r *Runner) classifyUnreachable(out daemonStatusOutput, probeErr error) dae
 		out.Status = sandboxStateStopped
 		out.Error = ""
 	case daemonctl.StateRunning:
-		out.Status = stateUnavailable
+		out.Status = sandboxStateRunning
 		out.PID = inspection.PID
 		out.Error = "daemon process is running but the endpoint is unreachable: " + probeErr.Error()
 	default:
@@ -468,7 +475,7 @@ func renderDaemonStatus(out io.Writer, format string, status daemonStatusOutput)
 		if status.PID != 0 {
 			_, _ = fmt.Fprintf(out, "PID:     %d\n", status.PID)
 		}
-		if status.Status == sandboxStateRunning {
+		if status.Status == sandboxStateRunning && status.Version != "" {
 			_, _ = fmt.Fprintf(out, "Version: %s (api %s)\nSandboxes: %d (running %d, stopped %d)\n", status.Version, status.API, status.Total, status.Running, status.Stopped)
 		}
 		if status.Error != "" {

@@ -99,3 +99,16 @@ func TestRunWarnsThatSizingDoesNotResizeExistingSandbox(t *testing.T) {
 		t.Fatalf("stderr=%q createCalls=%d", stderr.String(), sandboxes.createCalls)
 	}
 }
+
+func TestCreateMemoryShortFlagAfterWorkspace(t *testing.T) {
+	sandbox := &recordingCreateSandbox{}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
+	workspace := t.TempDir()
+	if code := runner.Run(context.Background(), []string{"create", "shell", workspace, "-m", "2g"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if sandbox.request.MemoryMiB != 2048 {
+		t.Fatalf("memory=%d", sandbox.request.MemoryMiB)
+	}
+}

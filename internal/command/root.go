@@ -70,7 +70,7 @@ Flags:
   --kit FILE                  apply a local kit definition
   --deny-write PATH           mount PATH read-only (repeatable)
   --cpus N                    CPU count for a new sandbox
-  --memory SIZE               memory limit (binary units)
+  -m, --memory SIZE           memory limit (binary units)
   --docker                    run the dedicated Docker profile
   --idempotency-key KEY       idempotency key
   -e, --env KEY=VALUE         environment for every process (repeatable)
@@ -1561,6 +1561,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	idempotency := fs.String("idempotency-key", "", "idempotency key")
 	cpus := fs.Uint("cpus", 0, "CPUs (0 selects the daemon default)")
 	memory := fs.String("memory", "", "memory limit such as 512m or 2g (empty selects the daemon default)")
+	fs.StringVar(memory, "m", "", "memory limit (alias for --memory)")
 	profile := fs.String("policy-profile", "", "egress profile: deny-all, balanced or sbx-compat")
 	privileged := fs.Bool("docker", false, "run the dedicated Docker profile")
 	cloneMode := fs.Bool("clone", false, "run the agent on a private in-guest clone of PATH")

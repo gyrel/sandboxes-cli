@@ -10,9 +10,18 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
+func workspaceSpecReadOnly(value string) bool {
+	return strings.HasSuffix(value, ":ro") || strings.HasSuffix(value, ":readonly")
+}
+
 func parseWorkspaceSpec(value string) (sdk.Workspace, error) {
-	readOnly := strings.HasSuffix(value, ":ro")
-	path := strings.TrimSuffix(value, ":ro")
+	readOnly := workspaceSpecReadOnly(value)
+	path := value
+	if strings.HasSuffix(value, ":readonly") {
+		path = strings.TrimSuffix(value, ":readonly")
+	} else if strings.HasSuffix(value, ":ro") {
+		path = strings.TrimSuffix(value, ":ro")
+	}
 	if path == "" || strings.ContainsRune(path, '\x00') {
 		return sdk.Workspace{}, errors.New("workspace path is invalid")
 	}

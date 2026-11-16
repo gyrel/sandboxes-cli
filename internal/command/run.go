@@ -211,9 +211,8 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
 		return 2
 	}
-	if err := prepareRunCloneSource(ctx, &opts, workspacePaths); err != nil {
-		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
-		return 2
+	if err := prepareRunCloneSource(ctx, &opts, agent, workspacePaths); err != nil {
+		return r.runWorkspaceError(err)
 	}
 	if err := validateRunRequest(opts, agent); err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
@@ -252,6 +251,19 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	return r.runAttached(ctx, client, opts, sandbox, created, agent, workspaces, workspacesExplicit, agentArgs, resources)
 }
 
+func (r *Runner) runWorkspaceError(err error) int {
+	if errors.Is(err, errPrimaryWorkspaceReadOnly) {
+		_, _ = fmt.Fprintf(r.Err, "error: %v\n", err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
+	return 2
+}
+
+func agentHasReadOnlyPrimary(agent string, paths []string) bool {
+	return agent != "" && len(paths) > 0 && workspaceSpecReadOnly(paths[0])
+}
+
 func resolveRunCloneSource(ctx context.Context, clone bool, paths []string) (string, error) {
 	if !clone {
 		return "", nil
@@ -270,7 +282,10 @@ func resolveRunCloneSource(ctx context.Context, clone bool, paths []string) (str
 	return workspace.Path, nil
 }
 
-func prepareRunCloneSource(ctx context.Context, opts *runOptions, paths []string) error {
+func prepareRunCloneSource(ctx context.Context, opts *runOptions, agent string, paths []string) error {
+	if agentHasReadOnlyPrimary(agent, paths) {
+		return errPrimaryWorkspaceReadOnly
+	}
 	path, err := resolveRunCloneSource(ctx, opts.clone, paths)
 	if err != nil {
 		return err

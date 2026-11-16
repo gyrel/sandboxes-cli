@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
@@ -69,5 +70,55 @@ func TestCreateAcceptsFlagsAfterWorkspaces(t *testing.T) {
 	}
 	if sandbox.request.Name != "dev" || sandbox.request.Agent != shellAgent || sandbox.request.Image != "example.test/image:tag" || sandbox.request.CPUs != 2 || len(sandbox.request.Workspaces) != 1 {
 		t.Fatalf("request=%+v", sandbox.request)
+	}
+}
+
+func TestAgentCreateRejectsReadOnlyPrimaryWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	for _, suffix := range []string{":ro", ":readonly"} {
+		called := false
+		var output bytes.Buffer
+		runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { called = true; return nil, nil }}
+		if code := runner.Run(context.Background(), []string{"create", "shell", workspace + suffix}); code != 1 || called || !strings.Contains(output.String(), "primary workspace must be read/write") {
+			t.Fatalf("%s: exit=%d connected=%t output=%q", suffix, code, called, output.String())
+		}
+	}
+}
+
+func TestAgentCreateAcceptsReadOnlyAdditionalWorkspace(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	sandbox := &recordingCreateSandbox{}
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
+	if code := runner.Run(context.Background(), []string{"create", "shell", first, second + ":readonly"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if len(sandbox.request.Workspaces) != 2 || !sandbox.request.Workspaces[1].ReadOnly {
+		t.Fatalf("workspaces=%+v", sandbox.request.Workspaces)
+	}
+}
+
+func TestAgentlessCreateKeepsReadOnlyPrimaryWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	sandbox := &recordingCreateSandbox{}
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
+	if code := runner.Run(context.Background(), []string{"create", "local", workspace + ":ro"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if len(sandbox.request.Workspaces) != 1 || !sandbox.request.Workspaces[0].ReadOnly {
+		t.Fatalf("workspaces=%+v", sandbox.request.Workspaces)
+	}
+}
+
+func TestAgentRunRejectsReadOnlyPrimaryWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	for _, suffix := range []string{":ro", ":readonly"} {
+		called := false
+		var output bytes.Buffer
+		runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { called = true; return nil, nil }}
+		if code := runner.Run(context.Background(), []string{"run", "shell", workspace + suffix, "--detach"}); code != 1 || called || !strings.Contains(output.String(), "primary workspace must be read/write") {
+			t.Fatalf("%s: exit=%d connected=%t output=%q", suffix, code, called, output.String())
+		}
 	}
 }

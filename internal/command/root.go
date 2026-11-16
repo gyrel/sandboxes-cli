@@ -55,7 +55,9 @@ const (
 const createUsage = `usage: rsbx create [AGENT] [PATH...] [--name NAME] [flags]
 
 Create a sandbox for an agent. Use ` + "`rsbx agents`" + ` to list launchable built-in
-agents and their pinned images. Omit PATH for no workspace mount.
+agents and their pinned images. Omit PATH for no workspace mount. An agent's
+primary workspace must be read/write; additional workspaces may use :ro or
+:readonly. Agentless sandboxes can use a read-only primary workspace.
 
 Flags:
   --name NAME                 sandbox name
@@ -1354,6 +1356,9 @@ func (r *Runner) create(ctx context.Context, args []string) int {
 	}
 	if err != nil {
 		r.error(err)
+		if errors.Is(err, errPrimaryWorkspaceReadOnly) {
+			return 1
+		}
 		return 2
 	}
 	client, err := r.client()
@@ -1608,7 +1613,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	if err != nil {
 		return createOptions{}, false, err
 	}
-	workspaces, cloneOptions, err := prepareCreateWorkspaces(ctx, workspaceFlags, paths, denyWriteFlags, *cloneMode)
+	workspaces, cloneOptions, err := prepareCreateWorkspaces(ctx, workspaceFlags, paths, denyWriteFlags, *cloneMode, agent != "")
 	if err != nil {
 		return createOptions{}, false, err
 	}
@@ -1644,13 +1649,18 @@ func reorderCreateArgs(fs *flag.FlagSet, args []string) []string {
 	return reorderFlagArgs(args, valueFlags)
 }
 
-func prepareCreateWorkspaces(ctx context.Context, workspaceFlags stringListFlag, paths, denyWrites []string, clone bool) ([]sdk.Workspace, *sdk.CloneOptions, error) {
+var errPrimaryWorkspaceReadOnly = errors.New("primary workspace must be read/write (remove ':ro' or ':readonly')")
+
+func prepareCreateWorkspaces(ctx context.Context, workspaceFlags stringListFlag, paths, denyWrites []string, clone, agent bool) ([]sdk.Workspace, *sdk.CloneOptions, error) {
 	for _, target := range denyWrites {
 		workspaceFlags = append(workspaceFlags, target+":ro")
 	}
 	workspaces, err := resolveCreateWorkspaces(workspaceFlags, paths)
 	if err != nil {
 		return nil, nil, err
+	}
+	if agent && len(workspaces) > 0 && workspaces[0].ReadOnly {
+		return nil, nil, errPrimaryWorkspaceReadOnly
 	}
 	return applyCreateCloneMode(ctx, clone, workspaces)
 }

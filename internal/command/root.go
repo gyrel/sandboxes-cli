@@ -1567,7 +1567,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	kitPath := fs.String("kit", "", "apply a local kit definition")
 	var denyWriteFlags stringListFlag
 	fs.Var(&denyWriteFlags, "deny-write", "mount PATH read-only (repeatable)")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderCreateArgs(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return createOptions{}, true, nil
 		}
@@ -1628,6 +1628,19 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 		workspaces: workspaces, ports: ports, allow: allow, deny: deny,
 		cpus: cpuCount, memoryMiB: memoryMiB, env: env, oauthCredentials: oauthCredentials, profile: *profile, privileged: *privileged, clone: cloneOptions,
 	}, false, nil
+}
+
+// reorderCreateArgs accepts options after the agent and workspace paths, as
+// advertised by create's command grammar. Preserve -- as the end of flags.
+func reorderCreateArgs(fs *flag.FlagSet, args []string) []string {
+	valueFlags := make(map[string]bool)
+	fs.VisitAll(func(f *flag.Flag) {
+		boolFlag, isBool := f.Value.(interface{ IsBoolFlag() bool })
+		takesValue := !isBool || !boolFlag.IsBoolFlag()
+		valueFlags["-"+f.Name] = takesValue
+		valueFlags["--"+f.Name] = takesValue
+	})
+	return reorderFlagArgs(args, valueFlags)
 }
 
 func prepareCreateWorkspaces(ctx context.Context, workspaceFlags stringListFlag, paths, denyWrites []string, clone bool) ([]sdk.Workspace, *sdk.CloneOptions, error) {

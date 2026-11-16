@@ -58,3 +58,16 @@ func TestCreateBakesEnv(t *testing.T) {
 		t.Fatalf("env=%v", sandbox.request.Env)
 	}
 }
+
+func TestCreateAcceptsFlagsAfterWorkspaces(t *testing.T) {
+	workspace := t.TempDir()
+	sandbox := &recordingCreateSandbox{}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
+	if code := runner.Run(context.Background(), []string{"create", "shell", workspace, "--name", "dev", "--image", "example.test/image:tag", "--cpus", "2"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if sandbox.request.Name != "dev" || sandbox.request.Agent != shellAgent || sandbox.request.Image != "example.test/image:tag" || sandbox.request.CPUs != 2 || len(sandbox.request.Workspaces) != 1 {
+		t.Fatalf("request=%+v", sandbox.request)
+	}
+}

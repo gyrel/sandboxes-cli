@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"time"
 )
@@ -414,7 +415,8 @@ func (s *Supervisor) Inspect() Inspection {
 		return Inspection{State: StateRunning, PID: live.PID, Record: live}
 	}
 	if errors.Is(liveErr, ErrEndpointNotRunning) {
-		if errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) {
+		if errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) ||
+			errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
 			return Inspection{State: StateStopped}
 		}
 		return Inspection{State: StateAmbiguous, Err: err}

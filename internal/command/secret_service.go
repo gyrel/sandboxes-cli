@@ -33,13 +33,48 @@ var serviceSecretNames = []string{
 	groqService, mistralService, "nebius", openAIService, openrouterService, xaiService,
 }
 
+const storedSecretDisplay = "(stored)"
+
 type serviceSecretOutput struct {
-	Type        string `json:"type" yaml:"type"`
-	Service     string `json:"service" yaml:"service"`
-	Username    string `json:"username,omitempty" yaml:"username,omitempty"`
-	Scope       string `json:"scope" yaml:"scope"`
-	SandboxName string `json:"sandbox_name,omitempty" yaml:"sandbox_name,omitempty"`
-	State       string `json:"state" yaml:"state"`
+	Type        string
+	Service     string
+	Username    string
+	Scope       string
+	SandboxName string
+	State       string
+}
+
+// Secret metadata not exposed by the SDK is null rather than claiming that
+// there are no custom or shadowed secrets or environment-only credentials.
+type secretListOutput struct {
+	Secrets          []secretListItem `json:"secrets" yaml:"secrets"`
+	CustomSecrets    *[]any           `json:"custom_secrets" yaml:"custom_secrets"`
+	ShadowedServices *[]any           `json:"shadowed_services" yaml:"shadowed_services"`
+	EnvOnlyCount     *int             `json:"env_only_count" yaml:"env_only_count"`
+}
+
+type secretListItem struct {
+	Scope    string `json:"scope" yaml:"scope"`
+	Type     string `json:"type" yaml:"type"`
+	Name     string `json:"name" yaml:"name"`
+	Username string `json:"username,omitempty" yaml:"username,omitempty"`
+	Secret   string `json:"secret" yaml:"secret"`
+}
+
+func machineSecretList(items []serviceSecretOutput) secretListOutput {
+	out := secretListOutput{
+		Secrets: make([]secretListItem, 0, len(items)),
+	}
+	for _, item := range items {
+		scope := item.Scope
+		if item.SandboxName != "" {
+			scope = item.SandboxName
+		}
+		out.Secrets = append(out.Secrets, secretListItem{
+			Scope: scope, Type: item.Type, Name: item.Service, Username: item.Username, Secret: storedSecretDisplay,
+		})
+	}
+	return out
 }
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
@@ -655,14 +690,11 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 	out := make([]serviceSecretOutput, 0, 4)
 	items, err := sdk.Secrets(client).List(ctx)
 	if err != nil {
-		var sdkErr *sdk.Error
-		if !errors.As(err, &sdkErr) || sdkErr.Code != "unsupported" {
-			r.error(err)
-			return 1
-		}
+		r.error(err)
+		return 1
 	}
 	for _, item := range items {
-		out = append(out, serviceSecretOutput{Type: "service", Service: item.Service, Scope: string(item.Scope), SandboxName: item.SandboxName, State: "(stored)"})
+		out = append(out, serviceSecretOutput{Type: "service", Service: item.Service, Scope: string(item.Scope), SandboxName: item.SandboxName, State: storedSecretDisplay})
 	}
 	if lister, ok := sdk.RegistryCredentialList(client); ok {
 		registries, regErr := lister.ListRegistryCredentials(ctx)
@@ -671,8 +703,11 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 			return 1
 		}
 		for _, item := range registries {
-			out = append(out, serviceSecretOutput{Type: "registry", Service: item.Registry, Username: item.Username, Scope: item.Scope, SandboxName: item.SandboxName, State: "(stored)"})
+			out = append(out, serviceSecretOutput{Type: "registry", Service: item.Registry, Username: item.Username, Scope: item.Scope, SandboxName: item.SandboxName, State: storedSecretDisplay})
 		}
+	} else {
+		r.error(errors.New("registry credential listing is not supported by this client"))
+		return 1
 	}
 	out = filterSecretList(out, *global, *sandbox, *service)
 	if *quiet {
@@ -683,6 +718,12 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 			}
 		}
 		return 0
+	}
+	machine := any(machineSecretList(out))
+	if *service != "" {
+		machine = struct {
+			Secrets []secretListItem `json:"secrets" yaml:"secrets"`
+		}{Secrets: machineSecretList(out).Secrets}
 	}
 	switch selected {
 	case listFormatTable:
@@ -709,7 +750,7 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		}
 		return 0
 	case listFormatYAML:
-		data, err := yaml.Marshal(out)
+		data, err := yaml.Marshal(machine)
 		if err != nil {
 			r.error(err)
 			return 1
@@ -719,7 +760,7 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 	default:
 		encoder := json.NewEncoder(r.Out)
 		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(out); err != nil {
+		if err := encoder.Encode(machine); err != nil {
 			r.error(err)
 			return 1
 		}

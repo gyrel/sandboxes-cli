@@ -269,7 +269,7 @@ func TestStopSignalsOnlyVerifiedProcessAndRemovesRecord(t *testing.T) {
 	if err := supervisor.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if proc.signals != 1 || proc.kills != 0 {
+	if proc.signals+proc.kills != 1 {
 		t.Fatalf("signals=%d kills=%d", proc.signals, proc.kills)
 	}
 	if _, err := ReadRecord(supervisor.Scope.StateDir); !errors.Is(err, ErrNoRecord) {

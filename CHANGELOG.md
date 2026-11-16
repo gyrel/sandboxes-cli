@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Security
+
+- Follow the Docker sbx baseline for the default sandbox network policy:
+  `--policy-profile` and the settings default now describe `allow-all` as the
+  omitted-profile behavior instead of `deny-all`. `--policy-profile deny-all`,
+  `rsbx policy init deny-all` and `policy.profile = "deny-all"` still select
+  default-deny. `rsbx policy ls` now shows the built-in default-profile rules as
+  read-only `default-*` rows so an empty user rule list is not reported as
+  default-deny. Explicit deny rules and organization deny precedence are
+  unchanged.
+
 ## v0.0.51 — 2026-11-16
 
 - Accept interspersed flags for `ports`, `policy`, `secret`, `settings`, `cp`,

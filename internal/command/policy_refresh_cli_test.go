@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ type policyRefreshFake struct {
 	resetCalled int
 	allow       []sdk.NetworkRule
 	deny        []sdk.NetworkRule
+	profile     string
 	err         error
 }
 
@@ -50,7 +52,12 @@ func (p *policyRefreshFake) MutatePolicy(context.Context, string, string, sdk.Ne
 	return nil, errors.New("not implemented")
 }
 
-func (p *policyRefreshFake) GetPolicyProfile(context.Context) (string, error) { return "deny-all", nil }
+func (p *policyRefreshFake) GetPolicyProfile(context.Context) (string, error) {
+	if p.profile == "" {
+		return policyProfileDenyAll, nil
+	}
+	return p.profile, nil
+}
 
 func (p *policyRefreshFake) SetPolicyProfile(_ context.Context, profile string) (string, error) {
 	return profile, nil
@@ -134,5 +141,57 @@ func TestPolicyRefreshSurfacesDaemonErrors(t *testing.T) {
 	_, code := runPolicyRPC(t, fake, "", "refresh")
 	if code != 1 {
 		t.Fatalf("exit=%d", code)
+	}
+}
+
+func TestPolicyListShowsDefaultAllowAllProfile(t *testing.T) {
+	fake := &policyRefreshFake{profile: policyProfileAllowAll}
+	out, code := runPolicyRPC(t, fake, "", "ls", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	var rules []policyRuleOutput
+	if err := json.Unmarshal(out.Bytes(), &rules); err != nil {
+		t.Fatalf("decode policy list: %v\n%s", err, out.String())
+	}
+	seen := map[string]bool{}
+	for _, rule := range rules {
+		if rule.Provenance == "default" {
+			seen[rule.Protocol] = true
+			if rule.Action != "allow" || rule.CIDR != anyIPv4CIDR || rule.Port != 0 || !strings.HasPrefix(rule.RuleID, "default-allow-all-") {
+				t.Fatalf("default rule = %+v", rule)
+			}
+		}
+	}
+	if !seen[tcpProtocol] || !seen[udpProtocol] {
+		t.Fatalf("policy ls default rules = %+v, want tcp and udp allow-all rows", rules)
+	}
+}
+
+func TestPolicyListExplicitDenyAllHasNoDefaultRows(t *testing.T) {
+	fake := &policyRefreshFake{profile: policyProfileDenyAll}
+	out, code := runPolicyRPC(t, fake, "", "ls", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	var rules []policyRuleOutput
+	if err := json.Unmarshal(out.Bytes(), &rules); err != nil {
+		t.Fatalf("decode policy list: %v\n%s", err, out.String())
+	}
+	for _, rule := range rules {
+		if rule.Provenance == "default" {
+			t.Fatalf("explicit deny-all produced a default row: %+v", rule)
+		}
+	}
+}
+
+func TestPolicyProfileReportsDaemonDefault(t *testing.T) {
+	fake := &policyRefreshFake{profile: policyProfileAllowAll}
+	out, code := runPolicyRPC(t, fake, "", "profile")
+	if code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "global: allow-all") {
+		t.Fatalf("policy profile output = %q", out.String())
 	}
 }

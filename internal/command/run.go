@@ -63,7 +63,7 @@ Flags:
                                   repeatable; accepts [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
       --allow-network CIDR[:PORT] allow egress CIDR rule (repeatable; optional udp: prefix)
       --deny-network CIDR[:PORT]  deny egress CIDR rule (repeatable; optional udp: prefix)
-      --policy-profile PROFILE    deny-all, balanced, or opt-in sbx-compat
+      --policy-profile PROFILE    allow-all (default), deny-all, balanced, or opt-in sbx-compat
       --docker                    run the dedicated Docker profile
       --cpus N                    CPUs for a new sandbox (0 selects the daemon default)
   -m, --memory SIZE               memory limit for a new sandbox, such as 512m or 2g

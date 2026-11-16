@@ -222,7 +222,7 @@ func parseDaemonStartOptions(name string, args []string, errOut io.Writer) (daem
 		return daemonctl.StartOptions{}, false, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 	switch opts.Policy {
-	case "", "allow-all", "balanced", "deny-all":
+	case "", policyProfileAllowAll, policyProfileBalanced, policyProfileDenyAll:
 	default:
 		return daemonctl.StartOptions{}, false, errors.New(`--policy must be "allow-all", "balanced" or "deny-all"`)
 	}

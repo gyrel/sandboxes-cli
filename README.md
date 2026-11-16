@@ -204,13 +204,19 @@ lists the stored bindings; `ports --publish ...` / `--unpublish ...` change them
 live; omitting `HOST_PORT` allocates an ephemeral host port on the selected
 loopback IP.
 `--allow-network CIDR[:PORT]` and `--deny-network CIDR[:PORT]` (optional `udp:`
-prefix) add create-time IPv4 egress rules; the default remains deny.
-`--policy-profile deny-all|balanced|sbx-compat` selects an egress preset
-(balanced: 80/443 + DNS; sbx-compat: all IPv4 network); the global default is
-`deny-all` and settings can change it. `rsbx policy ls [SANDBOX]` lists global
-and sandbox rules with `rule_id`, scope, origin, action, protocol, target and
-port; when the daemon has an organization bundle loaded, its rules are appended
-with origin `org`. `rsbx policy org [--format table|json|yaml]` shows the
+prefix) add create-time IPv4 egress rules. A sandbox created without a profile
+uses `allow-all`, matching the Docker sbx baseline; explicit deny rules still
+win.
+`--policy-profile allow-all|deny-all|balanced|sbx-compat` selects an egress
+preset (allow-all: all IPv4 network, the default; deny-all: no egress;
+balanced: 80/443 + DNS; sbx-compat: alias for allow-all). The global default is
+`allow-all` and settings or `rsbx policy init` can change it. `rsbx policy ls
+[SANDBOX]` lists global and sandbox rules with `rule_id`, scope, origin, action,
+protocol, target and port; for the global list it also shows the built-in
+default-profile rules as read-only `default-*` rows so an empty user rule list
+is never mistaken for default-deny. When the daemon has an organization bundle
+loaded, its rules are appended with origin `org`. `rsbx policy org
+[--format table|json|yaml]` shows the
 effective organization policy: organization, bundle schema version and
 revision, payload fingerprint, enforcement state, load/expiry times, and every
 network rule marked `enforced` or `advisory`. A missing bundle prints an empty

@@ -372,10 +372,10 @@ func applyTypedSetting(values *settings.Values, key, value string) (bool, error)
 		values.DNSUpstream = value
 	case "policy.profile":
 		switch value {
-		case "", "deny-all", "balanced", "sbx-compat":
+		case "", policyProfileAllowAll, policyProfileDenyAll, policyProfileBalanced, policyProfileCompat:
 			values.DefaultPolicyProfile = value
 		default:
-			return true, errors.New("policy.profile must be deny-all, balanced or sbx-compat")
+			return true, errors.New("policy.profile must be allow-all, deny-all, balanced or sbx-compat")
 		}
 	case "defaults.cpus":
 		parsed, err := parseSettingUint(value, 0, 64)

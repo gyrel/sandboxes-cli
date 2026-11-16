@@ -67,7 +67,7 @@ var dockerCatalog = []Entry{
 // sit beside the Docker matrix and use the same override file.
 var extensionKeys = []Entry{
 	{Key: "dns.upstream", Type: "string", Restart: true, Description: "DNS upstream used by sandbox gateways (HOST:PORT)"},
-	{Key: "policy.profile", Type: "string", Description: "Default network policy profile for new sandboxes: deny-all, balanced, sbx-compat"},
+	{Key: "policy.profile", Type: "string", Description: "Default network policy profile for new sandboxes: allow-all (default), deny-all, balanced, sbx-compat"},
 	{Key: "defaults.cpus", Type: "int", Description: "CPU count for new sandboxes (0 = host-derived)"},
 	{Key: "defaults.memory_mib", Type: "int", Description: "Memory in MiB for new sandboxes (0 = host-derived)"},
 	{Key: "mcp.remote.allowedHosts", Type: "string", Restart: true, Description: "Exact remote MCP DNS host allowlist (comma-separated); no wildcards or IP literals. Empty disables remote MCP."},

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+
+	"github.com/rheic/sandboxes-cli/internal/settings"
 )
 
 func TestProfileRules(t *testing.T) {
@@ -14,7 +16,8 @@ func TestProfileRules(t *testing.T) {
 		want    int
 		bad     bool
 	}{
-		{"", 0, false},
+		{"", 2, false},
+		{"allow-all", 2, false},
 		{"deny-all", 0, false},
 		{"balanced", 4, false},
 		{"sbx-compat", 2, false},
@@ -24,6 +27,20 @@ func TestProfileRules(t *testing.T) {
 		if (err != nil) != tc.bad || len(rules) != tc.want {
 			t.Fatalf("profile %q rules=%d err=%v", tc.profile, len(rules), err)
 		}
+	}
+}
+
+func TestApplyPolicyProfileSetting(t *testing.T) {
+	var values settings.Values
+	for _, profile := range []string{policyProfileAllowAll, policyProfileDenyAll, policyProfileBalanced, policyProfileCompat} {
+		handled, err := applyTypedSetting(&values, "policy.profile", profile)
+		if !handled || err != nil || values.DefaultPolicyProfile != profile {
+			t.Fatalf("profile %q: handled=%t err=%v value=%q", profile, handled, err, values.DefaultPolicyProfile)
+		}
+	}
+	handled, err := applyTypedSetting(&values, "policy.profile", "unknown")
+	if !handled || err == nil {
+		t.Fatalf("unknown profile: handled=%t err=%v", handled, err)
 	}
 }
 

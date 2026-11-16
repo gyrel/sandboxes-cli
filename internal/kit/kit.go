@@ -249,9 +249,9 @@ func (k Kit) Validate() error {
 		return errors.New("kit spec.agent or spec.image is required")
 	}
 	switch k.Spec.PolicyProfile {
-	case "", "deny-all", "balanced", "sbx-compat":
+	case "", "allow-all", "deny-all", "balanced", "sbx-compat":
 	default:
-		return errors.New("kit spec.policy_profile must be deny-all, balanced or sbx-compat")
+		return errors.New("kit spec.policy_profile must be allow-all, deny-all, balanced or sbx-compat")
 	}
 	if k.Spec.Workspace.Seed != "" {
 		if err := validateSeed(k.Spec.Workspace.Seed); err != nil {

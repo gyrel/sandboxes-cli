@@ -65,7 +65,8 @@ Set the global default policy profile.
 
 const policyProfileUsage = `usage: rsbx policy profile [ls]
 
-Show the global default profile and the available profiles.
+Show the global default profile (allow-all unless configured otherwise) and the
+available profiles.
 `
 
 func policyMutateUsage(action string) string {
@@ -263,6 +264,29 @@ func globalPolicyForList(ctx context.Context, client sdk.Client) ([]sdk.NetworkR
 		return nil, nil, nil
 	}
 	return allow, deny, err
+}
+
+// globalPolicyListRules renders stored global rules and, when includeDefault is
+// set, the built-in profile rows that apply to new sandboxes. The default is
+// read-only: it is never written to the global allow/deny settings.
+func globalPolicyListRules(ctx context.Context, client sdk.Client, includeDefault bool) ([]policyRuleOutput, error) {
+	allow, deny, err := globalPolicyForList(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	rules := policyRulesFrom("global", allow, deny)
+	if !includeDefault {
+		return rules, nil
+	}
+	profile, err := sdk.Policies(client).GetPolicyProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defaultRules, err := profileRules(profile)
+	if err != nil {
+		return nil, err
+	}
+	return append(defaultProfileRuleOutputs(profile, defaultRules), rules...), nil
 }
 
 func (r *Runner) policyMutateGlobal(ctx context.Context, action, value string) int {
@@ -653,12 +677,11 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	globalAllow, globalDeny, err := globalPolicyForList(ctx, client)
+	rules, err := globalPolicyListRules(ctx, client, fs.NArg() == 0)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
-	rules := policyRulesFrom("global", globalAllow, globalDeny)
 	if fs.NArg() == 1 {
 		id, err := findExecSandbox(ctx, client, fs.Arg(0))
 		if err != nil {
@@ -690,7 +713,7 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 		return 2
 	}
 	profile := args[0]
-	if profile != "allow-all" && profile != policyProfileBalanced && profile != policyProfileDenyAll {
+	if profile != policyProfileAllowAll && profile != policyProfileBalanced && profile != policyProfileDenyAll {
 		_, _ = fmt.Fprintln(r.Err, "profile must be allow-all, balanced or deny-all")
 		return 2
 	}
@@ -729,7 +752,7 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(r.Out, "global: %s\navailable: deny-all, balanced, allow-all\n", profile)
+	_, _ = fmt.Fprintf(r.Out, "global: %s\navailable: allow-all, deny-all, balanced, sbx-compat\n", profile)
 	return 0
 }
 
@@ -935,12 +958,32 @@ func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOu
 	return out
 }
 
+// defaultProfileRuleOutputs describes the profile that the daemon applies to
+// new sandboxes when no explicit profile is selected. sbx reports its built-in
+// allow-all rule in `policy ls`, so Rheic reports the equivalent read-only
+// default rows instead of implying that an empty global list means deny-all.
+func defaultProfileRuleOutputs(profile string, rules []sdk.NetworkRule) []policyRuleOutput {
+	if len(rules) == 0 {
+		return nil
+	}
+	normalized := profile
+	if normalized == "" || normalized == policyProfileCompat {
+		normalized = policyProfileAllowAll
+	}
+	out := policyRulesFrom("global", rules, nil)
+	for i := range out {
+		out[i].RuleID = fmt.Sprintf("default-%s-%d", normalized, i+1)
+		out[i].Provenance = "default"
+	}
+	return out
+}
+
 //nolint:gocognit // one renderer covers both resource sections and three formats.
 func renderPolicyRules(out io.Writer, format string, rules []policyRuleOutput) error {
 	switch format {
 	case listFormatTable:
 		if len(rules) == 0 {
-			_, err := fmt.Fprintln(out, "No policy rules (default deny)")
+			_, err := fmt.Fprintln(out, "No policy rules")
 			return err
 		}
 		_, _ = fmt.Fprintln(out, "NETWORK")
@@ -1049,5 +1092,5 @@ Commands:
                                           enforced vs advisory rules, or an empty state
 
 policy refresh/reset/approval need daemon support and fail closed.
-Default is deny-all.
+Default is allow-all (sbx baseline); use policy init deny-all for default-deny.
 `

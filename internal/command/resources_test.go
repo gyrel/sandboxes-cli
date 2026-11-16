@@ -49,7 +49,7 @@ func TestCreatePassesResources(t *testing.T) {
 	sandbox := &recordingCreateSandbox{}
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
-	if code := runner.Run(context.Background(), []string{"create", "--cpus", "3", "--memory", "2g", "dev"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"create", "--cpus", "3", "--memory", "2g", "shell"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 	if sandbox.request.CPUs != 3 || sandbox.request.MemoryMiB != 2048 {
@@ -59,9 +59,9 @@ func TestCreatePassesResources(t *testing.T) {
 
 func TestCreateRejectsInvalidResources(t *testing.T) {
 	for _, args := range [][]string{
-		{"create", "--cpus", "65", "dev"},
-		{"create", "--memory", "64m", "dev"},
-		{"create", "--memory", "bogus", "dev"},
+		{"create", "--cpus", "65", "shell"},
+		{"create", "--memory", "64m", "shell"},
+		{"create", "--memory", "bogus", "shell"},
 	} {
 		called := false
 		runner := &Runner{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, NewClient: func(string) (sdk.Client, error) {

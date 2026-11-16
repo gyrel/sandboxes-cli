@@ -42,7 +42,7 @@ Show one rule by ID or one sandbox's policy in detail.
 
 // policyLog prints gateway audit decisions from the host run directory.
 func (r *Runner) policyLog(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, limitFlag: true, "--type": true})
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, limitFlag: true, logTypeFlag: true})
 	fs := flag.NewFlagSet("policy log", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { _, _ = fmt.Fprintln(r.Out, policyLogUsage) }

@@ -8,25 +8,6 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-func TestProfileRules(t *testing.T) {
-	for _, tc := range []struct {
-		profile string
-		want    int
-		bad     bool
-	}{
-		{"", 0, false},
-		{"deny-all", 0, false},
-		{"balanced", 4, false},
-		{"sbx-compat", 2, false},
-		{"unknown", 0, true},
-	} {
-		rules, err := profileRules(tc.profile)
-		if (err != nil) != tc.bad || len(rules) != tc.want {
-			t.Fatalf("profile %q rules=%d err=%v", tc.profile, len(rules), err)
-		}
-	}
-}
-
 func TestCreatePolicyProfile(t *testing.T) {
 	workspace := t.TempDir()
 	sandbox := &recordingCreateSandbox{}

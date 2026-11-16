@@ -10,13 +10,13 @@ import (
 // list their subcommands in completionSubcommands.
 var completionTree = map[string][]string{
 	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, removeFlag, newFlag, helpShort, helpFlag},
-	commandCreate:     {nameFlag, "--workspace", publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, cpusFlag, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag},
+	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, helpShort, helpFlag},
 	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
 	commandGet:        {formatFlag, jsonFlag, helpShort, helpFlag},
 	"ports":           {formatFlag, jsonFlag, publishFlag, "--unpublish"},
-	policyCommand:     {formatFlag, jsonFlag, sandboxFlag},
+	policyCommand:     {formatFlag, jsonFlag, sandboxFlag, protocolFlag, logTypeFlag, limitFlag, "--write", forceFlag, helpShort, helpFlag},
 	startCommand:      {graceFlag, formatFlag, jsonFlag},
 	stopCommand:       {graceFlag, formatFlag, jsonFlag},
 	"rm":              {"-f", forceFlag, allFlag, formatFlag, jsonFlag},
@@ -47,16 +47,16 @@ var completionTree = map[string][]string{
 }
 
 var completionSubcommands = map[string][]string{
-	policyCommand:     {"ls", commandInspect, actionAllow, actionDeny, "rm", "check", networkKeyword, orgScope},
-	secretCommand:     {"import", "ls", commandList, commandSet, commandSetCustom, "rm", commandRemove, commandDelete, commandUnset},
+	policyCommand:     {"ls", commandInspect, actionAllow, actionDeny, "rm", "check", networkKeyword, filesystemKeyword, "init", "profile", "log", "refresh", commandReset, orgScope},
+	secretCommand:     {"import", "ls", commandList, commandSet, "rm", commandRemove, commandDelete, commandUnset},
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 	commandAgents:     {"ls", commandList},
 	mcpCommand:        {"ls", "add", "call", "rm"},
 	daemonCommand:     {daemonStatusCommand, startCommand, stopCommand, daemonRestartCommand, daemonLogLevelCommand},
 	envCommand:        {"plan", commandCreate, commandRun, commandExec, "rm"},
-	kitCommand:        {commandInspect, "ls", commandList},
-	settingsCommand:   {"ls", commandList, commandGet, commandSet, commandUnset},
-	templateCommand:   {"ls", commandList, commandInspect, "save", "load", "rm"},
+	kitCommand:        {commandInspect, "ls"},
+	settingsCommand:   {"ls", commandGet, commandSet, commandUnset},
+	templateCommand:   {"ls", commandInspect},
 	skillsCommand:     {"ls", commandList, commandImport, "rm", commandRemove},
 }
 
@@ -262,7 +262,8 @@ func flagsTakingValue(flags []string) []string {
 		nameFlag: true, imageFlag: true, templateShort: true, templateFlag: true,
 		publishShort: true, publishFlag: true, allowFlag: true, denyFlag: true,
 		cpusFlag: true, memoryShort: true, memoryFlag: true, envShort: true, envFlag: true,
-		envFileFlag: true, "--workspace": true, "--idempotency-key": true,
+		envFileFlag: true, "--idempotency-key": true, policyProfileFlag: true,
+		kitFlag: true, denyWriteFlag: true, protocolFlag: true, logTypeFlag: true,
 		"-w": true, workdirFlag: true, "-u": true, userFlag: true,
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
 		usernameFlag: true, registryFlag: true, sandboxFlag: true,

@@ -51,7 +51,7 @@ func (r *Runner) template(args []string) int {
 	case helpCommand, helpShort, helpFlag:
 		_, _ = fmt.Fprint(r.Out, templateUsage)
 		return 0
-	case "ls", commandList:
+	case "ls":
 		return r.templateList(args[1:])
 	case commandInspect:
 		return r.templateInspect(args[1:])

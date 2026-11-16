@@ -34,14 +34,14 @@ func TestCreatePassesMultipleWorkspaces(t *testing.T) {
 	sandbox := &recordingCreateSandbox{}
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
-	if code := runner.Run(context.Background(), []string{"create", "--workspace", first, "--workspace", second + ":ro", "multi"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"create", "shell", first, second + ":ro"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 	if len(sandbox.request.Workspaces) != 2 || sandbox.request.Workspaces[0].ReadOnly || !sandbox.request.Workspaces[1].ReadOnly {
 		t.Fatalf("request=%+v", sandbox.request)
 	}
 	if sandbox.request.Workspace != first {
-		t.Fatalf("compat workspace=%q", sandbox.request.Workspace)
+		t.Fatalf("primary workspace=%q", sandbox.request.Workspace)
 	}
 }
 
@@ -51,7 +51,7 @@ func TestCreateRejectsMissingWorkspace(t *testing.T) {
 		called = true
 		return fakeClient{}, nil
 	}}
-	if code := runner.Run(context.Background(), []string{"create", "--workspace", "/definitely/not/here", "dev"}); code != 2 || called {
+	if code := runner.Run(context.Background(), []string{"create", "shell", "/definitely/not/here"}); code != 2 || called {
 		t.Fatalf("exit=%d client-called=%t", code, called)
 	}
 	if !strings.Contains(runner.Err.(*bytes.Buffer).String(), "workspace") {

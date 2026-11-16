@@ -7,7 +7,7 @@ Status: pre-alpha.
 
 ## Import path migration
 
-The canonical Go module path is now `github.com/rheic/sandboxes-cli` (previously `github.com/quoiner/sandboxes-cli`). Update imports and `go.mod` requirements when moving to a release that includes this change. The old module path is not kept as a compatibility alias.
+The canonical Go module path is now `github.com/rheic/sandboxes-cli` (previously `github.com/quoiner/sandboxes-cli`). Update imports and `go.mod` requirements when moving to a release that includes this change. The old module path is not kept as a compatibility alias. Rheic reads settings only from `~/.config/rheic/settings.toml` (or `$XDG_CONFIG_HOME/rheic/settings.toml`) and uses its own `com.rheic.*` keychain services; no legacy brand settings or keychain paths are consulted.
 
 Command-line and terminal client. Uses sandboxes-go-sdk for sandbox operations
 and the sandboxes-api contract directly for the read-only organization policy
@@ -179,9 +179,8 @@ host component is missing.
 
 
 `rsbx create` mirrors the Docker grammar `create AGENT [PATH...]` with optional
-`--name NAME`; a missing PATH creates a mountless sandbox, and PATHs accept the
-`:ro` suffix. The legacy `create NAME` and repeated `--workspace` forms remain
-supported. `rsbx run` creates a sandbox (or reuses `--name`), starts it if needed, and
+`--name NAME`; AGENT is required, a missing PATH creates a mountless sandbox,
+and PATHs accept the `:ro` suffix. `rsbx run` creates a sandbox (or reuses `--name`), starts it if needed, and
 attaches an interactive shell. Without `--name`, the name is
 `<agent>-<workspace-basename>`, using the current directory when PATH is
 omitted; it is reused only when the agent, image, and workspaces match.
@@ -213,10 +212,11 @@ lists the stored bindings; `ports --publish ...` / `--unpublish ...` change them
 live; omitting `HOST_PORT` allocates an ephemeral host port on the selected
 loopback IP.
 `--allow-network CIDR[:PORT]` and `--deny-network CIDR[:PORT]` (optional `udp:`
-prefix) add create-time IPv4 egress rules; the default remains deny.
-`--policy-profile deny-all|balanced|sbx-compat` selects an egress preset
-(balanced: 80/443 + DNS; sbx-compat: all IPv4 network); the global default is
-`deny-all` and settings can change it. `rsbx policy ls [SANDBOX]` lists global
+prefix) add create-time IPv4 egress rules.
+`--policy-profile allow-all|balanced|deny-all|sbx-compat` selects an egress
+preset (balanced: 80/443 + DNS; allow-all and its sbx-compat alias: all IPv4
+network); the global default is `allow-all`, matching the Docker sbx baseline,
+and settings can change it. `rsbx policy ls [SANDBOX]` lists global
 and sandbox rules. `--format json|yaml` emits Docker `sbx`'s
 `{"rules":[...]}` schema with rule id, name, policy id, scope, applies-to,
 resource type, decision, resources, origin, status, provenance and actions;
@@ -234,8 +234,11 @@ upstream and resolve only allowlisted names; a domain rule is enforced after a
 DNS answer is bound to its IPs. `policy check network` evaluates CIDR or domain
 targets (exit 0 allow, 1 deny). `check network --json|--format yaml` emits
 sbx's verdict fields (`action`, `allowed`, `context`, `governance`,
-`resource_type`, `resource_value`, `target`, `type`). `reset`, `refresh`,
-approvals, HTTP methods and filesystem rules are not implemented. TCP and UDP are supported with explicit
+`resource_type`, `resource_value`, `target`, `type`). `policy refresh` and
+`policy reset` are implemented, and `policy check filesystem` evaluates
+workspace paths. Approval-gated operations are not implemented, and HTTP
+method/path/query conditions are not exposed by the `rsbx` policy surface yet
+(the gateway policy layer validates them). TCP and UDP are supported with explicit
 or ephemeral host ports; an occupied host port is rejected at create and
 dynamic updates reconcile gvproxy's forwarders without restarting the VM.
 Loopback IPv4/IPv6 bindings are supported; public bindings are rejected.

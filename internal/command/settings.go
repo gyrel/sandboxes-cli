@@ -84,7 +84,7 @@ func (r *Runner) settings(args []string) int {
 	case helpCommand, helpShort, helpFlag:
 		_, _ = fmt.Fprint(r.Out, settingsUsage)
 		return 0
-	case "ls", commandList:
+	case "ls":
 		return r.settingsList(args[1:])
 	case commandGet:
 		return r.settingsGet(args[1:])
@@ -446,10 +446,10 @@ func applyTypedSetting(values *settings.Values, key, value string) (bool, error)
 		values.DNSUpstream = value
 	case "policy.profile":
 		switch value {
-		case "", "deny-all", "balanced", "sbx-compat":
+		case "", "allow-all", "deny-all", "balanced", "sbx-compat":
 			values.DefaultPolicyProfile = value
 		default:
-			return true, errors.New("policy.profile must be deny-all, balanced or sbx-compat")
+			return true, errors.New("policy.profile must be allow-all, deny-all, balanced or sbx-compat")
 		}
 	case "defaults.cpus":
 		parsed, err := parseSettingUint(value, 0, 64)

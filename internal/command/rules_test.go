@@ -41,7 +41,7 @@ func TestCreatePassesNetworkRules(t *testing.T) {
 	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
 	if code := runner.Run(context.Background(), []string{
 		"create", "--allow-network", "10.0.0.0/8:443", "--allow-network", "0.0.0.0/0:80",
-		"--deny-network", "udp:10.1.0.0/16:53", "dev",
+		"--deny-network", "udp:10.1.0.0/16:53", "shell",
 	}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}

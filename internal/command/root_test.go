@@ -28,6 +28,18 @@ func TestUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestUndocumentedTopLevelAliasesAreRejected(t *testing.T) {
+	for _, name := range []string{"list", "delete", "secrets"} {
+		var out bytes.Buffer
+		if code := Run(context.Background(), []string{name}, &out, &out); code != 2 {
+			t.Fatalf("%s: exit=%d output=%q", name, code, out.String())
+		}
+		if !strings.Contains(out.String(), "unknown command") {
+			t.Fatalf("%s: output=%q", name, out.String())
+		}
+	}
+}
+
 func TestCreateUsesSDK(t *testing.T) {
 	var out bytes.Buffer
 	runner := &Runner{
@@ -36,7 +48,7 @@ func TestCreateUsesSDK(t *testing.T) {
 		Socket:    "unused",
 		NewClient: func(string) (sdk.Client, error) { return fakeClient{}, nil },
 	}
-	if code := runner.Run(context.Background(), []string{"create", "dev"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"create", "--name", "dev", "shell"}); code != 0 {
 		t.Fatalf("exit code %d, output %s", code, out.String())
 	}
 	if !strings.Contains(out.String(), "SANDBOX") || !strings.Contains(out.String(), "Created sandbox dev") {
@@ -697,16 +709,14 @@ func TestSecretRequiresExplicitRegistry(t *testing.T) {
 	}
 }
 
-func TestSecretHelpAndAlias(t *testing.T) {
-	for _, name := range []string{"secret", "secrets"} {
-		var out bytes.Buffer
-		runner := &Runner{Out: &out, Err: &out}
-		if code := runner.Run(context.Background(), []string{name, "--help"}); code != 0 {
-			t.Fatalf("%s --help: exit=%d, output=%q", name, code, out.String())
-		}
-		if !strings.Contains(out.String(), "service secrets and registry credentials") {
-			t.Fatalf("missing current limitation: %q", out.String())
-		}
+func TestSecretHelp(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out}
+	if code := runner.Run(context.Background(), []string{"secret", "--help"}); code != 0 {
+		t.Fatalf("secret --help: exit=%d, output=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "service secrets and registry credentials") {
+		t.Fatalf("missing current limitation: %q", out.String())
 	}
 }
 

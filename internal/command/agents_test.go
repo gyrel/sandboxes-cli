@@ -17,9 +17,6 @@ func TestKimiAgentSpec(t *testing.T) {
 	if err := validateRunAgent("kimi"); err != nil {
 		t.Fatalf("kimi rejected: %v", err)
 	}
-	if !isAgentName("kimi") {
-		t.Fatal("kimi is not an agent name")
-	}
 }
 
 func TestCreateKimiUsesDefaultImage(t *testing.T) {
@@ -75,9 +72,6 @@ func TestAgentRegistryPreviewAndUnsupported(t *testing.T) {
 	}
 	if err := validateRunAgent("missing"); err == nil {
 		t.Fatal("unknown agent accepted")
-	}
-	if !isAgentName("kimi") || !isAgentName("cline") || isAgentName("missing") {
-		t.Fatal("isAgentName registry mismatch")
 	}
 }
 

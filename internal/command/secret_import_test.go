@@ -19,6 +19,7 @@ func TestSecretImportHelpDocumentsBehaviorAndOAuthScope(t *testing.T) {
 	for _, want := range []string{
 		"--all adds new values without prompts and leaves existing ones intact.",
 		"--force saves every detected value, replacing existing entries too.",
+		"Without --force, importing an existing value fails",
 		"A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.",
 		"--dry-run never writes",
 	} {
@@ -157,7 +158,7 @@ func TestSecretImportOverwriteModesMatchDockerPromptRules(t *testing.T) {
 	t.Setenv("GH_TOKEN", "synthetic-token")
 	existing := []sdk.ServiceSecret{{Service: "github", Scope: sdk.SecretScopeGlobal}}
 
-	t.Run("interactive confirmation overwrites", func(t *testing.T) {
+	t.Run("existing value without force is refused", func(t *testing.T) {
 		secrets := &fakeServiceSecrets{items: existing}
 		client := fakeClient{secrets: secrets}
 		var output bytes.Buffer
@@ -165,11 +166,28 @@ func TestSecretImportOverwriteModesMatchDockerPromptRules(t *testing.T) {
 			Out: &output, Err: &output, In: strings.NewReader("y\n"),
 			NewClient: func(string) (sdk.Client, error) { return client, nil },
 		}
-		if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 0 {
+		if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 1 {
 			t.Fatalf("exit=%d output=%q", code, output.String())
 		}
-		if secrets.setCalls != 1 || secrets.createCalls != 0 || !strings.Contains(output.String(), "Overwrite github from GH_TOKEN") {
-			t.Fatalf("interactive overwrite mismatch: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
+		want := "error: service secret already exists for \"github\" in scope \"(global)\"; pass --force to overwrite"
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("missing actionable duplicate error: %q", output.String())
+		}
+		if secrets.setCalls != 0 || secrets.createCalls != 0 {
+			t.Fatalf("existing value was overwritten without --force: set=%d create=%d", secrets.setCalls, secrets.createCalls)
+		}
+	})
+
+	t.Run("force overwrites existing value", func(t *testing.T) {
+		secrets := &fakeServiceSecrets{items: existing}
+		client := fakeClient{secrets: secrets}
+		var output bytes.Buffer
+		runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+		if code := runner.Run(context.Background(), []string{"secret", "import", "github", "--force"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, output.String())
+		}
+		if secrets.setCalls != 1 || secrets.createCalls != 0 || string(secrets.value) != "synthetic-token" {
+			t.Fatalf("--force did not overwrite existing value: set=%d create=%d value=%q", secrets.setCalls, secrets.createCalls, secrets.value)
 		}
 	})
 
@@ -183,28 +201,6 @@ func TestSecretImportOverwriteModesMatchDockerPromptRules(t *testing.T) {
 		}
 		if secrets.setCalls != 0 || secrets.createCalls != 0 || !strings.Contains(output.String(), "already stored") {
 			t.Fatalf("--all did not skip existing entry: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
-		}
-	})
-
-	t.Run("negative confirmation leaves existing entry untouched", func(t *testing.T) {
-		secrets := &fakeServiceSecrets{items: existing}
-		client := fakeClient{secrets: secrets}
-		var output bytes.Buffer
-		runner := &Runner{
-			Out: &output, Err: &output, In: strings.NewReader("n\n"),
-			NewClient: func(string) (sdk.Client, error) { return client, nil },
-		}
-		if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 0 {
-			t.Fatalf("exit=%d output=%q", code, output.String())
-		}
-		if secrets.setCalls != 0 || secrets.createCalls != 0 || !strings.Contains(output.String(), "Overwrite github from GH_TOKEN") {
-			t.Fatalf("negative control modified or did not prompt for existing entry: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
-		}
-		if !strings.Contains(output.String(), "0 secrets imported · 1 skipped") {
-			t.Fatalf("missing imported/skipped summary: %q", output.String())
-		}
-		if strings.Contains(output.String(), "no environment variable found") {
-			t.Fatalf("declined import was reported as a missing environment variable: %q", output.String())
 		}
 	})
 }

@@ -201,16 +201,16 @@ func TestSecretRemoveOpenAIReportsPartialOAuthRevocationFailure(t *testing.T) {
 }
 
 func TestNamedServiceRemovalChecksInventoryBeforeConfirmation(t *testing.T) {
-	t.Run("missing credential reports missing target", func(t *testing.T) {
+	t.Run("missing credential succeeds with one line", func(t *testing.T) {
 		var out bytes.Buffer
 		secrets := &fakeServiceSecrets{}
 		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{secrets: secrets}, nil
 		}}
-		if code := runner.Run(context.Background(), []string{"secret", "rm", "github", "--global"}); code != 1 {
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "github", "--force"}); code != 0 {
 			t.Fatalf("exit=%d output=%q", code, out.String())
 		}
-		want := "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry\nerror: no secret found for service \"github\" in scope \"(global)\"\n"
+		want := "No service credentials stored for \"github\" in scope \"(global)\"\n"
 		if out.String() != want || secrets.removeCalls != 0 {
 			t.Fatalf("output=%q removals=%d, want %q and no mutation", out.String(), secrets.removeCalls, want)
 		}
@@ -236,7 +236,7 @@ func TestNamedServiceRemovalChecksInventoryBeforeConfirmation(t *testing.T) {
 		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{secrets: &fakeServiceSecrets{}}, nil
 		}}
-		if code := runner.Run(context.Background(), []string{"secret", "rm", sandboxName, "github"}); code != 1 {
+		if code := runner.Run(context.Background(), []string{"secret", "rm", sandboxName, "github"}); code != 0 {
 			t.Fatalf("exit=%d output=%q", code, out.String())
 		}
 		if strings.Contains(out.String(), "\x1b") || !strings.Contains(out.String(), "--sandbox sandbox�[2J") {
@@ -381,7 +381,7 @@ func TestServiceSecretSetRequiresForceToOverwriteTokenValue(t *testing.T) {
 		args []string
 		want int
 	}{
-		{name: "without force", args: []string{"secret", "set", "openai", "--token", "replacement"}, want: 2},
+		{name: "without force", args: []string{"secret", "set", "openai", "--token", "replacement"}, want: 1},
 		{name: "with force", args: []string{"secret", "set", "openai", "--token", "replacement", "-f"}, want: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -393,8 +393,14 @@ func TestServiceSecretSetRequiresForceToOverwriteTokenValue(t *testing.T) {
 			if code := runner.Run(context.Background(), test.args); code != test.want {
 				t.Fatalf("exit=%d output=%q want=%d", code, out.String(), test.want)
 			}
-			if test.want == 2 && secrets.value != nil {
-				t.Fatalf("secret was written without --force: %q", secrets.value)
+			if test.want == 1 {
+				if secrets.value != nil {
+					t.Fatalf("secret was written without --force: %q", secrets.value)
+				}
+				want := "error: service secret already exists for \"openai\" in scope \"(global)\"; pass --force to overwrite"
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("output=%q does not contain %q", out.String(), want)
+				}
 			}
 			if test.want == 0 && string(secrets.value) != "replacement" {
 				t.Fatalf("secret was not overwritten: %q", secrets.value)

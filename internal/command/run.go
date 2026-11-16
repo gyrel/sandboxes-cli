@@ -118,6 +118,7 @@ Examples:
 	globalFlag        = "--global"
 	registryFlag      = "--registry"
 	globalScopeLabel  = "(global)"
+	sdkAlreadyExists  = "already_exists"
 	userFlag          = "--user"
 	commandFlag       = "--command"
 	mcpCommand        = "mcp"

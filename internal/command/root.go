@@ -711,7 +711,8 @@ Passing these options to Rheic currently fails closed.
 
 func (r *Runner) secretSetHelp() int {
 	const usage = `Description:
-  Create or update a service secret or registry credential.
+  Create a service secret or registry credential. Existing credentials are not
+  replaced unless --force is passed, in every scope.
 
 Available services:
   anthropic, copilot, cursor, devin, droid, github, google, groq, mistral,
@@ -722,15 +723,17 @@ Usage:
 
 When SERVICE is omitted, choose it with the arrow keys and Enter. Press q or
 Escape to cancel. Values are stored in the host credential vault. Without
---force, an existing value is never overwritten. For scripts, pass SERVICE
-explicitly and provide the value with --token or standard input.
+--force, an existing value is never overwritten and the command fails with an
+error naming the service and scope. For scripts, pass SERVICE explicitly and
+provide the value with --token or standard input.
 
 Registry credentials
   Use --registry to store a registry credential. Without --sandbox or
   --all-sandboxes, it is host-only and is not injected into sandboxes.
   --all-sandboxes enables brokered use in all sandboxes; --sandbox scopes it
   to one sandbox. Credentials are provided to the host broker, not guest env.
-  Cross-host registry authentication endpoints are not supported yet.
+  An existing credential in the same scope is not replaced unless --force is
+  passed. Cross-host registry authentication endpoints are not supported yet.
 
 Examples:
   rsbx secret set github
@@ -755,7 +758,7 @@ Flags:
       --username string Registry username
       --password-stdin Read registry password or token from stdin
       --all-sandboxes   Enable brokered registry use in every sandbox
-  -f, --force           Overwrite an existing secret
+  -f, --force           Overwrite an existing secret or registry credential
   -h, --help            Show this help
 `
 	if _, err := io.WriteString(r.Out, usage); err != nil {
@@ -767,7 +770,8 @@ Flags:
 
 func (r *Runner) secretRemoveHelp() int {
 	const usage = `Description:
-  Remove a service or registry credential.
+  Remove a service or registry credential. Removing a credential that is not
+  stored prints one message and succeeds, so repeated cleanup is safe.
 
 Usage:
   rsbx secret rm [SERVICE] [flags]
@@ -1107,9 +1111,8 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 		return 1
 	}
 	if !registryCredentialPresent(items, *registry, *sandboxName, scopes) {
-		scopeName := registryRemovalScopeName(*sandboxName, *allSandboxes)
-		_, _ = fmt.Fprintf(r.Err, "error: no registry secret found for %q in scope %q\n", *registry, scopeName)
-		return 1
+		_, _ = fmt.Fprint(r.Out, registryRemovalAbsentMessage(*registry, *sandboxName, scopes))
+		return 0
 	}
 	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("registry credentials for %s", *registry), *force)
 	if code != 0 {
@@ -1135,15 +1138,22 @@ func registryCredentialPresent(items []sdk.RegistryCredentialSummary, registry, 
 	return false
 }
 
-func registryRemovalScopeName(sandboxName string, allSandboxes bool) string {
-	if sandboxName != "" {
-		return sandboxName
+func registryRemovalAbsentMessage(registry, sandboxName string, scopes []sdk.RegistryCredentialScope) string {
+	if len(scopes) > 1 && sandboxName == "" {
+		return fmt.Sprintf("No registry credentials stored for %q\n", sanitizeTerminalText(registry))
 	}
-	if allSandboxes {
-		return "(all-sandboxes)"
+	labels := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		labels = append(labels, registryScopeDisplay(scope, sandboxName))
 	}
-	// Both explicit global and default registry removal use Docker's global label.
-	return globalScopeLabel
+	return fmt.Sprintf("No registry credentials stored for %q (%s)\n", sanitizeTerminalText(registry), strings.Join(labels, ", "))
+}
+
+func registryScopeDisplay(scope sdk.RegistryCredentialScope, sandboxName string) string {
+	if scope == sdk.RegistryScopeSandbox && sandboxName != "" {
+		return fmt.Sprintf("%s %s", scope, sanitizeTerminalText(sandboxName))
+	}
+	return string(scope)
 }
 
 func registryRemovalArgumentError(registry string, positionals int, sandboxName string, global, allSandboxes bool) (string, int) {
@@ -1196,12 +1206,14 @@ func (r *Runner) removeRegistryScopes(ctx context.Context, client sdk.Client, re
 			}
 			return 1
 		}
-		removedAny = removedAny || response.Removed
-		status := "No registry credentials stored"
-		if response.Removed {
-			status = "Removed registry credentials"
+		if response == nil || !response.Removed {
+			continue
 		}
-		_, _ = fmt.Fprintf(r.Out, "%s for %s (%s)\n", status, sanitizeTerminalText(registry), scope)
+		removedAny = true
+		_, _ = fmt.Fprintf(r.Out, "Removed registry credentials for %s (%s)\n", sanitizeTerminalText(registry), registryScopeDisplay(scope, sandboxName))
+	}
+	if !removedAny {
+		_, _ = fmt.Fprint(r.Out, registryRemovalAbsentMessage(registry, sandboxName, scopes))
 	}
 	return 0
 }
@@ -1215,6 +1227,8 @@ func (r *Runner) registrySet(ctx context.Context, args []string) int {
 	passwordStdin := fs.Bool("password-stdin", false, "read password from stdin")
 	allSandboxes := fs.Bool("all-sandboxes", false, "allow future brokered use in all sandboxes")
 	sandboxName := fs.String("sandbox", "", "allow future brokered use in one sandbox")
+	force := fs.Bool("force", false, "overwrite an existing registry credential")
+	fs.BoolVar(force, "f", false, "overwrite an existing registry credential")
 	if code, done := r.parseFlagsOrFail("secret set", fs, args); done {
 		return code
 	}
@@ -1226,28 +1240,10 @@ func (r *Runner) registrySet(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Err, "--all-sandboxes and --sandbox cannot be combined")
 		return 2
 	}
-	if *username == "" {
-		if *passwordStdin {
-			_, _ = fmt.Fprintln(r.Err, "--username is required with --password-stdin")
-			return 2
-		}
-		if _, err := fmt.Fprint(r.Err, "Username: "); err != nil {
-			r.error(err)
-			return 1
-		}
-		line, err := bufio.NewReader(r.In).ReadString('\n')
-		if err != nil && line == "" {
-			r.error(fmt.Errorf("read username: %w", err))
-			return 1
-		}
-		*username = strings.TrimSpace(line)
-	}
-	password, err := r.readLoginPassword(*passwordStdin)
-	if err != nil {
-		r.error(err)
+	if *username == "" && *passwordStdin {
+		_, _ = fmt.Fprintln(r.Err, "--username is required with --password-stdin")
 		return 2
 	}
-	defer clear(password)
 	scope := sdk.RegistryScopeHostOnly
 	if *allSandboxes {
 		scope = sdk.RegistryScopeAllSandboxes
@@ -1260,16 +1256,90 @@ func (r *Runner) registrySet(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	if !*force {
+		if code := r.checkRegistryCredentialAbsent(ctx, client, *registry, *sandboxName, scope); code != 0 {
+			return code
+		}
+	}
+	if *username == "" {
+		if code := r.promptRegistryUsername(username); code != 0 {
+			return code
+		}
+	}
+	password, err := r.readLoginPassword(*passwordStdin)
+	if err != nil {
+		r.error(err)
+		return 2
+	}
+	defer clear(password)
+	return r.loginRegistryCredential(ctx, client, *registry, *username, password, scope, *sandboxName)
+}
+
+func (r *Runner) loginRegistryCredential(ctx context.Context, client sdk.Client, registry, username string, password []byte, scope sdk.RegistryCredentialScope, sandboxName string) int {
 	response, err := client.RegistryCredentials().Login(ctx, sdk.RegistryLoginRequest{
-		Registry: *registry, Username: *username, Password: password,
-		Scope: scope, SandboxName: *sandboxName,
+		Registry: registry, Username: username, Password: password,
+		Scope: scope, SandboxName: sandboxName,
 	})
 	if err != nil {
+		var sdkErr *sdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.Code == sdkAlreadyExists {
+			r.error(registrySecretAlreadyExistsError(registry, registrySetScopeLabel(scope, sandboxName)))
+			return 1
+		}
 		r.error(err)
 		return 1
 	}
 	_, _ = fmt.Fprintf(r.Out, "Credentials stored (not verified) in host keychain for %s as %s (%s); sandbox registry access is not enabled yet\n", response.Registry, response.Username, response.Scope)
 	return 0
+}
+
+func (r *Runner) promptRegistryUsername(username *string) int {
+	if _, err := fmt.Fprint(r.Err, "Username: "); err != nil {
+		r.error(err)
+		return 1
+	}
+	line, err := bufio.NewReader(r.In).ReadString('\n')
+	if err != nil && line == "" {
+		r.error(fmt.Errorf("read username: %w", err))
+		return 1
+	}
+	*username = strings.TrimSpace(line)
+	return 0
+}
+
+func (r *Runner) checkRegistryCredentialAbsent(ctx context.Context, client sdk.Client, registry, sandboxName string, scope sdk.RegistryCredentialScope) int {
+	lister, ok := sdk.RegistryCredentialList(client)
+	if !ok {
+		r.error(errors.New("registry credential inventory is unavailable; refusing a non-atomic overwrite"))
+		return 1
+	}
+	items, err := lister.ListRegistryCredentials(ctx)
+	if err != nil {
+		r.error(fmt.Errorf("list registry credentials before storage: %w", err))
+		return 1
+	}
+	if registryCredentialPresent(items, registry, sandboxName, []sdk.RegistryCredentialScope{scope}) {
+		r.error(registrySecretAlreadyExistsError(registry, registrySetScopeLabel(scope, sandboxName)))
+		return 1
+	}
+	return 0
+}
+
+func registrySecretAlreadyExistsError(registry, scope string) error {
+	return fmt.Errorf("error: registry secret already exists for %q in scope %q; pass --force to overwrite", registry, scope)
+}
+
+func registrySetScopeLabel(scope sdk.RegistryCredentialScope, sandboxName string) string {
+	switch scope {
+	case sdk.RegistryScopeHostOnly:
+		return "(host only)"
+	case sdk.RegistryScopeAllSandboxes:
+		return "(all sandboxes)"
+	case sdk.RegistryScopeSandbox:
+		return fmt.Sprintf("(sandbox %s)", sandboxName)
+	default:
+		return string(scope)
+	}
 }
 
 type flagParseError struct{ err error }

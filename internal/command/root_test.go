@@ -299,16 +299,16 @@ func TestRegistrySecretRemovalUsesSDK(t *testing.T) {
 }
 
 func TestRegistryRemovalChecksInventoryBeforeConfirmation(t *testing.T) {
-	t.Run("missing credential reports missing target", func(t *testing.T) {
+	t.Run("missing credential succeeds with one line", func(t *testing.T) {
 		var out bytes.Buffer
 		registry := &fakeRegistryCredentials{}
 		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{registry: registry}, nil
 		}}
-		if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "--global"}); code != 1 {
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "--global"}); code != 0 {
 			t.Fatalf("exit=%d output=%q", code, out.String())
 		}
-		want := "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry\nerror: no registry secret found for \"ghcr.io\" in scope \"(global)\"\n"
+		want := "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry\nNo registry credentials stored for \"ghcr.io\" (host-only)\n"
 		if out.String() != want || len(registry.requests) != 0 {
 			t.Fatalf("output=%q removals=%d, want %q and no mutation", out.String(), len(registry.requests), want)
 		}
@@ -500,7 +500,7 @@ func TestSecretSetHelpDocumentsInteractiveServiceChoiceAndLimits(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"secret", "set", "--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string      Use a 1Password op:// reference or AWS Secrets Manager ARN", "--command string  Run a host shell command to resolve a secret (can access host files)", "--refresh string", "--no-verify", "--show-error", "Registry credentials", "--registry string", "--password-stdin", "Cross-host registry authentication endpoints are not supported yet."} {
+	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string      Use a 1Password op:// reference or AWS Secrets Manager ARN", "--command string  Run a host shell command to resolve a secret (can access host files)", "--refresh string", "--no-verify", "--show-error", "Registry credentials", "An existing credential in the same scope is not replaced unless --force is", "--registry string", "--password-stdin", "Cross-host registry authentication endpoints are not supported yet."} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("help lacks %q: %s", expected, out.String())
 		}
@@ -877,14 +877,21 @@ func (fakeAccounts) Logout(_ context.Context, provider string) (bool, error) {
 }
 
 type fakeRegistryCredentials struct {
-	request  sdk.RegistryLoginRequest
-	password string
-	requests []sdk.RegistryLogoutRequest
-	items    []sdk.RegistryCredentialSummary
-	listErr  error
+	request    sdk.RegistryLoginRequest
+	password   string
+	loginCalls int
+	loginErr   error
+	requests   []sdk.RegistryLogoutRequest
+	logoutErr  error
+	items      []sdk.RegistryCredentialSummary
+	listErr    error
 }
 
 func (f *fakeRegistryCredentials) Login(_ context.Context, req sdk.RegistryLoginRequest) (*sdk.RegistryLoginResponse, error) {
+	f.loginCalls++
+	if f.loginErr != nil {
+		return nil, f.loginErr
+	}
 	f.password = string(req.Password)
 	f.request = req
 	return &sdk.RegistryLoginResponse{Registry: req.Registry, Username: req.Username, Scope: req.Scope, SandboxName: req.SandboxName}, nil
@@ -892,7 +899,15 @@ func (f *fakeRegistryCredentials) Login(_ context.Context, req sdk.RegistryLogin
 
 func (f *fakeRegistryCredentials) Logout(_ context.Context, req sdk.RegistryLogoutRequest) (*sdk.RegistryLogoutResponse, error) {
 	f.requests = append(f.requests, req)
-	return &sdk.RegistryLogoutResponse{Removed: req.Registry == "ghcr.io"}, nil
+	if f.logoutErr != nil {
+		return nil, f.logoutErr
+	}
+	for _, item := range f.items {
+		if item.Registry == req.Registry && item.Scope == string(req.Scope) && item.SandboxName == req.SandboxName {
+			return &sdk.RegistryLogoutResponse{Removed: true}, nil
+		}
+	}
+	return &sdk.RegistryLogoutResponse{Removed: false}, nil
 }
 
 type fakeSandbox struct{}

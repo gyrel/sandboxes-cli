@@ -10,6 +10,16 @@
 - Make help consistent for every command and subcommand: `rsbx CMD --help` and
   `rsbx help CMD` print to stdout and exit 0 instead of writing to stderr,
   printing nothing, or failing with exit 2.
+- `rsbx secret set` now refuses to overwrite an existing service secret or
+  registry credential without `-f/--force`, in every scope. The error names the
+  service or registry, the scope, and tells the user to pass `--force`.
+  `rsbx secret import` likewise requires `--force` to replace an existing
+  stored value.
+- `rsbx secret rm` now exits 0 and prints one line when the credential is not
+  stored, for both service and registry credentials. Removing a registry
+  credential no longer prints a second misleading `(all-sandboxes)` line when
+  only one scope held the credential. Daemon and inventory failures still
+  exit 1.
 
 ## v0.0.50 — 2026-11-15
 

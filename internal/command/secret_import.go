@@ -37,9 +37,11 @@ func (r *Runner) secretImportHelp() int {
   then use those saved credentials without exporting each variable per shell.
 
   Detected variables are shown one at a time with a Y/n prompt and a preview
-  of the value's final four characters. Replacing a saved value is explicit:
+  of the value's final four characters. Existing stored values are never
+  replaced without --force:
 
-    - Interactive mode asks before replacing an existing value.
+    - Without --force, importing an existing value fails with an error naming
+      the service and global scope.
     - --all adds new values without prompts and leaves existing ones intact.
     - --force saves every detected value, replacing existing entries too.
 
@@ -169,6 +171,10 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 			skipped++
 			continue
 		}
+		if existing[service] && !*force {
+			r.error(serviceSecretAlreadyExistsError(service, serviceCredentialScopeLabel(sdk.SecretScopeGlobal, "")))
+			return 1
+		}
 		if !*all && !*force {
 			ok, err := r.confirmSecretImport(input, service, name, value, existing[service])
 			if err != nil {
@@ -181,7 +187,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 			}
 		}
 		var err error
-		if *force || existing[service] {
+		if *force {
 			_, err = secretStore.Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
 		} else {
 			creator, ok := sdk.SecretCreation(client)

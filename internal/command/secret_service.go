@@ -176,6 +176,11 @@ func (r *Runner) storeServiceSecretSource(ctx context.Context, service, sandboxN
 		OPAccount: opAccount, AWSProfile: awsProfile,
 	}, force)
 	if err != nil {
+		var sdkErr *sdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.Code == sdkAlreadyExists {
+			r.error(serviceSecretAlreadyExistsError(service, serviceCredentialScopeLabel(scope, sandboxName)))
+			return 1
+		}
 		r.error(err)
 		return 1
 	}
@@ -237,11 +242,12 @@ func (r *Runner) storeServiceSecret(ctx context.Context, service, sandboxName, t
 		summary, err = creator.Create(ctx, service, scope, sandboxName, value)
 	}
 	if err != nil {
-		r.error(err)
 		var sdkErr *sdk.Error
-		if errors.As(err, &sdkErr) && sdkErr.Code == "already_exists" {
-			return 2
+		if errors.As(err, &sdkErr) && sdkErr.Code == sdkAlreadyExists {
+			r.error(serviceSecretAlreadyExistsError(service, serviceCredentialScopeLabel(scope, sandboxName)))
+			return 1
 		}
+		r.error(err)
 		return 1
 	}
 	displayScope := string(summary.Scope)
@@ -250,6 +256,10 @@ func (r *Runner) storeServiceSecret(ctx context.Context, service, sandboxName, t
 	}
 	_, _ = fmt.Fprintf(r.Out, "Stored %s secret (%s) in host keychain\n", summary.Service, displayScope)
 	return 0
+}
+
+func serviceSecretAlreadyExistsError(service, scope string) error {
+	return fmt.Errorf("error: service secret already exists for %q in scope %q; pass --force to overwrite", service, scope)
 }
 
 func (r *Runner) serviceSecretOAuthSet(ctx context.Context, service, sandboxName, token, ref, command string) int {
@@ -414,8 +424,8 @@ func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, san
 		return 1
 	}
 	if !present {
-		_, _ = fmt.Fprintf(r.Err, "error: no secret found for service %q in scope %q\n", service, serviceCredentialScopeLabel(scope, sandboxName))
-		return 1
+		_, _ = fmt.Fprintf(r.Out, "No service credentials stored for %q in scope %q\n", service, serviceCredentialScopeLabel(scope, sandboxName))
+		return 0
 	}
 	if servicePresent {
 		if err := writeNamedServiceRemovalCandidate(r.Out, service, serviceCredentialScopeLabel(scope, sandboxName)); err != nil {

@@ -77,4 +77,4 @@ jobs:
       - name: Start release workflow for the approved tag
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/dispatches" -f "ref=$TAG"
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/dispatches" -f "ref=main" -f "inputs[release_tag]=$TAG"

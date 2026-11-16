@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.0.52 — 2026-11-16
+
+### Changed
+
+- `ls`, `rm`, `stop` and `prune` JSON output now matches the Docker sbx shape
+  exactly: same envelope, field names, value types and `[]` for empty results.
+- `policy ls` returns `{"rules":[...]}`, `settings ls` uses typed values, and
+  `diagnose` emits the flat `checks` schema with `message`/`hint`, exiting 0
+  when the installation is merely unconfigured.
+- Help, `diagnose` and `policy ls` describe allow-all as the default egress
+  profile while `deny-all` remains selectable.
+
 ## v0.0.51 — 2026-11-16
 
 - `rsbx policy ls --format json|yaml` now emits Docker `sbx`'s policy schema:

@@ -26,6 +26,8 @@ var (
 // normalizeContractJSON replaces only random identifiers, ports and
 // timestamps. Key ordering and every other value stay byte-for-byte intact.
 func normalizeContractJSON(input string) string {
+	// Git may check the golden fixtures out with CRLF on Windows runners.
+	input = strings.ReplaceAll(input, "\r\n", "\n")
 	input = contractUUID.ReplaceAllString(input, "<ID>")
 	input = contractPrefixedID.ReplaceAllString(input, "<ID>")
 	input = contractTimestamp.ReplaceAllString(input, "<TIMESTAMP>")

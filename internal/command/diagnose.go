@@ -26,7 +26,17 @@ const (
 	diagnoseFail  = "fail"
 	diagnoseWarn  = "warn"
 	diagnoseSkip  = "skip"
-	diagnoseUsage = "usage: rsbx diagnose [--format table|json|yaml|github-issue] [--json]"
+	diagnoseUsage = `usage: rsbx diagnose [--format table|json|yaml|github-issue] [--json]
+
+Diagnose host installation, platform, storage and daemon connection checks.
+JSON and YAML use sbx's flat report schema: version, checks[] with name, status,
+message, detail and hint, plus a summary. github-issue emits a Markdown issue
+body with the JSON report embedded.
+
+Exit 0 when every check passes, warns or is skipped; unconfigured optional
+state such as a signed-out daemon is a warning. Exit 1 only when a check fails,
+for example when the daemon cannot be reached or the state directory is not
+writable.`
 
 	diagnoseFormatGitHubIssue = "github-issue"
 	diagnoseReportVersion     = "1.0"
@@ -440,8 +450,10 @@ func (r *Runner) checkAuthentication(ctx context.Context, client sdk.Client) dia
 		return check
 	}
 	if !present {
-		check.Status = diagnoseFail
-		check.Detail = "not signed in; try: rsbx login"
+		// A signed-out installation is unconfigured, not broken. sbx reports a
+		// warning and still exits 0; only hard failures make the report fail.
+		check.Status = diagnoseWarn
+		check.Detail = "not signed in; run rsbx login to enable registry and account features"
 		return check
 	}
 	check.Status = diagnosePass

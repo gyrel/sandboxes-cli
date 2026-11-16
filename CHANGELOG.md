@@ -4,6 +4,29 @@
 
 ## v0.0.51 — 2026-11-16
 
+- `rsbx policy ls --format json|yaml` now emits Docker `sbx`'s policy schema:
+  a top-level `{"rules":[...]}` object whose rules carry `id`, `name`,
+  `policy_id`, `scope`, `applies_to`, `resource_type`, `decision`, `resources`,
+  `origin`, `layer`, `status`, `editable`, `provenance`, `actions` and, for
+  scoped rules, `sandbox_id`. The previous bare array with `rule_id`,
+  `cidr`/`domain` and `port` is replaced.
+- `rsbx policy check network --json|--format yaml` now emits sbx's verdict
+  shape with `action`, `allowed`, `context`, `governance`, `resource_type`,
+  `resource_value`, `target` and `type`. The table output uses sbx's
+  `Allowed:`/`Denied:`, `Governance:` and `Context:` lines. Allow still exits 0
+  and deny still exits 1.
+- `rsbx settings ls --format json|yaml` and `rsbx settings get --json` now use
+  sbx's typed settings records: `value` and `default` are booleans, integers,
+  JSON objects/arrays, or strings as the setting type requires; `restart` is
+  renamed to `requires_restart`; and `env_var` is included for the settings
+  where sbx defines an environment override. File-backed values report source
+  `override` like sbx instead of `file`.
+- `rsbx diagnose` now treats a signed-out daemon as a warning instead of a
+  failure, so a merely unconfigured installation exits 0. The flat report uses
+  sbx's `version`, `checks[]` (`name`, `status`, `message`, `detail`, `hint`) and
+  `summary` schema, and the advertised `--format github-issue` output produces a
+  Markdown issue body with the JSON report embedded. Hard failures, such as an
+  unreachable daemon or an unwritable state directory, still exit 1.
 - Accept interspersed flags for `ports`, `policy`, `secret`, `settings`, `cp`,
   `exec`, `get`, `wait`, `agents`, `mcp`, `env`, `kit` and `template`: flags now
   work before, between and after positional arguments, and a literal `--` ends

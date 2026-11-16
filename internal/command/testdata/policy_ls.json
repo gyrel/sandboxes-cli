@@ -1,0 +1,73 @@
+{
+  "rules": [
+    {
+      "id": "rul_50fb95b4624b0e67",
+      "name": "rul_50fb95b4624b0e67",
+      "policy_id": "local-policy",
+      "scope": "sandbox:dev",
+      "applies_to": "sandbox:dev",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "10.0.0.0/8:443"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "dev",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "rul_eeabbf81db85d3c5",
+      "name": "rul_eeabbf81db85d3c5",
+      "policy_id": "local-policy",
+      "scope": "sandbox:dev",
+      "applies_to": "sandbox:dev",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "api.example.com:8443"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "dev",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "rul_d66de0147aa55362",
+      "name": "rul_d66de0147aa55362",
+      "policy_id": "local-policy",
+      "scope": "sandbox:dev",
+      "applies_to": "sandbox:dev",
+      "resource_type": "network",
+      "decision": "deny",
+      "resources": [
+        "192.0.2.0/24:53"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "dev",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:udp"
+      ]
+    }
+  ]
+}

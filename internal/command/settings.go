@@ -30,6 +30,11 @@ Commands:
   set KEY VALUE                   set an override (type-validated)
   unset KEY                       remove an override
 
+Machine output uses the sbx settings record: key, value, type, source, default,
+env_var (only when sbx defines the variable) and requires_restart (only when a
+daemon restart is needed). value and default keep their JSON type: booleans,
+integers, objects/arrays for json settings, and strings otherwise.
+
 Local runtime keys: dns.upstream (restart required), policy.profile,
 defaults.cpus, defaults.memory_mib, sandbox.disk.dockerVolume,
 mcp.remote.allowedHosts (restart required).
@@ -37,11 +42,13 @@ Unknown keys are rejected.
 `
 	settingsListUsage = `usage: rsbx settings ls [--format table|json|yaml] [--json]
 
-List the full setting catalog and the effective source of each value.
+List the full setting catalog and the effective source of each value. JSON and
+YAML records use sbx's field names and keep booleans and integers typed.
 `
 	settingsGetUsage = `usage: rsbx settings get KEY [--json] [--format table|json|yaml]
 
-Print one setting value or its full catalog record.
+Print one setting value or its full catalog record. --json and --format json
+emit the same typed record as settings ls; without them the scalar is printed.
 `
 	settingsSetUsage = `usage: rsbx settings set KEY VALUE
 
@@ -55,14 +62,17 @@ Remove a setting override and restore the built-in default.
 	settingMCPRemoteHosts = "mcp.remote.allowedHosts"
 )
 
+// settingOutput mirrors the sbx settings record. Field order matches sbx's
+// alphabetically ordered JSON, and value/default are typed rather than strings.
 type settingOutput struct {
-	Key         string `json:"key" yaml:"key"`
-	Value       string `json:"value" yaml:"value"`
-	Type        string `json:"type" yaml:"type"`
-	Source      string `json:"source" yaml:"source"`
-	Default     string `json:"default" yaml:"default"`
-	Restart     bool   `json:"restart" yaml:"restart"`
-	Description string `json:"description" yaml:"description"`
+	Default         any    `json:"default" yaml:"default"`
+	Description     string `json:"description" yaml:"description"`
+	EnvVar          string `json:"env_var,omitempty" yaml:"env_var,omitempty"`
+	Key             string `json:"key" yaml:"key"`
+	RequiresRestart bool   `json:"requires_restart,omitempty" yaml:"requires_restart,omitempty"`
+	Source          string `json:"source" yaml:"source"`
+	Type            string `json:"type" yaml:"type"`
+	Value           any    `json:"value" yaml:"value"`
 }
 
 func (r *Runner) settings(args []string) int {
@@ -129,7 +139,7 @@ func (r *Runner) settingsList(args []string) int {
 		tw := tabwriter.NewWriter(r.Out, 0, 4, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "KEY\tVALUE\tTYPE\tSOURCE\tRESTART\tDESCRIPTION")
 		for _, row := range rows {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", row.Key, row.Value, row.Type, row.Source, boolMarker(row.Restart), row.Description)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", row.Key, formatSettingValue(row.Value), row.Type, row.Source, boolMarker(row.RequiresRestart), row.Description)
 		}
 		if err := tw.Flush(); err != nil {
 			r.error(err)
@@ -195,12 +205,76 @@ func settingValue(values settings.Values, entry settings.Entry) (string, bool) {
 func settingRow(entry settings.Entry, value string, overridden bool) settingOutput {
 	source := "default"
 	if overridden {
-		source = "file"
+		source = "override"
 	} else {
 		value = entry.Default
 	}
-	return settingOutput{Key: entry.Key, Value: value, Type: entry.Type, Source: source,
-		Default: entry.Default, Restart: entry.Restart, Description: entry.Description}
+	return settingOutput{
+		Default:         settingTypedValue(entry.Type, entry.Default),
+		Description:     entry.Description,
+		EnvVar:          entry.EnvVar,
+		Key:             entry.Key,
+		RequiresRestart: entry.Restart,
+		Source:          source,
+		Type:            entry.Type,
+		Value:           settingTypedValue(entry.Type, value),
+	}
+}
+
+// settingTypedValue converts the catalog's textual representation into the
+// type sbx uses on the wire. String settings stay strings; json settings become
+// objects, arrays, or scalars; empty integer defaults become 0.
+func settingTypedValue(kind, text string) any {
+	switch kind {
+	case "bool":
+		parsed, err := strconv.ParseBool(text)
+		if err != nil {
+			return false
+		}
+		return parsed
+	case "int":
+		parsed, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			return int64(0)
+		}
+		return parsed
+	case listFormatJSON:
+		if text == "" {
+			return nil
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+			return text
+		}
+		return parsed
+	default:
+		return text
+	}
+}
+
+// formatSettingValue renders a typed value for the human table and for
+// settings get without --json.
+func formatSettingValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case bool:
+		return strconv.FormatBool(typed)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(typed), 10)
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(data)
+	}
 }
 
 func uintString(value uint32) string {
@@ -241,7 +315,7 @@ func (r *Runner) settingsGet(args []string) int {
 		return r.printSettingRecord(row, listFormatJSON)
 	}
 	if *format == "" {
-		_, _ = fmt.Fprintln(r.Out, row.Value)
+		_, _ = fmt.Fprintln(r.Out, formatSettingValue(row.Value))
 		return 0
 	}
 	selected, err := resolveOperationFormat(*format, false)

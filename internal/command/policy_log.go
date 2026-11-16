@@ -260,7 +260,7 @@ func (r *Runner) inspectRuleByID(ctx context.Context, client sdk.Client, selecto
 	if err != nil {
 		return nil, false
 	}
-	globalRules := policyRulesFrom("global", globalAllow, globalDeny)
+	globalRules := policyRulesFrom(policyGlobalScope, globalAllow, globalDeny)
 	for i := range globalRules {
 		if globalRules[i].RuleID == selector {
 			return []policyRuleOutput{globalRules[i]}, true

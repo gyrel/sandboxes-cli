@@ -181,17 +181,48 @@ func TestDiagnoseFailsWhenDaemonUnreachable(t *testing.T) {
 	}
 }
 
-func TestDiagnoseFailsWhenNotSignedIn(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "sandboxd.sock")
-	if err := os.WriteFile(socket, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runner, out := diagnoseRunner(t, socket, diagnoseSandbox{}, fakeAccountStatus{statuses: map[string]bool{"docker": false}}, nil)
-	if code := runner.Run(context.Background(), []string{"diagnose", "--format", "table"}); code != 1 {
-		t.Fatalf("exit=%d output=%q", code, out.String())
-	}
-	if !strings.Contains(out.String(), "✗ Authentication") || !strings.Contains(out.String(), "rsbx login") {
-		t.Fatalf("authentication failure not reported: %s", out.String())
+func TestDiagnoseExitStatusInBothAuthenticationStates(t *testing.T) {
+	originalVirtualizationSupport := hostVirtualizationSupport
+	t.Cleanup(func() { hostVirtualizationSupport = originalVirtualizationSupport })
+	hostVirtualizationSupport = func() (bool, string) { return true, "test hypervisor present" }
+	t.Setenv("SSL_CERT_FILE", "")
+
+	for _, tc := range []struct {
+		name       string
+		signedIn   bool
+		wantMark   string
+		wantStatus string
+	}{
+		{name: "signed in", signedIn: true, wantMark: "✓ Authentication", wantStatus: diagnosePass},
+		{name: "signed out", signedIn: false, wantMark: "! Authentication", wantStatus: diagnoseWarn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			socket := filepath.Join(t.TempDir(), "sandboxd.sock")
+			if err := os.WriteFile(socket, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runner, out := diagnoseRunner(t, socket, diagnoseSandbox{}, fakeAccountStatus{statuses: map[string]bool{"docker": tc.signedIn}}, nil)
+			if code := runner.Run(context.Background(), []string{"diagnose", "--format", "table"}); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, out.String())
+			}
+			if !strings.Contains(out.String(), tc.wantMark) {
+				t.Fatalf("output lacks %q: %s", tc.wantMark, out.String())
+			}
+			var flat diagnoseFlatReport
+			out.Reset()
+			if code := runner.Run(context.Background(), []string{"diagnose", "--json"}); code != 0 {
+				t.Fatalf("json exit=%d output=%q", code, out.String())
+			}
+			if err := json.Unmarshal(out.Bytes(), &flat); err != nil {
+				t.Fatalf("json %q: %v", out.String(), err)
+			}
+			if check := findFlatDiagnoseCheck(t, flat, "Authentication"); check.Status != tc.wantStatus {
+				t.Fatalf("authentication = %#v", check)
+			}
+			if flat.Summary.Fail != 0 {
+				t.Fatalf("summary=%#v", flat.Summary)
+			}
+		})
 	}
 }
 

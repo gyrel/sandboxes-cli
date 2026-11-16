@@ -43,17 +43,41 @@ func TestSettingsListsFullCatalogWithDefaults(t *testing.T) {
 	for _, row := range rows {
 		byKey[row.Key] = row
 	}
-	if row := byKey["proxy.daemon"]; row.Source != "default" || row.Value != "" || !row.Restart {
+	if row := byKey["proxy.daemon"]; row.Source != "default" || row.Value != "" || !row.RequiresRestart {
 		t.Fatalf("proxy.daemon row = %+v", row)
 	}
-	if row := byKey["kit.requireSignature"]; row.Type != "bool" || row.Default != "false" {
+	if row := byKey["kit.requireSignature"]; row.Type != "bool" || row.Default != false || row.Value != false {
 		t.Fatalf("kit.requireSignature row = %+v", row)
+	}
+	if row := byKey["daemon.log.maxBackups"]; row.Value != float64(3) || row.Default != float64(3) {
+		t.Fatalf("daemon.log.maxBackups typed values = %+v", row)
 	}
 	if row := byKey["sandbox.disk.dockerVolume"]; row.Default != "10g" {
 		t.Fatalf("docker volume row = %+v", row)
 	}
-	if row := byKey["mcp.remote.allowedHosts"]; !row.Restart || row.Source != "default" {
+	if row := byKey["mcp.remote.allowedHosts"]; !row.RequiresRestart || row.Source != "default" {
 		t.Fatalf("remote MCP host allowlist row = %+v", row)
+	}
+	if row := byKey["clipboard.imagePaste"]; row.EnvVar != "DOCKER_SANDBOXES_CLIPBOARD_IMAGE_PASTE" {
+		t.Fatalf("clipboard env var row = %+v", row)
+	}
+	if row := byKey["browser.enabled"]; row.EnvVar != "" {
+		t.Fatalf("browser.enabled must not invent an env var: %+v", row)
+	}
+	var rawRows []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &rawRows); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	rawByKey := map[string]map[string]any{}
+	for _, row := range rawRows {
+		key, _ := row["key"].(string)
+		rawByKey[key] = row
+	}
+	if _, ok := rawByKey["browser.enabled"]["requires_restart"]; ok {
+		t.Fatalf("false requires_restart must be omitted: %v", rawByKey["browser.enabled"])
+	}
+	if restart, ok := rawByKey["proxy.daemon"]["requires_restart"].(bool); !ok || !restart {
+		t.Fatalf("proxy.daemon requires_restart = %v", rawByKey["proxy.daemon"]["requires_restart"])
 	}
 }
 
@@ -99,7 +123,7 @@ func TestSettingsSetValidatesCatalogTypesAndPersistsExtras(t *testing.T) {
 		t.Fatalf("unset exit=%d", code)
 	}
 	out, code = runSettings(t, path, "get", "ssh.autoCreate", "--json")
-	if code != 0 || !strings.Contains(out.String(), `"source": "default"`) {
+	if code != 0 || !strings.Contains(out.String(), `"source": "default"`) || !strings.Contains(out.String(), `"value": false`) {
 		t.Fatalf("get --json exit=%d output=%q", code, out.String())
 	}
 }

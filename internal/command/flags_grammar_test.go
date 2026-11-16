@@ -234,17 +234,17 @@ func TestGetAcceptsInterspersedFlagsAndTerminator(t *testing.T) {
 		{
 			name:       "flag before arguments",
 			args:       []string{"get", "--help"},
-			wantOutput: []string{"usage: rsbx get SANDBOX"},
+			wantOutput: []string{"usage: rsbx get"},
 		},
 		{
 			name:       "flag after arguments",
 			args:       []string{"get", "one", "--help"},
-			wantOutput: []string{"usage: rsbx get SANDBOX"},
+			wantOutput: []string{"usage: rsbx get"},
 		},
 		{
 			name:       "flag between arguments",
 			args:       []string{"get", "one", "--help", "two"},
-			wantOutput: []string{"usage: rsbx get SANDBOX"},
+			wantOutput: []string{"usage: rsbx get"},
 		},
 		{
 			name:       "terminator keeps flag-like name positional",

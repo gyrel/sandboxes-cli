@@ -95,13 +95,23 @@ Examples:
   rsbx rm --force -- --literal-name
 `
 
-const getUsage = `usage: rsbx get SANDBOX
+const getUsage = `usage: rsbx get [--format table|json|yaml] [--json] SANDBOX
 
-Show one sandbox by name or ID. Use -- to end flag parsing.
+Show one sandbox by name or ID. This is a Rheic extension: Docker sbx has no
+get command. The default table output is a detailed key/value block; JSON and
+YAML use the same field set as "rsbx ls". Flags may appear before or after the
+sandbox name; use -- to end flag parsing.
 
 Examples:
   rsbx get api
+  rsbx get api --format json
+  rsbx get --json api
+  rsbx get --format yaml api
   rsbx get -- --literal-name
+
+Flags:
+      --format table|json|yaml  output format
+      --json                    output in JSON format
 `
 
 const pruneUsage = `usage: rsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
@@ -1762,7 +1772,9 @@ func applyCreateCloneMode(ctx context.Context, clone bool, workspaces []sdk.Work
 func (r *Runner) get(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("get", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = fmt.Fprint(r.Out, getUsage)
 			return 0
@@ -1771,6 +1783,11 @@ func (r *Runner) get(ctx context.Context, args []string) int {
 	}
 	if fs.NArg() != 1 {
 		_, _ = fmt.Fprint(r.Err, getUsage)
+		return 2
+	}
+	selected, err := resolveOperationFormat(*format, *jsonOutput)
+	if err != nil {
+		r.error(err)
 		return 2
 	}
 	client, err := r.client()
@@ -1789,7 +1806,10 @@ func (r *Runner) get(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	r.printSandbox(sb)
+	if err := renderSandboxDetail(r.Out, selected, sb); err != nil {
+		r.error(err)
+		return 1
+	}
 	return 0
 }
 
@@ -2092,14 +2112,17 @@ func (r *Runner) wait(ctx context.Context, args []string) int {
 
 func lifecycleUsage(name string) string {
 	verb := "Start"
+	details := ""
 	if name == stopCommand {
 		verb = "Stop"
+	} else {
+		details = "\nStart fails closed when the daemon has no runtime backend; the sandbox\nis restored to stopped instead of reporting an unusable running state.\n"
 	}
 	return fmt.Sprintf(`usage: rsbx %s [--format table|json|yaml] [--json] [flags] SANDBOX...
 
 %s one or more sandboxes. Flags may appear before, between or after sandbox
 names; use -- to end flag parsing.
-
+%s
 Examples:
   rsbx %s --format json api
   rsbx %s api --format json
@@ -2109,7 +2132,7 @@ Flags:
       --grace DURATION            stop grace period
       --format table|json|yaml    output format
       --json                      output in JSON format
-`, name, verb, name, name, name)
+`, name, verb, details, name, name, name)
 }
 
 func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int {
@@ -2184,6 +2207,11 @@ func (r *Runner) runLifecycleTarget(ctx context.Context, client sdk.Client, name
 	if op != nil && op.State == sdk.StateFailed {
 		return nil, fmt.Errorf("%s sandbox %s failed: %s", name, target, op.Error)
 	}
+	if name == startCommand {
+		if err := r.requireRuntimeForStart(ctx, client, id, target); err != nil {
+			return nil, err
+		}
+	}
 	if err := r.reconcileCloneLifecycle(ctx, client, id, name == startCommand); err != nil {
 		return nil, err
 	}
@@ -2214,16 +2242,6 @@ func (r *Runner) printOperation(op *sdk.Operation) {
 		return
 	}
 	_, _ = fmt.Fprintf(r.Out, "%s\t%s\t%s\t%s\n", op.ID, op.Kind, op.State, op.Error)
-}
-
-func (r *Runner) printSandbox(sb *sdk.Sandbox) {
-	if sb == nil {
-		_, _ = fmt.Fprintln(r.Out, "not found")
-		return
-	}
-	_, _ = fmt.Fprintf(r.Out, "id: %s\nname: %s\nstate: %s\nagent: %s\npolicy_profile: %s\ndetached: %t\nlast_used_at: %s\nimage: %s\nworkspace: %s\nworkspaces: %s\nports: %s\nallow: %s\ndeny: %s\ncpus: %d\nmemory_mib: %d\nstopped_at: %s\ngeneration: %d\ncreated: %s\n",
-		sb.ID, sb.Name, sb.State, formatAgent(sb.Agent), sb.PolicyProfile, sb.Detached, formatTime(sb.LastUsedAt), sb.Image, sb.Workspace, formatWorkspaces(sb), formatPorts(sb), formatRules(sb.Allow), formatRules(sb.Deny),
-		sb.CPUs, sb.MemoryMiB, formatTime(sb.StoppedAt), sb.Generation, formatTime(sb.CreatedAt))
 }
 
 func (r *Runner) usage() {

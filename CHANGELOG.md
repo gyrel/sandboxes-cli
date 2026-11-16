@@ -20,6 +20,17 @@
   credential no longer prints a second misleading `(all-sandboxes)` line when
   only one scope held the credential. Daemon and inventory failures still
   exit 1.
+- `rsbx start` now fails closed when the daemon has no runtime backend. The
+  daemon still persisted a `running` state for state-only deployments, which
+  made the next `exec`, `cp` or `attach` fail with `runtime does not support
+  exec`. Start now probes the runtime, reports an actionable error, and restores
+  the sandbox to `stopped` instead of announcing a running sandbox it cannot
+  back.
+- `rsbx get` now supports `-h/--help` on stdout with exit 0, `--format
+  table|json|yaml`, and the `--json` shorthand. Unknown flags use the shared
+  flag-error contract, and structured output uses the same schema as `rsbx ls`.
+  The human table output remains a detailed key/value block. Docker `sbx` has no
+  `get` command; the help text documents it as a Rheic extension.
 
 ## v0.0.50 — 2026-11-15
 

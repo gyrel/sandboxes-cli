@@ -86,6 +86,7 @@ rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" ls --format json
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" ls -q
 rsbx tui
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" get <name-or-id>
+rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" get <name-or-id> --format json
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" start one two
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" stop one two
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" rm [--force] one two
@@ -261,7 +262,10 @@ and reports sandbox counts; `--json` emits the same report for automation. It
 does not diagnose containerd, image, gateway, or credential state yet.
 `rsbx stop`/`start`, `rm` and `prune` accept `--format table|json|yaml` and
 `--json`; structured output carries operation records (or sandbox candidates
-for `prune --dry-run`).
+for `prune --dry-run`). `rsbx start` verifies that the daemon can back the
+running state with a runtime. If the daemon is state-only, start fails with an
+actionable error and restores the sandbox to stopped instead of reporting a
+running sandbox that `exec`, `cp` or `attach` cannot use.
 
 `rsbx ls` retrieves all pages; `--limit N` caps the number of returned
 sandboxes (1-1000), and every sandbox is listed without it. `--format`
@@ -270,9 +274,12 @@ prints names only. JSON/YAML include `name`, `id`, `agent`, `status`, `image`,
 `agent`, `status`, `last_used_at`, `workspaces`, `detached`, `cpus`, `memory_mib`,
 `generation`, `created_at` and `updated_at`. The table is Docker-like:
 `SANDBOX AGENT STATUS PORTS WORKSPACE CREATED`.
-The local store does not record an agent yet, so `agent` is empty; Docker's
-`last_used_at` and `detached` fields are not emitted. `rsbx get` resolves a name
-or ID. `stop`/`start`/`rm` accept multiple names; `rm --all --force` removes every
+The local store may not record an agent yet, so `agent` can be empty. `rsbx get`
+resolves a name or ID. Docker `sbx` has no `get` command; it is a Rheic
+extension. Its default
+table output is a detailed key/value block, while `--format json`, `--format
+yaml` and `--json` use the same field set as `rsbx ls`, including `status`.
+`stop`/`start`/`rm` accept multiple names; `rm --all --force` removes every
 sandbox after the explicit force flag. `rm` and `prune` require a
 terminal confirmation unless `--force` is passed; `prune` removes stopped
 sandboxes only, with `--dry-run` to preview and `--filter until=TIMESTAMP|DURATION`

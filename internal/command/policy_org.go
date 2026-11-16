@@ -50,7 +50,11 @@ type orgPolicyOutput struct {
 func (r *Runner) policyOrg(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("policy org", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(r.Out, "usage: rsbx policy org [--format table|json|yaml] [--json]")
+		_, _ = fmt.Fprintln(r.Out, "Show the effective organization policy bundle without changing it.")
+	}
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {

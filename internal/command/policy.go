@@ -36,6 +36,51 @@ type policyRuleOutput struct {
 	Port         uint16 `json:"port" yaml:"port"`
 }
 
+const policyListUsage = `usage: rsbx policy ls [SANDBOX] [--format table|json|yaml] [--json]
+
+List global and sandbox allow/deny rules.
+`
+
+const policyCheckUsage = `usage: rsbx policy check SANDBOX IP PORT [PROTOCOL]
+
+Evaluate a request against a sandbox's stored network rules.
+`
+
+const policyCheckNetworkUsage = `usage: rsbx policy check network [--sandbox NAME] TARGET
+
+Evaluate an IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s) URL target.
+`
+
+const policyCheckFilesystemUsage = `usage: rsbx policy check filesystem --sandbox NAME [--write] PATH
+
+Evaluate whether a guest path is readable or writable.
+`
+
+const policyInitUsage = `usage: rsbx policy init allow-all|balanced|deny-all
+
+Set the global default policy profile.
+`
+
+const policyProfileUsage = `usage: rsbx policy profile [ls]
+
+Show the global default profile and the available profiles.
+`
+
+func policyMutateUsage(action string) string {
+	return fmt.Sprintf(`usage: rsbx policy %s SANDBOX CIDR[:PORT]
+       rsbx policy %s network [--sandbox NAME] CIDR[:PORT]|DOMAIN
+
+Add or remove a network policy rule.
+`, action, action)
+}
+
+func policyMutateNetworkUsage(action string) string {
+	return fmt.Sprintf(`usage: rsbx policy %s network [--sandbox NAME] CIDR[:PORT]|DOMAIN
+
+Flags may appear before, between or after arguments; use -- to end flag parsing.
+`, action)
+}
+
 //nolint:cyclop,gocyclo // one command dispatch switch with one case per subcommand.
 func (r *Runner) policy(ctx context.Context, args []string) int {
 	if len(args) == 0 {
@@ -73,6 +118,10 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 	case commandReset:
 		return r.policyReset(ctx, args[1:])
 	case "approval":
+		if hasFlag(args[1:], helpFlag) || hasFlag(args[1:], helpShort) {
+			_, _ = fmt.Fprint(r.Out, policyUsage)
+			return 0
+		}
 		return r.policyUnsupported("approval", "approval-gated operations are not implemented, so no approvals can be pending")
 	case helpCommand, helpShort, helpFlag:
 		_, _ = fmt.Fprint(r.Out, policyUsage)
@@ -87,6 +136,11 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 // policyRefresh forces the daemon to re-apply effective policy to running
 // sandboxes immediately.
 func (r *Runner) policyRefresh(ctx context.Context, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprintln(r.Out, "usage: rsbx policy refresh")
+		_, _ = fmt.Fprintln(r.Out, "Re-apply the effective policy to running sandboxes.")
+		return 0
+	}
 	if len(args) != 0 {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy refresh")
 		return 2
@@ -168,6 +222,7 @@ func (r *Runner) policyUnsupported(name, reason string) int {
 // grammar used by the Docker sbx baseline. An empty sandbox name means the
 // global scope, which the local runtime does not implement.
 func (r *Runner) policyNetworkScope(cmdPath string, args []string) (sandboxName string, rest []string, code int) {
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true})
 	fs := flag.NewFlagSet(cmdPath, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&sandboxName, "sandbox", "", "scope the rule to one sandbox (global scope is not implemented locally)")
@@ -181,12 +236,16 @@ func (r *Runner) policyNetworkScope(cmdPath string, args []string) (sandboxName 
 }
 
 func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, policyMutateNetworkUsage(action))
+		return 0
+	}
 	sandboxName, rest, code := r.policyNetworkScope("policy "+action+" network", args)
 	if code >= 0 {
 		return code
 	}
 	if len(rest) != 1 {
-		_, _ = fmt.Fprintf(r.Err, "usage: rsbx policy %s network [--sandbox NAME] CIDR[:PORT]|DOMAIN\n", action)
+		_, _ = fmt.Fprint(r.Err, policyMutateNetworkUsage(action))
 		return 2
 	}
 	if sandboxName == "" {
@@ -226,12 +285,16 @@ func (r *Runner) policyMutateGlobal(ctx context.Context, action, value string) i
 }
 
 func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage)
+		return 0
+	}
 	sandboxName, rest, code := r.policyNetworkScope("policy check network", args)
 	if code >= 0 {
 		return code
 	}
 	if len(rest) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy check network [--sandbox NAME] TARGET (IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s)://URL)")
+		_, _ = fmt.Fprint(r.Err, policyCheckNetworkUsage)
 		return 2
 	}
 	host, port, err := parsePolicyTarget(rest[0])
@@ -448,7 +511,8 @@ func evaluatePolicyTarget(allow, deny []sdk.NetworkRule, protocol string, ip net
 func (r *Runner) policyList(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("policy ls", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyListUsage) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
@@ -458,7 +522,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		return r.flagParseFailure("policy ls", err)
 	}
 	if fs.NArg() > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy ls [--format table|json|yaml] [SANDBOX]")
+		_, _ = fmt.Fprint(r.Err, policyListUsage)
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -500,8 +564,12 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) policyInit(ctx context.Context, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, policyInitUsage)
+		return 0
+	}
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy init allow-all|balanced|deny-all")
+		_, _ = fmt.Fprint(r.Err, policyInitUsage)
 		return 2
 	}
 	profile := args[0]
@@ -525,8 +593,12 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) policyProfile(ctx context.Context, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, policyProfileUsage)
+		return 0
+	}
 	if len(args) > 1 || (len(args) == 1 && args[0] != "ls" && args[0] != commandList) {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy profile [ls]")
+		_, _ = fmt.Fprint(r.Err, policyProfileUsage)
 		return 2
 	}
 	client, err := r.client()
@@ -545,8 +617,12 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) policyMutate(ctx context.Context, action string, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, policyMutateUsage(action))
+		return 0
+	}
 	if len(args) != 2 {
-		_, _ = fmt.Fprintf(r.Err, "usage: rsbx policy %s SANDBOX CIDR[:PORT]\n", action)
+		_, _ = fmt.Fprint(r.Err, policyMutateUsage(action))
 		return 2
 	}
 	rule, err := parseNetworkRule(args[1])
@@ -575,8 +651,12 @@ func (r *Runner) policyMutate(ctx context.Context, action string, args []string)
 }
 
 func (r *Runner) policyCheck(ctx context.Context, args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, policyCheckUsage)
+		return 0
+	}
 	if len(args) != 3 && len(args) != 4 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy check SANDBOX CIDR PORT [PROTOCOL]")
+		_, _ = fmt.Fprint(r.Err, policyCheckUsage)
 		return 2
 	}
 	protocol := tcpProtocol
@@ -654,10 +734,12 @@ func filesystemRuleID(targetPath, access string) string {
 // policyCheckFilesystem evaluates the workspace mount policy. The guest rootfs
 // is read-only, so only declared workspaces can be written.
 //
-//nolint:gocyclo,cyclop // one command parses flags, selects the most specific workspace and reports.
+//nolint:gocyclo,cyclop,funlen // one command parses flags, selects the most specific workspace and reports.
 func (r *Runner) policyCheckFilesystem(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true})
 	fs := flag.NewFlagSet("policy check filesystem", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyCheckFilesystemUsage) }
 	sandboxName := fs.String("sandbox", "", "scope the check to one sandbox")
 	write := fs.Bool("write", false, "check write access instead of read")
 	if err := fs.Parse(args); err != nil {
@@ -667,7 +749,7 @@ func (r *Runner) policyCheckFilesystem(ctx context.Context, args []string) int {
 		return r.flagParseFailure("policy check filesystem", err)
 	}
 	if *sandboxName == "" || fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy check filesystem --sandbox NAME [--write] PATH")
+		_, _ = fmt.Fprint(r.Err, policyCheckFilesystemUsage)
 		return 2
 	}
 	target := path.Clean(fs.Arg(0))

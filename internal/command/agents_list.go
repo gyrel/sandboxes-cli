@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"gopkg.in/yaml.v3"
@@ -18,29 +19,43 @@ Preview agents can be launched, but have not passed full live-VM and authenticat
 `
 
 func (r *Runner) agents(args []string) int {
-	if len(args) > 0 && (args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag) {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		_, _ = fmt.Fprint(r.Out, agentsUsage)
 		return 0
 	}
-	if len(args) > 0 && args[0] != "ls" && args[0] != commandList {
-		_, _ = fmt.Fprintf(r.Err, "rsbx agents: unknown subcommand %q\n", args[0])
-		_, _ = fmt.Fprint(r.Err, agentsUsage)
-		return 2
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			filtered = append(filtered, args[i:]...)
+			break
+		}
+		switch {
+		case arg == "ls" || arg == commandList:
+			continue
+		case arg == formatFlag && i+1 < len(args):
+			filtered = append(filtered, arg, args[i+1])
+			i++
+		case strings.HasPrefix(arg, "-"):
+			filtered = append(filtered, arg)
+		default:
+			_, _ = fmt.Fprintf(r.Err, "rsbx agents: unknown subcommand %q\n", arg)
+			_, _ = fmt.Fprint(r.Err, agentsUsage)
+			return 2
+		}
 	}
-	if len(args) > 0 {
-		args = args[1:]
-	}
-	return r.agentList(args)
+	return r.agentList(filtered)
 }
 
 func (r *Runner) agentList(args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet(commandAgents, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, agentsUsage) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, agentsUsage)
 			return 0
 		}
 		return r.flagParseFailure(commandAgents, err)

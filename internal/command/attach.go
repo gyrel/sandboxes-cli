@@ -22,7 +22,7 @@ func (r *Runner) attach(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	shell := fs.Bool("shell", false, "open /bin/sh instead of the agent command")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = fmt.Fprint(r.Out, attachUsage)
 			return 0

@@ -110,6 +110,11 @@ Remove stopped sandboxes. --dry-run lists candidates without removing them;
 --force skips confirmation.
 `
 
+const waitUsage = `usage: rsbx wait OPERATION_ID
+
+Wait for an operation to finish and print its final state.
+`
+
 // Runner executes commands against a local daemon.
 type Runner struct {
 	Out       io.Writer
@@ -217,14 +222,16 @@ func (r *Runner) parseGlobalArgs(args []string) (rest []string, code int, done b
 	return global.Args(), 0, false
 }
 
-// help prints top-level usage or, with a command name, that command's help.
-// Subcommands implement --help, so dispatch through Run to keep one handler.
+// help prints top-level usage or, with a command path, that command's help.
+// Subcommands implement --help, so dispatch the full path through Run to keep
+// one handler, including nested forms such as "help policy allow network".
 func (r *Runner) help(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag {
 		r.usage()
 		return 0
 	}
-	return r.Run(ctx, []string{args[0], helpFlag})
+	dispatched := append(append([]string(nil), args...), helpFlag)
+	return r.Run(ctx, dispatched)
 }
 
 // extractSocketFlag removes the global --socket flag from any position so it
@@ -348,20 +355,20 @@ func (r *Runner) fallbackCommand(name string, args []string) (int, bool) {
 
 func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "Description:")
-		_, _ = fmt.Fprintln(fs.Output(), "  Sign in to Docker")
-		_, _ = fmt.Fprintln(fs.Output(), "\nUsage:")
-		_, _ = fmt.Fprintln(fs.Output(), "  rsbx login [flags]")
-		_, _ = fmt.Fprintln(fs.Output(), "\nExamples:")
-		_, _ = fmt.Fprintln(fs.Output(), "  rsbx login")
-		_, _ = fmt.Fprintln(fs.Output(), "\n  # Non-interactive sign-in, for CI")
-		_, _ = fmt.Fprintln(fs.Output(), "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
-		_, _ = fmt.Fprintln(fs.Output(), "\nFlags:")
-		_, _ = fmt.Fprintln(fs.Output(), "  -h, --help              help for login")
-		_, _ = fmt.Fprintln(fs.Output(), "      --password-stdin    Read password or access token from stdin")
-		_, _ = fmt.Fprintln(fs.Output(), "      --username string   Docker username for non-interactive login")
+		_, _ = fmt.Fprintln(r.Out, "Description:")
+		_, _ = fmt.Fprintln(r.Out, "  Sign in to Docker")
+		_, _ = fmt.Fprintln(r.Out, "\nUsage:")
+		_, _ = fmt.Fprintln(r.Out, "  rsbx login [flags]")
+		_, _ = fmt.Fprintln(r.Out, "\nExamples:")
+		_, _ = fmt.Fprintln(r.Out, "  rsbx login")
+		_, _ = fmt.Fprintln(r.Out, "\n  # Non-interactive sign-in, for CI")
+		_, _ = fmt.Fprintln(r.Out, "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
+		_, _ = fmt.Fprintln(r.Out, "\nFlags:")
+		_, _ = fmt.Fprintln(r.Out, "  -h, --help              help for login")
+		_, _ = fmt.Fprintln(r.Out, "      --password-stdin    Read password or access token from stdin")
+		_, _ = fmt.Fprintln(r.Out, "      --username string   Docker username for non-interactive login")
 	}
 	username := fs.String("username", "", "Docker Hub username for PAT login")
 	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
@@ -464,19 +471,19 @@ func readDockerPassword(input io.Reader) ([]byte, error) {
 
 func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "Description:")
-		_, _ = fmt.Fprintln(fs.Output(), "  Stop running local sandboxes and sign out of Docker")
-		_, _ = fmt.Fprintln(fs.Output(), "\nUsage:")
-		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout [flags]")
-		_, _ = fmt.Fprintln(fs.Output(), "\nExamples:")
-		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout")
-		_, _ = fmt.Fprintln(fs.Output(), "\n  # Skip the confirmation prompt")
-		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout --force")
-		_, _ = fmt.Fprintln(fs.Output(), "\nFlags:")
-		_, _ = fmt.Fprintln(fs.Output(), "  -f, --force   Skip confirmation prompt")
-		_, _ = fmt.Fprintln(fs.Output(), "  -h, --help    help for logout")
+		_, _ = fmt.Fprintln(r.Out, "Description:")
+		_, _ = fmt.Fprintln(r.Out, "  Stop running local sandboxes and sign out of Docker")
+		_, _ = fmt.Fprintln(r.Out, "\nUsage:")
+		_, _ = fmt.Fprintln(r.Out, "  rsbx logout [flags]")
+		_, _ = fmt.Fprintln(r.Out, "\nExamples:")
+		_, _ = fmt.Fprintln(r.Out, "  rsbx logout")
+		_, _ = fmt.Fprintln(r.Out, "\n  # Skip the confirmation prompt")
+		_, _ = fmt.Fprintln(r.Out, "  rsbx logout --force")
+		_, _ = fmt.Fprintln(r.Out, "\nFlags:")
+		_, _ = fmt.Fprintln(r.Out, "  -f, --force   Skip confirmation prompt")
+		_, _ = fmt.Fprintln(r.Out, "  -h, --help    help for logout")
 	}
 	force := fs.Bool("force", false, "skip confirmation")
 	forceShort := fs.Bool("f", false, "skip confirmation")
@@ -648,18 +655,18 @@ func (r *Runner) secretRemoveCommand(ctx context.Context, args []string) int {
 	if hasFlag(args, "--help") || hasFlag(args, "-h") {
 		return r.secretRemoveHelp()
 	}
-	if hasFlag(args, "--all") && hasFlag(args, globalFlag) {
+	if hasFlag(args, allFlag) && hasFlag(args, globalFlag) {
 		_, _ = fmt.Fprintln(r.Err, "error: if any flags in the group [all global] are set none of the others can be; [all global] were all set\n  try: rsbx secret rm --help")
 		return 1
 	}
-	if hasFlag(args, "--all") {
+	if hasFlag(args, allFlag) {
 		return r.serviceSecretRemoveAll(ctx, args)
 	}
-	if hasFlag(args, "--all-sandboxes") && !hasFlag(args, registryFlag) {
+	if hasFlag(args, allSandboxesFlag) && !hasFlag(args, registryFlag) {
 		_, _ = fmt.Fprintln(r.Err, "error: --all-sandboxes requires --registry\n  try: rsbx secret rm --help")
 		return 1
 	}
-	if hasFlag(args, registryFlag) || hasFlag(args, "--all-sandboxes") {
+	if hasFlag(args, registryFlag) || hasFlag(args, allSandboxesFlag) {
 		return r.registryRemove(ctx, args)
 	}
 	return r.serviceSecretRemove(ctx, args)
@@ -829,6 +836,7 @@ Flags:
 }
 
 func (r *Runner) serviceSecretRemoveAll(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{allFlag: false, forceFlag: false, "-f": false})
 	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	all := fs.Bool("all", false, "remove inventoried host credentials")
@@ -1055,7 +1063,7 @@ func (r *Runner) confirmSecretRemoval(target string, force bool) (bool, int) {
 }
 
 func (r *Runner) registryRemove(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, sandboxFlag: true, "--all-sandboxes": false, globalFlag: false, forceFlag: false, "-f": false})
+	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, sandboxFlag: true, allSandboxesFlag: false, globalFlag: false, forceFlag: false, "-f": false})
 	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	registry := fs.String("registry", "", "registry host")
@@ -1199,6 +1207,7 @@ func (r *Runner) removeRegistryScopes(ctx context.Context, client sdk.Client, re
 }
 
 func (r *Runner) registrySet(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, usernameFlag: true, sandboxFlag: true, passwordStdinFlag: false, allSandboxesFlag: false})
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	registry := fs.String("registry", "", "registry host")
@@ -1980,8 +1989,17 @@ func affirmativeAnswer(answer string) bool {
 }
 
 func (r *Runner) wait(ctx context.Context, args []string) int {
-	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx wait <operation-id>")
+	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, waitUsage) }
+	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("wait", err)
+	}
+	if fs.NArg() != 1 {
+		_, _ = fmt.Fprint(r.Err, waitUsage)
 		return 2
 	}
 	client, err := r.client()
@@ -1990,7 +2008,7 @@ func (r *Runner) wait(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	op, err := client.Operations().Wait(ctx, args[0])
+	op, err := client.Operations().Wait(ctx, fs.Arg(0))
 	if err != nil {
 		r.error(err)
 		return 1

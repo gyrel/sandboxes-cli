@@ -52,7 +52,7 @@ var completionSubcommands = map[string][]string{
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 	commandAgents:     {"ls", commandList},
 	mcpCommand:        {"ls", "add", "call", "rm"},
-	daemonCommand:     {"status", startCommand, stopCommand, "restart", "log-level"},
+	daemonCommand:     {daemonStatusCommand, startCommand, stopCommand, daemonRestartCommand, daemonLogLevelCommand},
 	envCommand:        {"plan", commandCreate, commandRun, commandExec, "rm"},
 	kitCommand:        {commandInspect, "ls", commandList},
 	settingsCommand:   {"ls", commandList, commandGet, commandSet, commandUnset},

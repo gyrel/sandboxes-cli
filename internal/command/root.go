@@ -19,6 +19,7 @@ import (
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
 
+	"github.com/rheic/sandboxes-cli/internal/daemonctl"
 	"github.com/rheic/sandboxes-cli/internal/kit"
 )
 
@@ -132,6 +133,10 @@ type Runner struct {
 	In        io.Reader
 	Socket    string
 	NewClient func(address string) (sdk.Client, error)
+	// NewDaemonSupervisor controls the local daemon process. Tests inject a
+	// fake to verify start/stop/restart sequencing without signaling a real
+	// process.
+	NewDaemonSupervisor func(address string) (daemonSupervisor, error)
 	// NewOrgPolicyClient reads the read-only organization policy view. It is a
 	// separate RPC client because the SDK release predates the additive API
 	// contract; tests inject a fake here.
@@ -157,11 +162,14 @@ type Runner struct {
 // NewRunner creates a CLI runner.
 func NewRunner(out, errOut io.Writer) *Runner {
 	return &Runner{
-		Out:                out,
-		Err:                errOut,
-		In:                 os.Stdin,
-		Socket:             defaultSocket(),
-		NewClient:          func(address string) (sdk.Client, error) { return sdk.New(sdk.Config{Address: address}) },
+		Out:       out,
+		Err:       errOut,
+		In:        os.Stdin,
+		Socket:    defaultSocket(),
+		NewClient: func(address string) (sdk.Client, error) { return sdk.New(sdk.Config{Address: address}) },
+		NewDaemonSupervisor: func(address string) (daemonSupervisor, error) {
+			return daemonctl.New(address)
+		},
 		NewOrgPolicyClient: newOrgPolicyClient,
 	}
 }

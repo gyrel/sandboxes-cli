@@ -49,7 +49,7 @@ func (r *Runner) policyLog(ctx context.Context, args []string) int {
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	limit := fs.Int(limitFlag[2:], 0, "maximum number of log entries to show (0 = all)")
-	logType := fs.String("type", "all", "filter logs by type: all or network")
+	logType := fs.String("type", logCategoryAll, "filter logs by type: all or network")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -60,7 +60,7 @@ func (r *Runner) policyLog(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Err, policyLogUsage)
 		return 2
 	}
-	if *logType != "all" && *logType != networkKeyword {
+	if *logType != logCategoryAll && *logType != networkKeyword {
 		r.error(fmt.Errorf("unsupported log type %q; filesystem logs are not supported", *logType))
 		return 2
 	}

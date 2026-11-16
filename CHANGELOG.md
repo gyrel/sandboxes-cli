@@ -31,6 +31,19 @@
   flag-error contract, and structured output uses the same schema as `rsbx ls`.
   The human table output remains a detailed key/value block. Docker `sbx` has no
   `get` command; the help text documents it as a Rheic extension.
+- Add `rsbx daemon start|stop|restart|log-level|status` with the local `sbx
+  daemon` grammar. `start`/`restart` support `--detach` and `--policy`;
+  `log-level` shows or persists `general`, `proxy` and `all` categories; and
+  `status --json` reports the sbx field names `status`, `socket` and `logs`
+  plus PID, version, API version and sandbox counts when available.
+- Refuse to stop or restart a daemon whose PID, process start identity,
+  installation identifier, state directory or socket does not match. Missing,
+  stale or unverifiable identity data fails closed, and stale sockets are
+  removed only after the recorded process is proven gone and the socket is
+  owned by the current user.
+- Set `SANDBOXES_DAEMON_BINARY` to choose the daemon binary; otherwise the CLI
+  uses `sandboxesd` from PATH or beside `rsbx`, and detached logs go to
+  `<state>/daemon.log`.
 
 ## v0.0.50 — 2026-11-15
 

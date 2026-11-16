@@ -212,7 +212,7 @@ func TestStopAndStartMultipleSandboxes(t *testing.T) {
 func TestPruneDryRunListsOnlyStopped(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
 		{ID: "sb-run", Name: "running", State: sdk.StateRunning},
-		{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped},
+		{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
 	}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"prune", "--dry-run"}); code != 0 {
@@ -226,7 +226,7 @@ func TestPruneDryRunListsOnlyStopped(t *testing.T) {
 func TestPruneRemovesOnlyStopped(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
 		{ID: "sb-run", Name: "running", State: sdk.StateRunning},
-		{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped},
+		{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
 	}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"prune", "-f"}); code != 0 {
@@ -238,7 +238,7 @@ func TestPruneRemovesOnlyStopped(t *testing.T) {
 }
 
 func TestPruneRequiresForceWithoutTerminal(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped}}}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)}}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"prune"}); code != 1 || len(sandbox.deletes) != 0 {
 		t.Fatalf("exit=%d deletes=%v output=%q", code, sandbox.deletes, out.String())
@@ -284,15 +284,16 @@ func TestStopJSONAndYAMLFormats(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"stop", "--json", "one"}); code != 0 {
 		t.Fatalf("json exit=%d output=%q", code, out.String())
 	}
-	var ops []operationOutput
-	if err := json.Unmarshal(out.Bytes(), &ops); err != nil || len(ops) != 1 || ops[0].ID != "op-stop" {
-		t.Fatalf("ops=%#v err=%v", ops, err)
+	var records []mutationOutput
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil || len(records) != 1 ||
+		records[0].Action != "stopped" || records[0].Resource != "sandbox" || records[0].Name != "one" {
+		t.Fatalf("records=%#v err=%v", records, err)
 	}
 	runner, out = lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"stop", "--format", "yaml", "one"}); code != 0 {
 		t.Fatalf("yaml exit=%d output=%q", code, out.String())
 	}
-	if !strings.Contains(out.String(), "id: op-stop") {
+	if !strings.Contains(out.String(), "action: stopped") || !strings.Contains(out.String(), "name: one") {
 		t.Fatalf("unexpected yaml: %q", out.String())
 	}
 }
@@ -303,29 +304,32 @@ func TestRemoveJSONFormat(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"rm", "-f", "--json", "one"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	var ops []operationOutput
-	if err := json.Unmarshal(out.Bytes(), &ops); err != nil || len(ops) != 1 || ops[0].ID != "op-delete" {
-		t.Fatalf("ops=%#v err=%v", ops, err)
+	var records []mutationOutput
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil || len(records) != 1 ||
+		records[0].Action != "removed" || records[0].Resource != "sandbox" || records[0].Name != "one" {
+		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }
 
 func TestPruneJSONFormats(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped}}}
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)}}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"prune", "--dry-run", "--json"}); code != 0 {
 		t.Fatalf("dry-run exit=%d output=%q", code, out.String())
 	}
-	var candidates []sandboxOutput
-	if err := json.Unmarshal(out.Bytes(), &candidates); err != nil || len(candidates) != 1 || candidates[0].ID != "sb-stop" {
+	var candidates pruneDryRunOutput
+	if err := json.Unmarshal(out.Bytes(), &candidates); err != nil || len(candidates.WouldRemove) != 1 ||
+		candidates.WouldRemove[0].Name != "stopped" || len(candidates.SkippedUnknownStop) != 0 {
 		t.Fatalf("candidates=%#v err=%v", candidates, err)
 	}
 	runner, out = lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"prune", "-f", "--json"}); code != 0 {
 		t.Fatalf("force exit=%d output=%q", code, out.String())
 	}
-	var ops []operationOutput
-	if err := json.Unmarshal(out.Bytes(), &ops); err != nil || len(ops) != 1 || ops[0].ID != "op-delete" {
-		t.Fatalf("ops=%#v err=%v", ops, err)
+	var records []mutationOutput
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil || len(records) != 1 ||
+		records[0].Action != "removed" || records[0].Name != "stopped" {
+		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }
 
@@ -352,21 +356,25 @@ func TestParsePruneFilter(t *testing.T) {
 	}
 }
 
-func TestFilterStoppedHonorsUntilAndUnknownStopTime(t *testing.T) {
+func TestSelectPruneCandidatesHonorsUntilAndUnknownStopTime(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 0, 0, 0, time.UTC)
 	items := []sdk.Sandbox{
-		{ID: "old", State: sdk.StateStopped, StoppedAt: now.Add(-3 * time.Hour)},
-		{ID: "new", State: sdk.StateStopped, StoppedAt: now.Add(-time.Hour)},
-		{ID: "unknown", State: sdk.StateStopped},
-		{ID: "running", State: sdk.StateRunning, StoppedAt: now.Add(-4 * time.Hour)},
+		{ID: "old", Name: "old", State: sdk.StateStopped, StoppedAt: now.Add(-3 * time.Hour)},
+		{ID: "new", Name: "new", State: sdk.StateStopped, StoppedAt: now.Add(-time.Hour)},
+		{ID: "unknown", Name: "unknown", State: sdk.StateStopped},
+		{ID: "running", Name: "running", State: sdk.StateRunning, StoppedAt: now.Add(-4 * time.Hour)},
 	}
 	cutoff := now.Add(-2 * time.Hour)
-	got := filterStopped(items, &cutoff)
+	got, skipped := selectPruneCandidates(items, &cutoff)
 	if len(got) != 1 || got[0].ID != "old" {
 		t.Fatalf("filtered=%v", got)
 	}
-	if all := filterStopped(items, nil); len(all) != 3 {
-		t.Fatalf("unfiltered=%v", all)
+	if len(skipped) != 1 || skipped[0] != "unknown" {
+		t.Fatalf("skipped=%v", skipped)
+	}
+	all, skippedAll := selectPruneCandidates(items, nil)
+	if len(all) != 2 || len(skippedAll) != 1 || skippedAll[0] != "unknown" {
+		t.Fatalf("unfiltered=%v skipped=%v", all, skippedAll)
 	}
 }
 

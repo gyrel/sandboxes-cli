@@ -87,7 +87,8 @@ names; use -- to end flag parsing. Without --force, every named sandbox must be
 stopped: if any sandbox is running or otherwise not stopped, the whole command
 fails and nothing is removed. Stop those sandboxes first, or pass --force to
 remove them anyway. --force also skips confirmation. --all removes every
-sandbox.
+sandbox. Structured output is an array of {action, resource, name} records,
+matching sbx rm --json.
 
 Examples:
   rsbx rm --force api
@@ -118,7 +119,9 @@ Flags:
 const pruneUsage = `usage: rsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
 
 Remove stopped sandboxes. --dry-run lists candidates without removing them;
---force skips confirmation.
+--force skips confirmation. With --dry-run, structured output is the sbx
+envelope {"would_remove":[...],"skipped_unknown_stop":[...]}; actual removals
+use the same {action, resource, name} records as sbx rm --json.
 `
 
 const waitUsage = `usage: rsbx wait OPERATION_ID
@@ -1859,8 +1862,8 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 	if code >= 0 {
 		return code
 	}
-	operations, removed, deleteFailed := r.deleteSandboxes(ctx, client, targets, opts.force)
-	if code := r.renderRemoval(opts.format, operations, removed); code >= 0 {
+	_, removed, deleteFailed := r.deleteSandboxes(ctx, client, targets, opts.force)
+	if code := r.renderRemoval(opts.format, removed); code >= 0 {
 		return code
 	}
 	if resolveFailed || deleteFailed {
@@ -1887,7 +1890,7 @@ func (r *Runner) prepareRemoval(ctx context.Context, client sdk.Client, opts rem
 		}
 	}
 	if len(targets) == 0 {
-		if err := renderOperations(r.Out, opts.format, nil); err != nil {
+		if err := renderMutations(r.Out, opts.format, nil); err != nil {
 			r.error(err)
 			return nil, true, 1
 		}
@@ -1959,9 +1962,9 @@ func removalStateError(sandbox *sdk.Sandbox) error {
 	}
 }
 
-func (r *Runner) renderRemoval(format string, operations []*sdk.Operation, removed []string) int {
+func (r *Runner) renderRemoval(format string, removed []string) int {
 	if format != listFormatTable {
-		if err := renderOperations(r.Out, format, operations); err != nil {
+		if err := renderMutations(r.Out, format, sandboxMutations("removed", removed)); err != nil {
 			r.error(err)
 			return 1
 		}
@@ -2123,6 +2126,7 @@ func lifecycleUsage(name string) string {
 	details := ""
 	if name == stopCommand {
 		verb = "Stop"
+		details = "\nStructured output is an array of {action, resource, name} records, matching\nsbx stop --json.\n"
 	} else {
 		details = "\nStart fails closed when the daemon has no runtime backend; the sandbox\nis restored to stopped instead of reporting an unusable running state.\n"
 	}
@@ -2173,6 +2177,7 @@ func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int 
 	defer func() { _ = client.Close() }()
 	failed := false
 	var operations []*sdk.Operation
+	completed := make([]string, 0, len(fs.Args()))
 	for _, target := range fs.Args() {
 		op, err := r.runLifecycleTarget(ctx, client, name, target, *grace)
 		if err != nil {
@@ -2181,13 +2186,20 @@ func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int 
 			continue
 		}
 		operations = append(operations, op)
+		completed = append(completed, target)
 		if selected == listFormatTable {
 			_, _ = fmt.Fprintf(r.Out, "%s sandbox %s\n", lifecyclePastTense(name), target)
 		}
 	}
 	if selected != listFormatTable {
-		if err := renderOperations(r.Out, selected, operations); err != nil {
-			r.error(err)
+		var renderErr error
+		if name == stopCommand {
+			renderErr = renderMutations(r.Out, selected, sandboxMutations("stopped", completed))
+		} else {
+			renderErr = renderOperations(r.Out, selected, operations)
+		}
+		if renderErr != nil {
+			r.error(renderErr)
 			return 1
 		}
 	}

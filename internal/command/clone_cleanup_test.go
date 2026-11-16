@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
@@ -141,6 +142,7 @@ func TestBulkDeleteWithoutCloneMetadataDoesNotAccessGit(t *testing.T) {
 			t.Parallel()
 			sandboxes := &lifecycleSandbox{items: []sdk.Sandbox{{
 				ID: "sb-plain", Name: "plain", State: sdk.StateStopped,
+				StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC),
 				Workspace: filepath.Join(t.TempDir(), "missing"),
 			}}}
 			state := newFakeGitConfigState(nil)
@@ -250,8 +252,10 @@ func TestCloneRemovalWarningOnlyAppliesToOwnedClones(t *testing.T) {
 
 func cloneCleanupSandbox(name, id, workspace string) sdk.Sandbox {
 	return sdk.Sandbox{
-		ID: id, Name: name, State: sdk.StateStopped, Workspace: workspace,
-		Clone: &sdk.CloneInfo{RemoteName: "sandbox-" + name, GuestWorkdir: "/workspace/" + name},
+		ID: id, Name: name, State: sdk.StateStopped,
+		StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC),
+		Workspace: workspace,
+		Clone:     &sdk.CloneInfo{RemoteName: "sandbox-" + name, GuestWorkdir: "/workspace/" + name},
 	}
 }
 

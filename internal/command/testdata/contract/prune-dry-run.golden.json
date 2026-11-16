@@ -1,0 +1,29 @@
+{
+  "would_remove": [
+    {
+      "name": "matrix-20261115-1025",
+      "agent": "codex",
+      "stopped_at": "<TIMESTAMP>",
+      "workspaces": [
+        "/private/tmp/rheic-sbx-matrix-20261115/repo"
+      ]
+    },
+    {
+      "name": "matrix-20261115-1035-prune",
+      "agent": "codex",
+      "stopped_at": "<TIMESTAMP>",
+      "workspaces": [
+        "/private/tmp/rheic-sbx-matrix-20261115/repo"
+      ]
+    },
+    {
+      "name": "my-sandbox",
+      "agent": "codex",
+      "stopped_at": "<TIMESTAMP>",
+      "workspaces": [
+        "/Users/vladimirzikman/Workspace/opensource/sandboxes"
+      ]
+    }
+  ],
+  "skipped_unknown_stop": []
+}

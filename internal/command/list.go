@@ -19,8 +19,8 @@ const listUsage = `usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--li
 
 List sandboxes. table is the default; --json is equivalent to --format json;
 -q prints only names. --limit N returns at most N sandboxes (1-1000); without
-it every sandbox is listed. JSON/YAML fields include name, id, agent, status,
-last_used_at, workspaces, created_at and detached. Flags may appear in any
+it every sandbox is listed. JSON/YAML use the sbx ls schema: name, id, agent,
+status, last_used_at, workspaces and created_at. Flags may appear in any
 order; use -- to end flag parsing.
 
 Examples:
@@ -46,25 +46,17 @@ type listOptions struct {
 	quiet  bool
 }
 
+// sandboxOutput mirrors the sbx ls JSON entry: name, id, agent, status,
+// last_used_at, workspaces and created_at, in that order. Fields sbx omits
+// when empty keep the same omitempty behavior here.
 type sandboxOutput struct {
-	Name          string       `json:"name" yaml:"name"`
-	ID            string       `json:"id" yaml:"id"`
-	Agent         string       `json:"agent" yaml:"agent"`
-	Status        string       `json:"status" yaml:"status"`
-	LastUsedAt    string       `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
-	Detached      bool         `json:"detached,omitempty" yaml:"detached,omitempty"`
-	PolicyProfile string       `json:"policy_profile,omitempty" yaml:"policy_profile,omitempty"`
-	Image         string       `json:"image" yaml:"image"`
-	Workspaces    []string     `json:"workspaces" yaml:"workspaces"`
-	Ports         []portOutput `json:"ports" yaml:"ports"`
-	Allow         []ruleOutput `json:"allow" yaml:"allow"`
-	Deny          []ruleOutput `json:"deny" yaml:"deny"`
-	CPUs          uint32       `json:"cpus" yaml:"cpus"`
-	MemoryMiB     uint32       `json:"memory_mib" yaml:"memory_mib"`
-	StoppedAt     string       `json:"stopped_at,omitempty" yaml:"stopped_at,omitempty"`
-	Generation    int64        `json:"generation" yaml:"generation"`
-	CreatedAt     string       `json:"created_at" yaml:"created_at"`
-	UpdatedAt     string       `json:"updated_at" yaml:"updated_at"`
+	Name       string   `json:"name" yaml:"name"`
+	ID         string   `json:"id" yaml:"id"`
+	Agent      string   `json:"agent" yaml:"agent"`
+	Status     string   `json:"status" yaml:"status"`
+	LastUsedAt string   `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	Workspaces []string `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
+	CreatedAt  string   `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
 func (r *Runner) list(ctx context.Context, args []string) int {
@@ -216,31 +208,20 @@ func sandboxOutputs(items []sdk.Sandbox) []sandboxOutput {
 }
 
 func sandboxOutputFor(sb *sdk.Sandbox) sandboxOutput {
-	workspaces := make([]string, 0, len(sb.Workspaces)+1)
+	var workspaces []string
 	if len(sb.Workspaces) > 0 {
-		workspaces = append(workspaces, workspacePaths(sb.Workspaces)...)
+		workspaces = workspacePaths(sb.Workspaces)
 	} else if sb.Workspace != "" {
-		workspaces = append(workspaces, sb.Workspace)
+		workspaces = []string{sb.Workspace}
 	}
 	return sandboxOutput{
-		Name:          sb.Name,
-		ID:            sb.ID,
-		Agent:         sb.Agent,
-		Status:        sb.State,
-		LastUsedAt:    listTime(sb.LastUsedAt),
-		Detached:      sb.Detached,
-		PolicyProfile: sb.PolicyProfile,
-		Image:         sb.Image,
-		Workspaces:    workspaces,
-		Ports:         portsFor(sb),
-		Allow:         allowRules(sb),
-		Deny:          denyRules(sb),
-		CPUs:          sb.CPUs,
-		MemoryMiB:     sb.MemoryMiB,
-		StoppedAt:     listTime(sb.StoppedAt),
-		Generation:    sb.Generation,
-		CreatedAt:     listTime(sb.CreatedAt),
-		UpdatedAt:     listTime(sb.UpdatedAt),
+		Name:       sb.Name,
+		ID:         sb.ID,
+		Agent:      sb.Agent,
+		Status:     sb.State,
+		LastUsedAt: listTime(sb.LastUsedAt),
+		Workspaces: workspaces,
+		CreatedAt:  listTime(sb.CreatedAt),
 	}
 }
 

@@ -320,6 +320,18 @@ func (s *Supervisor) stopUnrecorded(ctx context.Context, cause error) error {
 }
 
 func (s *Supervisor) stopEndpointError(cause, liveErr error) error {
+	// Some platforms cannot discover the endpoint owner. The control record and
+	// the process inspector are then the only evidence, so decide from them
+	// instead of reporting an ambiguous endpoint.
+	if errors.Is(liveErr, ErrIdentityUnverifiable) && !socketPathExists(s.Scope.Socket) {
+		switch {
+		case errors.Is(cause, ErrNoRecord), errors.Is(cause, ErrProcessNotFound):
+			// Nothing is running for this record; keep it for the operator.
+			return nil
+		case errors.Is(cause, ErrIdentityMismatch), errors.Is(cause, ErrInvalidRecord):
+			return fmt.Errorf("refusing to stop daemon: %w", cause)
+		}
+	}
 	if errors.Is(liveErr, ErrEndpointNotRunning) {
 		if errors.Is(cause, ErrNoRecord) || errors.Is(cause, ErrProcessNotFound) {
 			return nil

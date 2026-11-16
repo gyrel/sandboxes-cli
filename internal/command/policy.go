@@ -46,9 +46,11 @@ const policyCheckUsage = `usage: rsbx policy check SANDBOX IP PORT [PROTOCOL]
 Evaluate a request against a sandbox's stored network rules.
 `
 
-const policyCheckNetworkUsage = `usage: rsbx policy check network [--sandbox NAME] TARGET
+const policyCheckNetworkUsage = `usage: rsbx policy check network [--sandbox NAME] [--protocol tcp|udp] [--format table|json|yaml] [--json] TARGET
 
 Evaluate an IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s) URL target.
+Bare targets without a port default to 443.
+The SDK does not expose governance.active or deny_kind, so those fields are omitted.
 `
 
 const policyCheckFilesystemUsage = `usage: rsbx policy check filesystem --sandbox NAME [--write] PATH
@@ -284,35 +286,44 @@ func (r *Runner) policyMutateGlobal(ctx context.Context, action, value string) i
 	return 0
 }
 
+//nolint:funlen,gocyclo,cyclop // one command parses flags, resolves the target and reports.
 func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		_, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage)
 		return 0
 	}
-	sandboxName, rest, code := r.policyNetworkScope("policy check network", args)
-	if code >= 0 {
-		return code
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, "--protocol": true})
+	fs := flag.NewFlagSet("policy check network", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage) }
+	sandboxName := fs.String("sandbox", "", "scope the check to one sandbox")
+	protocol := fs.String("protocol", tcpProtocol, "protocol to evaluate: tcp or udp")
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("policy check network", err)
 	}
-	if len(rest) != 1 {
+	if fs.NArg() != 1 {
 		_, _ = fmt.Fprint(r.Err, policyCheckNetworkUsage)
 		return 2
 	}
-	host, port, err := parsePolicyTarget(rest[0])
+	selected, err := resolveOperationFormat(*format, *jsonOutput)
 	if err != nil {
 		r.error(err)
 		return 2
 	}
-	protocol := tcpProtocol
-	address := ""
-	domain := ""
-	if host == nil {
-		domain, port, err = parsePolicyNameTarget(rest[0])
-		if err != nil {
-			r.error(err)
-			return 2
-		}
-	} else {
-		address = host.String()
+	selectedProtocol := strings.ToLower(*protocol)
+	if selectedProtocol != tcpProtocol && selectedProtocol != udpProtocol {
+		r.error(errors.New("protocol must be tcp or udp"))
+		return 2
+	}
+	address, domain, port, err := parsePolicyCheckNetworkTarget(fs.Arg(0))
+	if err != nil {
+		r.error(err)
+		return 2
 	}
 	client, err := r.client()
 	if err != nil {
@@ -321,24 +332,125 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 	}
 	defer func() { _ = client.Close() }()
 	id := ""
-	if sandboxName != "" {
-		id, err = findExecSandbox(ctx, client, sandboxName)
+	if *sandboxName != "" {
+		id, err = findExecSandbox(ctx, client, *sandboxName)
 		if err != nil {
 			r.error(err)
 			return 1
 		}
 	}
-	decision, err := sdk.Policies(client).Check(ctx, id, protocol, address, domain, port)
+	decision, err := sdk.Policies(client).Check(ctx, id, selectedProtocol, address, domain, port)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
+	policyContext := "global"
+	if *sandboxName != "" {
+		policyContext = sandboxPrefix + ":" + *sandboxName
+	}
+	host := address
+	if host == "" {
+		host = domain
+	}
+	if err := renderPolicyCheckNetwork(r.Out, selected, newPolicyCheckNetworkOutput(decision, selectedProtocol, policyContext, host, port)); err != nil {
+		r.error(err)
+		return 1
+	}
 	if decision.Allowed {
-		_, _ = fmt.Fprintf(r.Out, "allowed: %s\n", decision.Reason)
 		return 0
 	}
-	_, _ = fmt.Fprintf(r.Out, "denied: %s\n", decision.Reason)
 	return 1
+}
+
+// parsePolicyCheckNetworkTarget resolves an IP or domain target. A bare target
+// without an explicit port defaults to 443; URL targets keep their scheme
+// default (80/443).
+func parsePolicyCheckNetworkTarget(target string) (string, string, uint16, error) {
+	host, port, err := parsePolicyTarget(target)
+	if err != nil {
+		return "", "", 0, err
+	}
+	address := ""
+	domain := ""
+	if host == nil {
+		domain, port, err = parsePolicyNameTarget(target)
+		if err != nil {
+			return "", "", 0, err
+		}
+	} else {
+		address = host.String()
+	}
+	if port == 0 {
+		port = 443
+	}
+	return address, domain, port, nil
+}
+
+// policyCheckNetworkOutput mirrors the Docker sbx check result. action,
+// context, resource_type, resource_value, target and type are derived from the
+// checked target, while rule_id and reason are retained only when the SDK
+// supplies them. The current SDK exposes neither governance.active nor
+// deny_kind, so those fields are intentionally omitted.
+type policyCheckNetworkOutput struct {
+	Action        string `json:"action" yaml:"action"`
+	Allowed       bool   `json:"allowed" yaml:"allowed"`
+	Context       string `json:"context" yaml:"context"`
+	ResourceType  string `json:"resource_type" yaml:"resource_type"`
+	ResourceValue string `json:"resource_value" yaml:"resource_value"`
+	Target        string `json:"target" yaml:"target"`
+	Type          string `json:"type" yaml:"type"`
+	RuleID        string `json:"rule_id,omitempty" yaml:"rule_id,omitempty"`
+	Reason        string `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+const (
+	policyNetworkActionPrefix = "net:connect:"
+	policyNetworkResourceType = "net:domain"
+	policyNetworkType         = "network"
+)
+
+func newPolicyCheckNetworkOutput(decision sdk.PolicyDecision, protocol, policyContext, host string, port uint16) policyCheckNetworkOutput {
+	portText := strconv.FormatUint(uint64(port), 10)
+	resourceValue := host + ":" + portText
+	normalizedTarget := net.JoinHostPort(host, portText)
+	return policyCheckNetworkOutput{
+		Action:        policyNetworkActionPrefix + protocol,
+		Allowed:       decision.Allowed,
+		Context:       policyContext,
+		ResourceType:  policyNetworkResourceType,
+		ResourceValue: resourceValue,
+		Target:        normalizedTarget,
+		Type:          policyNetworkType,
+		RuleID:        decision.RuleID,
+		Reason:        decision.Reason,
+	}
+}
+
+func renderPolicyCheckNetwork(out io.Writer, format string, result policyCheckNetworkOutput) error {
+	switch format {
+	case listFormatTable:
+		verb := "denied"
+		if result.Allowed {
+			verb = "allowed"
+		}
+		if result.Reason == "" {
+			_, _ = fmt.Fprintln(out, verb)
+			return nil
+		}
+		_, _ = fmt.Fprintf(out, "%s: %s\n", verb, result.Reason)
+		return nil
+	case listFormatYAML:
+		data, err := yaml.Marshal(result)
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(data)
+		return err
+	default:
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
 }
 
 //nolint:nestif // parsing URL and host:port forms is inherently branchy.
@@ -347,7 +459,7 @@ func parsePolicyNameTarget(target string) (string, uint16, error) {
 	port := uint16(0)
 	if strings.Contains(target, "://") {
 		parsed, err := url.Parse(target)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != schemeHTTPS) || parsed.Hostname() == "" {
+		if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
 			return "", 0, fmt.Errorf("unsupported policy target %q", target)
 		}
 		host = parsed.Hostname()
@@ -360,8 +472,10 @@ func parsePolicyNameTarget(target string) (string, uint16, error) {
 			port = uint16(value)
 		case parsed.Scheme == schemeHTTPS:
 			port = 443
-		default:
+		case parsed.Scheme == "http":
 			port = 80
+		default:
+			return "", 0, fmt.Errorf("URL scheme %q requires an explicit port", parsed.Scheme)
 		}
 	} else {
 		host = target
@@ -458,8 +572,8 @@ func parsePolicyTarget(target string) (net.IP, uint16, error) {
 
 func parseURLPolicyTarget(target string) (net.IP, uint16, error) {
 	parsed, err := url.Parse(target)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != schemeHTTPS) {
-		return nil, 0, fmt.Errorf("unsupported policy target %q; use IPv4/IPv6 or an http(s) URL", target)
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return nil, 0, fmt.Errorf("unsupported policy target %q", target)
 	}
 	host := parsed.Hostname()
 	if parsed.Port() != "" {
@@ -472,7 +586,10 @@ func parseURLPolicyTarget(target string) (net.IP, uint16, error) {
 	if parsed.Scheme == "https" {
 		return net.ParseIP(host), 443, nil
 	}
-	return net.ParseIP(host), 80, nil
+	if parsed.Scheme == "http" {
+		return net.ParseIP(host), 80, nil
+	}
+	return nil, 0, fmt.Errorf("URL scheme %q requires an explicit port", parsed.Scheme)
 }
 
 // evaluatePolicyTarget evaluates rules for a host; a zero port matches rules
@@ -922,7 +1039,8 @@ Commands:
                                           Docker sbx grammar; omit --sandbox for
                                           global rules
   check SANDBOX IP PORT [PROTOCOL]        evaluate a request against stored rules
-  check network [--sandbox NAME] TARGET   evaluate IPv4[:PORT], IPv6[:PORT], or URL
+  check network [--sandbox NAME] [--protocol tcp|udp] [--format table|json|yaml] [--json] TARGET
+                                          evaluate IPv4[:PORT], IPv6[:PORT], domain or URL
   check filesystem --sandbox NAME [--write] PATH
                                           evaluate a guest workspace path
   init allow-all|balanced|deny-all        set the global default profile

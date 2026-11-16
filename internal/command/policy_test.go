@@ -338,3 +338,278 @@ func (f fakePolicyCheck) Check(ctx context.Context, id, protocol, address, domai
 }
 
 func (f fakeClient) PolicyService() sdk.PolicyService { return fakePolicyCheck{sandboxes: f.sandbox} }
+
+type policyCheckNetworkCall struct {
+	ID       string
+	Protocol string
+	Address  string
+	Domain   string
+	Port     uint16
+}
+
+// policyCheckNetworkRecorder reuses the fake policy client and records the
+// arguments the CLI sends to the SDK.
+type policyCheckNetworkRecorder struct {
+	decision sdk.PolicyDecision
+	err      error
+	calls    []policyCheckNetworkCall
+}
+
+func (p *policyCheckNetworkRecorder) Check(_ context.Context, id, protocol, address, domain string, port uint16) (sdk.PolicyDecision, error) {
+	p.calls = append(p.calls, policyCheckNetworkCall{ID: id, Protocol: protocol, Address: address, Domain: domain, Port: port})
+	return p.decision, p.err
+}
+
+type policyCheckNetworkService struct {
+	fakePolicyCheck
+	recorder *policyCheckNetworkRecorder
+}
+
+func (s policyCheckNetworkService) Check(ctx context.Context, id, protocol, address, domain string, port uint16) (sdk.PolicyDecision, error) {
+	return s.recorder.Check(ctx, id, protocol, address, domain, port)
+}
+
+type policyCheckNetworkClient struct {
+	fakeClient
+	recorder *policyCheckNetworkRecorder
+}
+
+func (c policyCheckNetworkClient) PolicyService() sdk.PolicyService {
+	return policyCheckNetworkService{recorder: c.recorder, fakePolicyCheck: fakePolicyCheck{sandboxes: c.sandbox}}
+}
+
+func newPolicyCheckNetworkRunner(t *testing.T, decision sdk.PolicyDecision) (*Runner, *bytes.Buffer, *policyCheckNetworkRecorder) {
+	t.Helper()
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev"}}}
+	recorder := &policyCheckNetworkRecorder{decision: decision}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+		return policyCheckNetworkClient{fakeClient: fakeClient{sandbox: sandbox}, recorder: recorder}, nil
+	}}
+	return runner, &out, recorder
+}
+
+func TestPolicyCheckNetworkProtocolAndPortDefaults(t *testing.T) {
+	cases := []struct {
+		args     []string
+		id       string
+		protocol string
+		address  string
+		domain   string
+		port     uint16
+	}{
+		{[]string{"192.0.2.1"}, "", "tcp", "192.0.2.1", "", 443},
+		{[]string{"192.0.2.1:8443"}, "", "tcp", "192.0.2.1", "", 8443},
+		{[]string{"http://192.0.2.1/path"}, "", "tcp", "192.0.2.1", "", 80},
+		{[]string{"https://192.0.2.1/path"}, "", "tcp", "192.0.2.1", "", 443},
+		{[]string{"example.com"}, "", "tcp", "", "example.com", 443},
+		{[]string{"example.com:8443"}, "", "tcp", "", "example.com", 8443},
+		{[]string{"--protocol", "udp", "192.0.2.1"}, "", "udp", "192.0.2.1", "", 443},
+		{[]string{"192.0.2.1", "--protocol", "udp"}, "", "udp", "192.0.2.1", "", 443},
+		{[]string{"--sandbox", "dev", "192.0.2.1", "--protocol", "udp"}, "sb-1", "udp", "192.0.2.1", "", 443},
+	}
+	for _, tc := range cases {
+		runner, out, recorder := newPolicyCheckNetworkRunner(t, sdk.PolicyDecision{Allowed: true, RuleID: "rul_net", Reason: "allow rule 192.0.2.0/24"})
+		if code := runner.Run(context.Background(), append([]string{"policy", "check", "network"}, tc.args...)); code != 0 {
+			t.Fatalf("%v: exit=%d output=%q", tc.args, code, out.String())
+		}
+		if len(recorder.calls) != 1 {
+			t.Fatalf("%v: calls=%+v", tc.args, recorder.calls)
+		}
+		call := recorder.calls[0]
+		if call.ID != tc.id || call.Protocol != tc.protocol || call.Address != tc.address || call.Domain != tc.domain || call.Port != tc.port {
+			t.Fatalf("%v: call=%+v want id=%q protocol=%q address=%q domain=%q port=%d", tc.args, call, tc.id, tc.protocol, tc.address, tc.domain, tc.port)
+		}
+	}
+}
+
+func TestPolicyCheckNetworkOutputFormats(t *testing.T) {
+	allowed := sdk.PolicyDecision{Allowed: true, RuleID: "rul_net", Reason: "allow rule 192.0.2.0/24"}
+	runner, out, _ := newPolicyCheckNetworkRunner(t, allowed)
+	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--format", "table", "192.0.2.1"}); code != 0 {
+		t.Fatalf("table exit=%d output=%q", code, out.String())
+	}
+	if out.String() != "allowed: allow rule 192.0.2.0/24\n" {
+		t.Fatalf("table output=%q", out.String())
+	}
+
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--json", "192.0.2.1"}); code != 0 {
+		t.Fatalf("json exit=%d output=%q", code, out.String())
+	}
+	var entry policyCheckNetworkOutput
+	if err := json.Unmarshal(out.Bytes(), &entry); err != nil {
+		t.Fatalf("json output=%q: %v", out.String(), err)
+	}
+	if !entry.Allowed || entry.RuleID != "rul_net" || entry.Reason != allowed.Reason {
+		t.Fatalf("json entry=%+v", entry)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("json output=%q: %v", out.String(), err)
+	}
+	if _, ok := raw["governance"]; ok {
+		t.Fatalf("unknown governance metadata leaked into output: %v", raw)
+	}
+
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--format", "yaml", "192.0.2.1"}); code != 0 {
+		t.Fatalf("yaml exit=%d output=%q", code, out.String())
+	}
+	for _, want := range []string{"allowed: true", "rule_id: rul_net", "reason: allow rule 192.0.2.0/24"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("yaml output=%q missing %q", out.String(), want)
+		}
+	}
+
+	denied := sdk.PolicyDecision{Allowed: false, Reason: reasonDefaultDeny}
+	runner, out, _ = newPolicyCheckNetworkRunner(t, denied)
+	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--json", "192.0.2.1"}); code != 1 {
+		t.Fatalf("denied exit=%d output=%q", code, out.String())
+	}
+	entry = policyCheckNetworkOutput{}
+	if err := json.Unmarshal(out.Bytes(), &entry); err != nil {
+		t.Fatalf("denied json output=%q: %v", out.String(), err)
+	}
+	if entry.Allowed || entry.RuleID != "" || entry.Reason != reasonDefaultDeny {
+		t.Fatalf("denied entry=%+v", entry)
+	}
+	if strings.Contains(out.String(), "rule_id") || strings.Contains(out.String(), "governance") {
+		t.Fatalf("denied output should omit unknown metadata: %q", out.String())
+	}
+}
+
+func TestPolicyCheckNetworkOutputFields(t *testing.T) {
+	decision := sdk.PolicyDecision{Allowed: true, RuleID: "rul_net", Reason: "allow rule 192.0.2.0/24"}
+	cases := []struct {
+		name          string
+		args          []string
+		action        string
+		context       string
+		resourceValue string
+		target        string
+	}{
+		{
+			name:          "global IPv4",
+			args:          []string{"policy", "check", "network", "--json", "192.0.2.1"},
+			action:        "net:connect:tcp",
+			context:       "global",
+			resourceValue: "192.0.2.1:443",
+		},
+		{
+			name:          "scoped domain with UDP",
+			args:          []string{"policy", "check", "network", "--sandbox", "dev", "--protocol", "udp", "--json", "example.com:8443"},
+			action:        "net:connect:udp",
+			context:       "sandbox:dev",
+			resourceValue: "example.com:8443",
+		},
+		{
+			name:          "global IPv6 normalized",
+			args:          []string{"policy", "check", "network", "--json", "2001:db8::1"},
+			action:        "net:connect:tcp",
+			context:       "global",
+			resourceValue: "2001:db8::1:443",
+			target:        "[2001:db8::1]:443",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner, out, _ := newPolicyCheckNetworkRunner(t, decision)
+			if code := runner.Run(context.Background(), tc.args); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, out.String())
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+				t.Fatalf("json output=%q: %v", out.String(), err)
+			}
+			target := tc.target
+			if target == "" {
+				target = tc.resourceValue
+			}
+			for field, want := range map[string]string{
+				"action":         tc.action,
+				"context":        tc.context,
+				"resource_type":  "net:domain",
+				"resource_value": tc.resourceValue,
+				"target":         target,
+				"type":           "network",
+			} {
+				if got, ok := raw[field].(string); !ok || got != want {
+					t.Fatalf("%s = %v, want %q", field, raw[field], want)
+				}
+			}
+			if allowed, ok := raw["allowed"].(bool); !ok || !allowed {
+				t.Fatalf("allowed = %v", raw["allowed"])
+			}
+			if raw["rule_id"] != "rul_net" || raw["reason"] != decision.Reason {
+				t.Fatalf("SDK metadata missing: %v", raw)
+			}
+		})
+	}
+}
+
+func TestPolicyCheckNetworkOutputNoFabricatedGovernance(t *testing.T) {
+	runner, out, _ := newPolicyCheckNetworkRunner(t, sdk.PolicyDecision{Allowed: true})
+	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--sandbox", "dev", "--json", "example.com"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("json output=%q: %v", out.String(), err)
+	}
+	for _, field := range []string{"rule_id", "reason", "governance", "deny_kind"} {
+		if _, ok := raw[field]; ok {
+			t.Fatalf("fabricated %q in output: %v", field, raw)
+		}
+	}
+	if raw["context"] != "sandbox:dev" {
+		t.Fatalf("context = %v, want sandbox:dev", raw["context"])
+	}
+
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--sandbox", "dev", "--format", "yaml", "example.com"}); code != 0 {
+		t.Fatalf("yaml exit=%d output=%q", code, out.String())
+	}
+	for _, field := range []string{"rule_id:", "reason:", "governance:", "deny_kind:"} {
+		if strings.Contains(out.String(), field) {
+			t.Fatalf("fabricated %q in YAML output: %q", field, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), "context: sandbox:dev") {
+		t.Fatalf("yaml output=%q missing scoped context", out.String())
+	}
+}
+
+func TestPolicyCheckNetworkFlagErrors(t *testing.T) {
+	runner, out, recorder := newPolicyCheckNetworkRunner(t, sdk.PolicyDecision{Allowed: true, Reason: "allow"})
+	cases := []struct {
+		args     []string
+		code     int
+		contains string
+	}{
+		{[]string{"policy", "check", "network", "--protocol", "sctp", "192.0.2.1"}, 2, "protocol must be tcp or udp"},
+		{[]string{"policy", "check", "network", "--format", "xml", "192.0.2.1"}, 2, "invalid format"},
+		{[]string{"policy", "check", "network", "--json", "--format", "yaml", "192.0.2.1"}, 2, "cannot be combined"},
+		{[]string{"policy", "check", "network"}, 2, "usage: rsbx policy check network"},
+		{[]string{"policy", "check", "network", "--sandbox"}, 2, "flag needs an argument"},
+	}
+	for _, tc := range cases {
+		out.Reset()
+		if code := runner.Run(context.Background(), tc.args); code != tc.code || !strings.Contains(out.String(), tc.contains) {
+			t.Fatalf("%v: exit=%d output=%q want %d/%q", tc.args, code, out.String(), tc.code, tc.contains)
+		}
+	}
+	if len(recorder.calls) != 0 {
+		t.Fatalf("flag errors reached the SDK: %+v", recorder.calls)
+	}
+}
+
+func TestPolicyCheckNetworkOtherSchemeExplicitPort(t *testing.T) {
+	address, domain, port, err := parsePolicyCheckNetworkTarget("ssh://example.invalid:22/path")
+	if err != nil || address != "" || domain != "example.invalid" || port != 22 {
+		t.Fatalf("target: %q %q %d %v", address, domain, port, err)
+	}
+	if _, _, _, err := parsePolicyCheckNetworkTarget("ssh://example.invalid/path"); err == nil {
+		t.Fatal("accepted scheme with no default or explicit port")
+	}
+}

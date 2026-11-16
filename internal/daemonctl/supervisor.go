@@ -414,9 +414,10 @@ func (s *Supervisor) Inspect() Inspection {
 	if liveErr == nil {
 		return Inspection{State: StateRunning, PID: live.PID, Record: live}
 	}
-	if errors.Is(liveErr, ErrEndpointNotRunning) {
-		if errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) ||
-			errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+	recordMissing := errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) ||
+		errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err)
+	if errors.Is(liveErr, ErrEndpointNotRunning) || (recordMissing && !socketPathExists(s.Scope.Socket)) {
+		if recordMissing {
 			return Inspection{State: StateStopped}
 		}
 		return Inspection{State: StateAmbiguous, Err: err}

@@ -120,7 +120,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 			r.error(fmt.Errorf("list stored secrets before import: %w", err))
 			return 1
 		}
-		for _, item := range items {
+		for _, item := range items { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 			if item.Scope == sdk.SecretScopeGlobal {
 				existing[item.Service] = true
 			}

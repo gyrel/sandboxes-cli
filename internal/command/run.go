@@ -522,7 +522,7 @@ func prepareMultiProviderCredentials(ctx context.Context, client sdk.Client, san
 		if hasEnvironmentKey(env, provider.variable) || hasEnvironmentKey(env, provider.baseURL) {
 			continue
 		}
-		for _, secret := range secrets {
+		for _, secret := range secrets { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 			if secret.Service == provider.service && serviceSecretMatchesSandbox(secret, sandboxName) {
 				env = append(env, provider.variable+"=${proxy:"+provider.service+"}")
 				break
@@ -542,7 +542,7 @@ func hasStoredAgentCredential(ctx context.Context, client sdk.Client, service, s
 	if err != nil {
 		return false, fmt.Errorf("check stored %s credentials: %w", service, err)
 	}
-	for _, secret := range secrets {
+	for _, secret := range secrets { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		if secret.Service == service && (secret.Scope == sdk.SecretScopeGlobal || secret.Scope == sdk.SecretScopeSandbox && secret.SandboxName == sandboxName && sandboxName != "") {
 			return true, nil
 		}

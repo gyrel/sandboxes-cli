@@ -559,7 +559,7 @@ func serviceCredentialPresent(ctx context.Context, client sdk.Client, service st
 	if err != nil {
 		return false, fmt.Errorf("list service credentials before removal: %w", err)
 	}
-	for _, item := range items {
+	for _, item := range items { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		if item.Service == service && item.Scope == scope && item.SandboxName == sandboxName {
 			return true, nil
 		}

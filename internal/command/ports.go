@@ -352,15 +352,26 @@ func (r *Runner) portsMutate(ctx context.Context, sandbox string, publishFlags, 
 		r.error(err)
 		return 1
 	}
-	unpublished, err := resolveUnpublishPorts(sb.Ports, unpublishFlags)
+	unpublished, err := resolveUnpublishRequests(sb.Ports, unpublishFlags)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
-	ports, err := applyPortChanges(sb.Ports, published, unpublished)
+	removals := unpublishRemovals(unpublished)
+	ports, err := applyPortChanges(sb.Ports, published, removals)
 	if err != nil {
 		r.error(err)
 		return 1
+	}
+	if len(published) == 0 && len(removals) == 0 {
+		r.printUnpublishRequests(unpublished)
+		return 0
+	}
+	if len(published) > 0 && sb.State == sdk.StateStopped {
+		if err := ensureSandboxRunning(ctx, client, sb); err != nil {
+			r.error(err)
+			return 1
+		}
 	}
 	updated, err := sdk.Ports(client).UpdatePorts(ctx, id, ports)
 	if err != nil {
@@ -368,7 +379,7 @@ func (r *Runner) portsMutate(ctx context.Context, sandbox string, publishFlags, 
 		return 1
 	}
 	r.printPublishedPorts(updated.Ports, published)
-	r.printUnpublishedPorts(unpublished)
+	r.printUnpublishRequests(unpublished)
 	if len(published) == 0 && len(unpublished) == 0 {
 		_, _ = fmt.Fprintf(r.Out, "updated ports for %s (%d)\n", updated.Name, len(updated.Ports))
 	}
@@ -400,40 +411,88 @@ func resolvedPublishedPort(actual []sdk.Port, requested sdk.Port) (string, uint1
 	return hostIP, host
 }
 
+type unpublishRequest struct {
+	requested sdk.Port
+	guestOnly bool
+	removals  []sdk.Port
+}
+
 func (r *Runner) printUnpublishedPorts(requested []sdk.Port) {
 	for _, port := range requested {
 		_, _ = fmt.Fprintf(r.Out, "Unpublish requested for port %s -> %d\n", hostPortEndpoint(portHostIP(port), port.Host), port.Guest)
 	}
 }
 
-func resolveUnpublishPorts(existing []sdk.Port, values []string) ([]sdk.Port, error) {
-	out := make([]sdk.Port, 0, len(values))
+func (r *Runner) printUnpublishRequests(requests []unpublishRequest) {
+	for _, request := range requests {
+		if request.guestOnly {
+			_, _ = fmt.Fprintf(r.Out, "Unpublish requested for all host ports -> %d\n", request.requested.Guest)
+			continue
+		}
+		r.printUnpublishedPorts([]sdk.Port{request.requested})
+	}
+}
+
+func resolveUnpublishRequests(existing []sdk.Port, values []string) ([]unpublishRequest, error) {
+	requests := make([]unpublishRequest, 0, len(values))
 	for _, value := range values {
 		requested, err := parsePortSpec(value, false)
 		if err != nil {
 			return nil, err
 		}
 		if requested.Host != 0 {
-			out = append(out, requested)
+			requests = append(requests, unpublishRequest{
+				requested: requested,
+				removals:  []sdk.Port{requested},
+			})
 			continue
 		}
-		var match *sdk.Port
+		var removals []sdk.Port
 		for i := range existing {
-			if existing[i].Guest != requested.Guest || existing[i].Protocol != requested.Protocol || portHostIP(existing[i]) != portHostIP(requested) {
+			if sameUnpublishTarget(existing[i], requested) {
+				removals = append(removals, existing[i])
+			}
+		}
+		// Guest-only unpublish is idempotent: zero matches still succeed, report
+		// the request, and leave the sandbox untouched.
+		requests = append(requests, unpublishRequest{
+			requested: requested,
+			guestOnly: true,
+			removals:  removals,
+		})
+	}
+	return requests, nil
+}
+
+func sameUnpublishTarget(current, requested sdk.Port) bool {
+	return current.Guest == requested.Guest && current.Protocol == requested.Protocol && portHostIP(current) == portHostIP(requested)
+}
+
+func unpublishRemovals(requests []unpublishRequest) []sdk.Port {
+	type portKey struct {
+		host     uint16
+		guest    uint16
+		protocol string
+		hostIP   string
+	}
+	seen := make(map[portKey]struct{})
+	out := make([]sdk.Port, 0)
+	for _, request := range requests {
+		for _, port := range request.removals {
+			key := portKey{
+				host:     port.Host,
+				guest:    port.Guest,
+				protocol: port.Protocol,
+				hostIP:   portHostIP(port),
+			}
+			if _, exists := seen[key]; exists {
 				continue
 			}
-			if match != nil {
-				return nil, fmt.Errorf("guest port %d/%s has multiple host mappings; specify HOST_IP:HOST_PORT:GUEST", requested.Guest, requested.Protocol)
-			}
-			match = &existing[i]
+			seen[key] = struct{}{}
+			out = append(out, port)
 		}
-		if match == nil {
-			return nil, fmt.Errorf("port %s:%d/%s is not published", portHostIP(requested), requested.Guest, requested.Protocol)
-		}
-		requested.Host = match.Host
-		out = append(out, requested)
 	}
-	return out, nil
+	return out
 }
 
 func applyPortChanges(existing, published, unpublished []sdk.Port) ([]sdk.Port, error) {

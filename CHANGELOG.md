@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.0.51 — 2026-11-16
+
 - Accept interspersed flags for `ports`, `policy`, `secret`, `settings`, `cp`,
   `exec`, `get`, `wait`, `agents`, `mcp`, `env`, `kit` and `template`: flags now
   work before, between and after positional arguments, and a literal `--` ends

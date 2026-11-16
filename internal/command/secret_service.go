@@ -559,7 +559,7 @@ func serviceCredentialPresent(ctx context.Context, client sdk.Client, service st
 	if err != nil {
 		return false, fmt.Errorf("list service credentials before removal: %w", err)
 	}
-	for _, item := range items {
+	for _, item := range items { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		if item.Service == service && item.Scope == scope && item.SandboxName == sandboxName {
 			return true, nil
 		}
@@ -693,7 +693,8 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		out = append(out, serviceSecretOutput{Type: "service", Service: item.Service, Scope: string(item.Scope), SandboxName: item.SandboxName, State: storedSecretDisplay})
 	}
 	if lister, ok := sdk.RegistryCredentialList(client); ok {
@@ -702,7 +703,8 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 			r.error(regErr)
 			return 1
 		}
-		for _, item := range registries {
+		for i := range registries {
+			item := &registries[i]
 			out = append(out, serviceSecretOutput{Type: "registry", Service: item.Registry, Username: item.Username, Scope: item.Scope, SandboxName: item.SandboxName, State: storedSecretDisplay})
 		}
 	} else {

@@ -23,7 +23,7 @@ type secretRemovalChoice struct {
 
 func buildSecretRemovalChoices(inventory secretRemovalInventory, sandboxFilter string, globalOnly bool) []secretRemovalChoice {
 	choices := make([]secretRemovalChoice, 0, inventory.count())
-	for _, item := range inventory.services {
+	for _, item := range inventory.services { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		if !secretRemovalScopeMatches(string(item.Scope), item.SandboxName, sandboxFilter, globalOnly, string(sdk.SecretScopeGlobal)) {
 			continue
 		}
@@ -33,7 +33,7 @@ func buildSecretRemovalChoices(inventory secretRemovalInventory, sandboxFilter s
 		}
 		choices = append(choices, secretRemovalChoice{label: sanitizeTerminalText(label + ")"), service: item.Service, scope: item.Scope, sandbox: item.SandboxName})
 	}
-	for _, item := range inventory.registries {
+	for _, item := range inventory.registries { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		if !secretRemovalScopeMatches(item.Scope, item.SandboxName, sandboxFilter, globalOnly, string(sdk.RegistryScopeHostOnly)) {
 			continue
 		}

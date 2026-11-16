@@ -956,7 +956,7 @@ func removeSecretRemovalInventory(ctx context.Context, client sdk.Client, invent
 
 func removeServiceSecretInventory(ctx context.Context, secrets sdk.SecretService, items []sdk.ServiceSecret) (int, error) {
 	removed := 0
-	for _, item := range items {
+	for _, item := range items { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		ok, err := secrets.Remove(ctx, item.Service, item.Scope, item.SandboxName)
 		if err != nil {
 			return removed, fmt.Errorf("partial credential removal after %d entries: %w", removed, err)
@@ -969,7 +969,7 @@ func removeServiceSecretInventory(ctx context.Context, secrets sdk.SecretService
 }
 
 func removeRegistrySecretInventory(ctx context.Context, registries sdk.RegistryCredentialService, items []sdk.RegistryCredentialSummary, removed int) (int, error) {
-	for _, item := range items {
+	for _, item := range items { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		response, err := registries.Logout(ctx, sdk.RegistryLogoutRequest{
 			Registry: item.Registry, Scope: sdk.RegistryCredentialScope(item.Scope), SandboxName: item.SandboxName,
 		})
@@ -1143,7 +1143,7 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 }
 
 func registryCredentialPresent(items []sdk.RegistryCredentialSummary, registry, sandboxName string, scopes []sdk.RegistryCredentialScope) bool {
-	for _, item := range items {
+	for _, item := range items { //nolint:gocritic // SDK secret records are read-only here; indexing would obscure the filter logic.
 		if item.Registry != registry || item.SandboxName != sandboxName {
 			continue
 		}

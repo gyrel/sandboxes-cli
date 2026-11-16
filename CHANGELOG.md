@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.0.54 — 2026-11-16
+
+### Changed
+
+- Update API to v0.0.28 and Go SDK to v0.0.26; the local RPC contract remains 0.0.27.
+- Correct release candidate validation when the changelog begins with `Unreleased`.
+
 ## v0.0.53 — 2026-11-16
 
 ### Fixed

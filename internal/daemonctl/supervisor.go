@@ -410,13 +410,18 @@ func (s *Supervisor) Inspect() Inspection {
 	if err == nil {
 		return Inspection{State: StateRunning, PID: record.PID, Record: record}
 	}
+	// A missing record with no socket is stopped on every platform; check it
+	// before any platform-specific endpoint probing can report ambiguity.
+	recordMissing := errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) ||
+		errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err)
+	if recordMissing && !socketPathExists(s.Scope.Socket) {
+		return Inspection{State: StateStopped}
+	}
 	live, liveErr := s.liveEndpointIdentity()
 	if liveErr == nil {
 		return Inspection{State: StateRunning, PID: live.PID, Record: live}
 	}
-	recordMissing := errors.Is(err, ErrNoRecord) || errors.Is(err, ErrProcessNotFound) ||
-		errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err)
-	if errors.Is(liveErr, ErrEndpointNotRunning) || (recordMissing && !socketPathExists(s.Scope.Socket)) {
+	if errors.Is(liveErr, ErrEndpointNotRunning) || recordMissing {
 		if recordMissing {
 			return Inspection{State: StateStopped}
 		}

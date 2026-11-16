@@ -14,7 +14,7 @@ var completionTree = map[string][]string{
 	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
-	commandGet:        {},
+	commandGet:        {formatFlag, jsonFlag, helpShort, helpFlag},
 	"ports":           {formatFlag, jsonFlag, publishFlag, "--unpublish"},
 	policyCommand:     {formatFlag, jsonFlag, sandboxFlag},
 	startCommand:      {graceFlag, formatFlag, jsonFlag},

@@ -70,9 +70,24 @@ func TestPolicyListAndCheck(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"policy", "ls", "--json", "dev"}); code != 0 {
 		t.Fatalf("json exit=%d output=%q", code, out.String())
 	}
-	var rules []policyRuleOutput
-	if err := json.Unmarshal(out.Bytes(), &rules); err != nil || len(rules) != 2 || rules[0].Action != "allow" {
-		t.Fatalf("rules=%+v err=%v", rules, err)
+	var list policyListOutput
+	if err := json.Unmarshal(out.Bytes(), &list); err != nil || len(list.Rules) != 2 || list.Rules[0].Decision != "allow" {
+		t.Fatalf("rules=%+v err=%v", list, err)
+	}
+	if list.Rules[0].Scope != "sandbox:dev" || list.Rules[0].AppliesTo != "sandbox:dev" || list.Rules[0].SandboxID != "dev" {
+		t.Fatalf("scoped rule shape=%+v", list.Rules[0])
+	}
+	if list.Rules[0].PolicyID != "local-policy" || list.Rules[0].ResourceType != "network" {
+		t.Fatalf("rule identity shape=%+v", list.Rules[0])
+	}
+	if len(list.Rules[0].Resources) != 1 || list.Rules[0].Resources[0] != "10.0.0.0/8:443" {
+		t.Fatalf("rule resources=%+v", list.Rules[0].Resources)
+	}
+	if len(list.Rules[0].Actions) != 1 || list.Rules[0].Actions[0] != "net:connect:tcp" {
+		t.Fatalf("rule actions=%+v", list.Rules[0].Actions)
+	}
+	if list.Rules[0].Provenance.CreatedVia != "added" || list.Rules[0].Origin != "scoped" {
+		t.Fatalf("rule provenance=%+v origin=%q", list.Rules[0].Provenance, list.Rules[0].Origin)
 	}
 	out.Reset()
 	if code := runner.Run(context.Background(), []string{"policy", "check", "dev", "10.1.2.3", "443"}); code != 0 {
@@ -249,12 +264,18 @@ func TestFilesystemPolicyOutputAndCheck(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"policy", "ls", "dev", "--json"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	var rules []policyRuleOutput
-	if err := json.Unmarshal(out.Bytes(), &rules); err != nil || len(rules) != 4 {
-		t.Fatalf("rules=%+v err=%v", rules, err)
+	var list policyListOutput
+	if err := json.Unmarshal(out.Bytes(), &list); err != nil || len(list.Rules) != 4 {
+		t.Fatalf("rules=%+v err=%v", list, err)
 	}
-	if rules[0].ResourceType != "filesystem" || rules[0].Path != "/work" || rules[0].Access != "read" {
-		t.Fatalf("first rule=%+v", rules[0])
+	if list.Rules[0].ResourceType != "filesystem:read" || list.Rules[0].Decision != "allow" || list.Rules[0].Resources[0] != "/work" {
+		t.Fatalf("first rule=%+v", list.Rules[0])
+	}
+	if list.Rules[0].Editable || list.Rules[0].Provenance.CreatedVia != "provisioned" {
+		t.Fatalf("filesystem rule must not be editable: %+v", list.Rules[0])
+	}
+	if list.Rules[3].ResourceType != "filesystem:write" || list.Rules[3].Decision != "deny" {
+		t.Fatalf("read-only workspace rule=%+v", list.Rules[3])
 	}
 	for _, tc := range []struct {
 		args []string
@@ -429,7 +450,7 @@ func TestPolicyCheckNetworkOutputFormats(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--format", "table", "192.0.2.1"}); code != 0 {
 		t.Fatalf("table exit=%d output=%q", code, out.String())
 	}
-	if out.String() != "allowed: allow rule 192.0.2.0/24\n" {
+	if !strings.Contains(out.String(), "Allowed:") || !strings.Contains(out.String(), "192.0.2.1:443") {
 		t.Fatalf("table output=%q", out.String())
 	}
 
@@ -441,22 +462,22 @@ func TestPolicyCheckNetworkOutputFormats(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &entry); err != nil {
 		t.Fatalf("json output=%q: %v", out.String(), err)
 	}
-	if !entry.Allowed || entry.RuleID != "rul_net" || entry.Reason != allowed.Reason {
+	if !entry.Allowed || entry.Governance.Active || entry.Target != "192.0.2.1:443" {
 		t.Fatalf("json entry=%+v", entry)
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
 		t.Fatalf("json output=%q: %v", out.String(), err)
 	}
-	if _, ok := raw["governance"]; ok {
-		t.Fatalf("unknown governance metadata leaked into output: %v", raw)
+	if governance, ok := raw["governance"].(map[string]any); !ok || governance["active"] != false {
+		t.Fatalf("governance = %v, want {active:false}", raw["governance"])
 	}
 
 	out.Reset()
 	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--format", "yaml", "192.0.2.1"}); code != 0 {
 		t.Fatalf("yaml exit=%d output=%q", code, out.String())
 	}
-	for _, want := range []string{"allowed: true", "rule_id: rul_net", "reason: allow rule 192.0.2.0/24"} {
+	for _, want := range []string{"allowed: true", "active: false", "target: 192.0.2.1:443"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("yaml output=%q missing %q", out.String(), want)
 		}
@@ -471,11 +492,11 @@ func TestPolicyCheckNetworkOutputFormats(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &entry); err != nil {
 		t.Fatalf("denied json output=%q: %v", out.String(), err)
 	}
-	if entry.Allowed || entry.RuleID != "" || entry.Reason != reasonDefaultDeny {
+	if entry.Allowed || entry.Governance.Active {
 		t.Fatalf("denied entry=%+v", entry)
 	}
-	if strings.Contains(out.String(), "rule_id") || strings.Contains(out.String(), "governance") {
-		t.Fatalf("denied output should omit unknown metadata: %q", out.String())
+	if strings.Contains(out.String(), "rule_id") || strings.Contains(out.String(), "reason") {
+		t.Fatalf("verdict must match sbx and omit internal metadata: %q", out.String())
 	}
 }
 
@@ -541,15 +562,21 @@ func TestPolicyCheckNetworkOutputFields(t *testing.T) {
 			if allowed, ok := raw["allowed"].(bool); !ok || !allowed {
 				t.Fatalf("allowed = %v", raw["allowed"])
 			}
-			if raw["rule_id"] != "rul_net" || raw["reason"] != decision.Reason {
-				t.Fatalf("SDK metadata missing: %v", raw)
+			governance, ok := raw["governance"].(map[string]any)
+			if !ok || governance["active"] != false {
+				t.Fatalf("governance = %v, want {active:false}", raw["governance"])
+			}
+			for _, field := range []string{"rule_id", "reason", "deny_kind"} {
+				if _, ok := raw[field]; ok {
+					t.Fatalf("unexpected %q in verdict: %v", field, raw)
+				}
 			}
 		})
 	}
 }
 
-func TestPolicyCheckNetworkOutputNoFabricatedGovernance(t *testing.T) {
-	runner, out, _ := newPolicyCheckNetworkRunner(t, sdk.PolicyDecision{Allowed: true})
+func TestPolicyCheckNetworkVerdictOmitsInternalMetadata(t *testing.T) {
+	runner, out, _ := newPolicyCheckNetworkRunner(t, sdk.PolicyDecision{Allowed: true, RuleID: "rul_net", Reason: "allow rule"})
 	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--sandbox", "dev", "--json", "example.com"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
@@ -557,9 +584,9 @@ func TestPolicyCheckNetworkOutputNoFabricatedGovernance(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
 		t.Fatalf("json output=%q: %v", out.String(), err)
 	}
-	for _, field := range []string{"rule_id", "reason", "governance", "deny_kind"} {
+	for _, field := range []string{"rule_id", "reason", "deny_kind"} {
 		if _, ok := raw[field]; ok {
-			t.Fatalf("fabricated %q in output: %v", field, raw)
+			t.Fatalf("unexpected %q in verdict: %v", field, raw)
 		}
 	}
 	if raw["context"] != "sandbox:dev" {
@@ -570,9 +597,9 @@ func TestPolicyCheckNetworkOutputNoFabricatedGovernance(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"policy", "check", "network", "--sandbox", "dev", "--format", "yaml", "example.com"}); code != 0 {
 		t.Fatalf("yaml exit=%d output=%q", code, out.String())
 	}
-	for _, field := range []string{"rule_id:", "reason:", "governance:", "deny_kind:"} {
+	for _, field := range []string{"rule_id:", "reason:", "deny_kind:"} {
 		if strings.Contains(out.String(), field) {
-			t.Fatalf("fabricated %q in YAML output: %q", field, out.String())
+			t.Fatalf("unexpected %q in YAML output: %q", field, out.String())
 		}
 	}
 	if !strings.Contains(out.String(), "context: sandbox:dev") {

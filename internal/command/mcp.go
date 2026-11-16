@@ -83,11 +83,11 @@ func (r *Runner) mcpList(ctx context.Context, args []string) int {
 		return 2
 	}
 	if *format != "" {
-		if *format != "table" && *format != "json" && *format != mcpFormatYAML {
+		if *format != listFormatTable && *format != listFormatJSON && *format != mcpFormatYAML {
 			_, _ = fmt.Fprintln(r.Err, "mcp ls: --format must be table, json, or yaml")
 			return 2
 		}
-		*jsonOutput = *jsonOutput || *format == "json"
+		*jsonOutput = *jsonOutput || *format == listFormatJSON
 	}
 	client, err := r.client()
 	if err != nil {

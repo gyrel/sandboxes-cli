@@ -21,19 +21,53 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
+// policyRuleOutput is the internal rule representation used by the table
+// renderer and by rule lookup. Machine output is converted to the sbx schema
+// by policyRuleJSONFrom.
 type policyRuleOutput struct {
-	RuleID       string `json:"rule_id" yaml:"rule_id"`
-	Scope        string `json:"scope" yaml:"scope"`
-	ResourceType string `json:"resource_type" yaml:"resource_type"`
-	Action       string `json:"action" yaml:"action"`
-	Provenance   string `json:"provenance" yaml:"provenance"`
-	Origin       string `json:"origin" yaml:"origin"`
-	Protocol     string `json:"protocol" yaml:"protocol"`
-	CIDR         string `json:"cidr,omitempty" yaml:"cidr,omitempty"`
-	Domain       string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	Path         string `json:"path,omitempty" yaml:"path,omitempty"`
-	Access       string `json:"access,omitempty" yaml:"access,omitempty"`
-	Port         uint16 `json:"port" yaml:"port"`
+	RuleID       string
+	Name         string
+	SandboxID    string
+	Scope        string
+	ResourceType string
+	Action       string
+	Provenance   string
+	Origin       string
+	Protocol     string
+	CIDR         string
+	Domain       string
+	Path         string
+	Access       string
+	Port         uint16
+}
+
+type policyProvenanceOutput struct {
+	CreatedVia string `json:"created_via" yaml:"created_via"`
+	Source     string `json:"source,omitempty" yaml:"source,omitempty"`
+}
+
+// policyRuleJSON is the rule shape emitted by `sbx policy ls --json`.
+type policyRuleJSON struct {
+	ID           string                 `json:"id" yaml:"id"`
+	Name         string                 `json:"name" yaml:"name"`
+	PolicyID     string                 `json:"policy_id" yaml:"policy_id"`
+	Scope        string                 `json:"scope" yaml:"scope"`
+	AppliesTo    string                 `json:"applies_to" yaml:"applies_to"`
+	ResourceType string                 `json:"resource_type" yaml:"resource_type"`
+	Decision     string                 `json:"decision" yaml:"decision"`
+	Resources    []string               `json:"resources" yaml:"resources"`
+	Origin       string                 `json:"origin" yaml:"origin"`
+	Layer        string                 `json:"layer" yaml:"layer"`
+	Status       string                 `json:"status" yaml:"status"`
+	Editable     bool                   `json:"editable" yaml:"editable"`
+	SandboxID    string                 `json:"sandbox_id,omitempty" yaml:"sandbox_id,omitempty"`
+	Provenance   policyProvenanceOutput `json:"provenance" yaml:"provenance"`
+	Actions      []string               `json:"actions" yaml:"actions"`
+}
+
+// policyListOutput is the top-level `sbx policy ls --json` object.
+type policyListOutput struct {
+	Rules []policyRuleJSON `json:"rules" yaml:"rules"`
 }
 
 const policyListUsage = `usage: rsbx policy ls [SANDBOX] [--format table|json|yaml] [--json]
@@ -49,8 +83,9 @@ Evaluate a request against a sandbox's stored network rules.
 const policyCheckNetworkUsage = `usage: rsbx policy check network [--sandbox NAME] [--protocol tcp|udp] [--format table|json|yaml] [--json] TARGET
 
 Evaluate an IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s) URL target.
-Bare targets without a port default to 443.
-The SDK does not expose governance.active or deny_kind, so those fields are omitted.
+Bare targets without a port default to 443. JSON and YAML emit sbx's verdict
+shape: action, allowed, context, governance, resource_type, resource_value,
+target and type. Exit 0 when allowed, 1 when denied.
 `
 
 const policyCheckFilesystemUsage = `usage: rsbx policy check filesystem --sandbox NAME [--write] PATH
@@ -344,7 +379,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	policyContext := "global"
+	policyContext := policyGlobalScope
 	if *sandboxName != "" {
 		policyContext = sandboxPrefix + ":" + *sandboxName
 	}
@@ -386,24 +421,28 @@ func parsePolicyCheckNetworkTarget(target string) (string, string, uint16, error
 	return address, domain, port, nil
 }
 
-// policyCheckNetworkOutput mirrors the Docker sbx check result. action,
-// context, resource_type, resource_value, target and type are derived from the
-// checked target, while rule_id and reason are retained only when the SDK
-// supplies them. The current SDK exposes neither governance.active nor
-// deny_kind, so those fields are intentionally omitted.
+type policyGovernanceOutput struct {
+	Active bool `json:"active" yaml:"active"`
+}
+
+// policyCheckNetworkOutput mirrors the Docker sbx verdict shape exactly:
+// action, allowed, context, governance, resource_type, resource_value, target
+// and type. RuleID and Reason are kept for the human table only.
 type policyCheckNetworkOutput struct {
-	Action        string `json:"action" yaml:"action"`
-	Allowed       bool   `json:"allowed" yaml:"allowed"`
-	Context       string `json:"context" yaml:"context"`
-	ResourceType  string `json:"resource_type" yaml:"resource_type"`
-	ResourceValue string `json:"resource_value" yaml:"resource_value"`
-	Target        string `json:"target" yaml:"target"`
-	Type          string `json:"type" yaml:"type"`
-	RuleID        string `json:"rule_id,omitempty" yaml:"rule_id,omitempty"`
-	Reason        string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Action        string                 `json:"action" yaml:"action"`
+	Allowed       bool                   `json:"allowed" yaml:"allowed"`
+	Context       string                 `json:"context" yaml:"context"`
+	Governance    policyGovernanceOutput `json:"governance" yaml:"governance"`
+	ResourceType  string                 `json:"resource_type" yaml:"resource_type"`
+	ResourceValue string                 `json:"resource_value" yaml:"resource_value"`
+	Target        string                 `json:"target" yaml:"target"`
+	Type          string                 `json:"type" yaml:"type"`
+	RuleID        string                 `json:"-" yaml:"-"`
+	Reason        string                 `json:"-" yaml:"-"`
 }
 
 const (
+	policyGlobalScope         = "global"
 	policyNetworkActionPrefix = "net:connect:"
 	policyNetworkResourceType = "net:domain"
 	policyNetworkType         = "network"
@@ -417,6 +456,7 @@ func newPolicyCheckNetworkOutput(decision sdk.PolicyDecision, protocol, policyCo
 		Action:        policyNetworkActionPrefix + protocol,
 		Allowed:       decision.Allowed,
 		Context:       policyContext,
+		Governance:    policyGovernanceOutput{Active: false},
 		ResourceType:  policyNetworkResourceType,
 		ResourceValue: resourceValue,
 		Target:        normalizedTarget,
@@ -429,15 +469,20 @@ func newPolicyCheckNetworkOutput(decision sdk.PolicyDecision, protocol, policyCo
 func renderPolicyCheckNetwork(out io.Writer, format string, result policyCheckNetworkOutput) error {
 	switch format {
 	case listFormatTable:
-		verb := "denied"
+		verb := "Denied:"
 		if result.Allowed {
-			verb = "allowed"
+			verb = "Allowed:"
 		}
-		if result.Reason == "" {
-			_, _ = fmt.Fprintln(out, verb)
-			return nil
+		governance := "Local policy only"
+		if result.Governance.Active {
+			governance = "Remote governance active"
 		}
-		_, _ = fmt.Fprintf(out, "%s: %s\n", verb, result.Reason)
+		_, _ = fmt.Fprintf(out, "  %-12s %s\n", verb, result.Target)
+		_, _ = fmt.Fprintf(out, "  %-12s %s\n", "Governance:", governance)
+		_, _ = fmt.Fprintf(out, "  %-12s %s\n", "Context:", result.Context)
+		if !result.Allowed && result.Reason != "" {
+			_, _ = fmt.Fprintf(out, "  %-12s %s\n", "Reason:", result.Reason)
+		}
 		return nil
 	case listFormatYAML:
 		data, err := yaml.Marshal(result)
@@ -658,7 +703,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	rules := policyRulesFrom("global", globalAllow, globalDeny)
+	rules := policyRulesFrom(policyGlobalScope, globalAllow, globalDeny)
 	if fs.NArg() == 1 {
 		id, err := findExecSandbox(ctx, client, fs.Arg(0))
 		if err != nil {
@@ -828,16 +873,17 @@ func parsePolicyDestination(value string) (net.IP, error) {
 }
 
 func policyRules(sb *sdk.Sandbox) []policyRuleOutput {
-	out := policyRulesFrom("sandbox", sb.Allow, sb.Deny)
+	scope := sandboxPrefix + ":" + sb.Name
+	out := policyRulesFrom(scope, sb.Allow, sb.Deny)
 	for _, workspace := range sb.Workspaces {
 		readID := filesystemRuleID(workspace.Path, "read")
-		out = append(out, policyRuleOutput{RuleID: readID, Scope: sandboxPrefix, ResourceType: filesystemKeyword,
+		out = append(out, policyRuleOutput{RuleID: readID, SandboxID: sb.Name, Scope: scope, ResourceType: filesystemKeyword,
 			Action: actionAllow, Provenance: workspaceLabel, Origin: originLocal, Path: workspace.Path, Access: "read"})
 		action := actionAllow
 		if workspace.ReadOnly {
 			action = actionDeny
 		}
-		out = append(out, policyRuleOutput{RuleID: filesystemRuleID(workspace.Path, "write"), Scope: sandboxPrefix, ResourceType: filesystemKeyword,
+		out = append(out, policyRuleOutput{RuleID: filesystemRuleID(workspace.Path, "write"), SandboxID: sb.Name, Scope: scope, ResourceType: filesystemKeyword,
 			Action: action, Provenance: workspaceLabel, Origin: originLocal, Path: workspace.Path, Access: "write"})
 	}
 	return out
@@ -920,18 +966,149 @@ func (r *Runner) policyCheckFilesystem(ctx context.Context, args []string) int {
 
 func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOutput {
 	out := make([]policyRuleOutput, 0, len(allow)+len(deny))
+	sandboxID := ""
+	if strings.HasPrefix(scope, sandboxPrefix+":") {
+		sandboxID = strings.TrimPrefix(scope, sandboxPrefix+":")
+	}
 	appendRules := func(action string, rules []sdk.NetworkRule) {
 		for i := range rules {
 			protocol := rules[i].Protocol
 			if protocol == "" {
 				protocol = tcpProtocol
 			}
-			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, Scope: scope, ResourceType: networkKeyword,
+			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, SandboxID: sandboxID, Scope: scope, ResourceType: networkKeyword,
 				Action: action, Provenance: "user", Origin: originLocal, Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
 		}
 	}
 	appendRules("allow", allow)
 	appendRules("deny", deny)
+	return out
+}
+
+// policyRuleJSONFrom maps an internal rule onto the sbx rule schema.
+func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
+	id := rule.RuleID
+	if id == "" {
+		sum := sha256.Sum256([]byte(rule.Scope + "\x00" + rule.Action + "\x00" + rule.Target()))
+		id = "rul_" + hex.EncodeToString(sum[:8])
+	}
+	name := rule.Name
+	if name == "" {
+		name = id
+	}
+	scope, appliesTo := policyScopeOutput(rule)
+	resourceType := rule.ResourceType
+	actions := []string{}
+	resources := []string{}
+	origin := rule.Origin
+	if origin == "" {
+		origin = originLocal
+	}
+	editable := false
+	provenance := policyProvenanceOutput{CreatedVia: "added"}
+	switch rule.ResourceType {
+	case filesystemKeyword:
+		resourceType = "filesystem:" + rule.Access
+		resources = append(resources, rule.Path)
+		switch rule.Access {
+		case "read":
+			actions = append(actions, "fs:mount:read")
+		case "write":
+			if rule.Action == actionAllow {
+				actions = append(actions, "fs:mount:read")
+			}
+			actions = append(actions, "fs:mount:write")
+		}
+		provenance = policyProvenanceOutput{CreatedVia: "provisioned", Source: "sandboxes"}
+	default:
+		protocol := rule.Protocol
+		if protocol == "" {
+			protocol = tcpProtocol
+		}
+		actions = append(actions, policyNetworkActionPrefix+protocol)
+		resources = append(resources, rule.NetworkResource())
+		editable = rule.Origin != orgScope
+		if rule.Origin == orgScope {
+			provenance = policyProvenanceOutput{CreatedVia: "added", Source: orgScope}
+		}
+	}
+	if strings.HasPrefix(scope, sandboxPrefix+":") {
+		origin = "scoped"
+	}
+	decision := actionDeny
+	if rule.Action == actionAllow {
+		decision = actionAllow
+	}
+	return policyRuleJSON{
+		ID:           id,
+		Name:         name,
+		PolicyID:     policyIDForScope(scope),
+		Scope:        scope,
+		AppliesTo:    appliesTo,
+		ResourceType: resourceType,
+		Decision:     decision,
+		Resources:    resources,
+		Origin:       origin,
+		Layer:        originLocal,
+		Status:       "active",
+		Editable:     editable,
+		SandboxID:    rule.SandboxID,
+		Provenance:   provenance,
+		Actions:      actions,
+	}
+}
+
+func policyScopeOutput(rule policyRuleOutput) (string, string) {
+	scope := rule.Scope
+	if scope == "" {
+		scope = policyGlobalScope
+	}
+	switch scope {
+	case policyGlobalScope, orgScope:
+		return scope, "all"
+	}
+	if strings.HasPrefix(scope, sandboxPrefix+":") {
+		return scope, scope
+	}
+	if rule.SandboxID != "" {
+		scoped := sandboxPrefix + ":" + rule.SandboxID
+		return scoped, scoped
+	}
+	return scope, scope
+}
+
+func policyIDForScope(scope string) string {
+	if scope == orgScope {
+		return "org-policy"
+	}
+	return "local-policy"
+}
+
+// Target returns the network target without a port.
+func (rule policyRuleOutput) Target() string {
+	if rule.Domain != "" {
+		return rule.Domain
+	}
+	if rule.CIDR != "" {
+		return rule.CIDR
+	}
+	return rule.Path
+}
+
+// NetworkResource renders the sbx resources entry for a network rule.
+func (rule policyRuleOutput) NetworkResource() string {
+	target := rule.Target()
+	if target != "" && rule.Port != 0 {
+		return target + ":" + strconv.FormatUint(uint64(rule.Port), 10)
+	}
+	return target
+}
+
+func policyRulesOutput(rules []policyRuleOutput) policyListOutput {
+	out := policyListOutput{Rules: make([]policyRuleJSON, 0, len(rules))}
+	for i := range rules {
+		out.Rules = append(out.Rules, policyRuleJSONFrom(rules[i]))
+	}
 	return out
 }
 
@@ -978,7 +1155,7 @@ func renderPolicyRules(out io.Writer, format string, rules []policyRuleOutput) e
 		}
 		return tw.Flush()
 	case listFormatYAML:
-		data, err := yaml.Marshal(rules)
+		data, err := yaml.Marshal(policyRulesOutput(rules))
 		if err != nil {
 			return err
 		}
@@ -987,7 +1164,7 @@ func renderPolicyRules(out io.Writer, format string, rules []policyRuleOutput) e
 	default:
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(rules)
+		return encoder.Encode(policyRulesOutput(rules))
 	}
 }
 
@@ -1028,6 +1205,10 @@ const policyUsage = `Usage: rsbx policy COMMAND
 
 Commands:
   ls [SANDBOX] [--format table|json|yaml] list global and sandbox allow/deny rules
+                                          JSON/YAML emit sbx's {"rules":[...]} with
+                                          id, name, policy_id, scope, applies_to,
+                                          resource_type, decision, resources,
+                                          origin, status, provenance and actions
   inspect RULE_ID|SANDBOX [--format ...]  show one rule or sandbox policy
   log [SANDBOX] [--type all|network] [--limit N]
                                           show gateway audit decisions

@@ -1,0 +1,12 @@
+{
+  "action": "net:connect:tcp",
+  "allowed": true,
+  "context": "sandbox:dev",
+  "governance": {
+    "active": false
+  },
+  "resource_type": "net:domain",
+  "resource_value": "api.example.com:443",
+  "target": "api.example.com:443",
+  "type": "network"
+}

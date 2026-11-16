@@ -208,9 +208,11 @@ prefix) add create-time IPv4 egress rules; the default remains deny.
 `--policy-profile deny-all|balanced|sbx-compat` selects an egress preset
 (balanced: 80/443 + DNS; sbx-compat: all IPv4 network); the global default is
 `deny-all` and settings can change it. `rsbx policy ls [SANDBOX]` lists global
-and sandbox rules with `rule_id`, scope, origin, action, protocol, target and
-port; when the daemon has an organization bundle loaded, its rules are appended
-with origin `org`. `rsbx policy org [--format table|json|yaml]` shows the
+and sandbox rules. `--format json|yaml` emits Docker `sbx`'s
+`{"rules":[...]}` schema with rule id, name, policy id, scope, applies-to,
+resource type, decision, resources, origin, status, provenance and actions;
+when the daemon has an organization bundle loaded, its rules are appended with
+origin `org`. `rsbx policy org [--format table|json|yaml]` shows the
 effective organization policy: organization, bundle schema version and
 revision, payload fingerprint, enforcement state, load/expiry times, and every
 network rule marked `enforced` or `advisory`. A missing bundle prints an empty
@@ -221,8 +223,10 @@ a domain (`example.com`, `*.example.com`, `**.example.com`, single-label
 changes are applied live to running sandboxes. Domain rules require a DNS
 upstream and resolve only allowlisted names; a domain rule is enforced after a
 DNS answer is bound to its IPs. `policy check network` evaluates CIDR or domain
-targets (exit 0 allow, 1 deny). `reset`, `refresh`, approvals, HTTP methods and
-filesystem rules are not implemented. TCP and UDP are supported with explicit
+targets (exit 0 allow, 1 deny). `check network --json|--format yaml` emits
+sbx's verdict fields (`action`, `allowed`, `context`, `governance`,
+`resource_type`, `resource_value`, `target`, `type`). `reset`, `refresh`,
+approvals, HTTP methods and filesystem rules are not implemented. TCP and UDP are supported with explicit
 or ephemeral host ports; an occupied host port is rejected at create and
 dynamic updates reconcile gvproxy's forwarders without restarting the VM.
 Loopback IPv4/IPv6 bindings are supported; public bindings are rejected.
@@ -254,7 +258,11 @@ secrets in argv (prefer a bounded, permission-restricted env file).
 session. `rsbx settings ls|get|set|unset` manages
 `~/.config/rheic/settings.toml` (`dns.upstream`, `policy.profile`,
 `defaults.cpus`, `defaults.memory_mib`, `sandbox.disk.dockerVolume`, and
-`mcp.remote.allowedHosts`). The remote MCP setting is a comma-separated exact
+`mcp.remote.allowedHosts`). `settings ls --format json|yaml` and
+`settings get --json` use sbx's typed record fields: `key`, `value`, `type`,
+`source`, `default`, `env_var` when defined, and `requires_restart` when a
+daemon restart is needed. Booleans and integers are emitted as JSON booleans
+and numbers, not strings. The remote MCP setting is a comma-separated exact
 DNS host allowlist (no wildcard or IP-literal entries); an empty value disables
 remote MCP. DNS and daemon-owned consumers need a daemon restart. `rsbx secret` stores service API
 keys and registry credentials in the host keychain. Service secret values are
@@ -296,9 +304,13 @@ inside a sandbox workspace, no followed link may escape that workspace
 (including when the workspace itself is reached through a symlink); cycles and
 special files fail closed.
 
-`rsbx diagnose` checks the socket path, calls `List` with a five-second deadline,
-and reports sandbox counts; `--json` emits the same report for automation. It
-does not diagnose containerd, image, gateway, or credential state yet.
+`rsbx diagnose` grades installation, platform, storage and daemon connection
+checks. `--json`/`--format json|yaml` emit sbx's flat `version`, `checks[]`
+(`name`, `status`, `message`, `detail`, `hint`) and `summary` schema, and
+`--format github-issue` prints a Markdown issue body with the JSON report
+embedded. Warnings and skipped checks exit 0; a signed-out daemon is a warning
+because the installation is unconfigured rather than broken. Only failed
+checks, such as an unreachable daemon or an unwritable state directory, exit 1.
 `rsbx stop`/`start`, `rm` and `prune` accept `--format table|json|yaml` and
 `--json`; structured output carries operation records (or sandbox candidates
 for `prune --dry-run`). `rsbx start` verifies that the daemon can back the

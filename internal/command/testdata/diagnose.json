@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "checks": [
+    {
+      "name": "CLI binary",
+      "status": "pass",
+      "message": "found",
+      "detail": "/usr/local/bin/rsbx",
+      "hint": ""
+    },
+    {
+      "name": "Binary version",
+      "status": "pass",
+      "message": "v0.0.50",
+      "detail": "",
+      "hint": ""
+    },
+    {
+      "name": "Daemon",
+      "status": "pass",
+      "message": "healthy (v0.0.50)",
+      "detail": "",
+      "hint": ""
+    },
+    {
+      "name": "Authentication",
+      "status": "warn",
+      "message": "not signed in; run rsbx login to enable registry and account features",
+      "detail": "",
+      "hint": ""
+    },
+    {
+      "name": "ZFS offset sync",
+      "status": "skip",
+      "message": "state directory is not on ZFS",
+      "detail": "",
+      "hint": ""
+    }
+  ],
+  "summary": {
+    "pass": 3,
+    "warn": 1,
+    "fail": 0,
+    "skip": 1
+  }
+}

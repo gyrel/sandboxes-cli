@@ -257,7 +257,7 @@ func TestStartRefusesSocketWithoutRecord(t *testing.T) {
 	}
 }
 
-func TestStopSignalsOnlyVerifiedProcessAndRemovesRecord(t *testing.T) {
+func TestStopSignalsOnlyVerifiedProcess(t *testing.T) {
 	supervisor, launcher, inspector := testSupervisor(t)
 	record := writeLiveRecord(t, supervisor.Scope, inspector, 7000, "fixture:live")
 	proc := &fakeProcess{pid: 7000, done: make(chan struct{})}
@@ -272,8 +272,8 @@ func TestStopSignalsOnlyVerifiedProcessAndRemovesRecord(t *testing.T) {
 	if proc.signals+proc.kills != 1 {
 		t.Fatalf("signals=%d kills=%d", proc.signals, proc.kills)
 	}
-	if _, err := ReadRecord(supervisor.Scope.StateDir); !errors.Is(err, ErrNoRecord) {
-		t.Fatalf("record remains: %v", err)
+	if _, err := ReadRecord(supervisor.Scope.StateDir); err != nil {
+		t.Fatalf("record was removed by supervisor: %v", err)
 	}
 	if record.PID != 7000 {
 		t.Fatalf("record = %+v", record)
@@ -293,15 +293,83 @@ func TestStopRefusesIdentityMismatch(t *testing.T) {
 	}
 }
 
-func TestStopWithoutDaemonRemovesStaleState(t *testing.T) {
+func TestStopReportsEndpointRemainingAfterProcessExit(t *testing.T) {
+	supervisor, launcher, inspector := testSupervisor(t)
+	writeLiveRecord(t, supervisor.Scope, inspector, 7000, "fixture:live")
+	proc := &fakeProcess{pid: 7000, done: make(chan struct{})}
+	proc.onSignal = func() {
+		delete(inspector.identities, 7000)
+		close(proc.done)
+	}
+	launcher.processes[7000] = proc
+	if err := os.WriteFile(supervisor.Scope.Socket, []byte("endpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.Stop(context.Background()); !errors.Is(err, ErrAmbiguousState) {
+		t.Fatalf("Stop() = %v, want ambiguous state", err)
+	}
+	if _, err := os.Stat(supervisor.Scope.Socket); err != nil {
+		t.Fatalf("endpoint was removed: %v", err)
+	}
+}
+
+func TestStopWithoutDaemonPreservesStaleRecord(t *testing.T) {
 	supervisor, _, inspector := testSupervisor(t)
 	writeLiveRecord(t, supervisor.Scope, inspector, 7000, "fixture:gone")
 	delete(inspector.identities, 7000)
 	if err := supervisor.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadRecord(supervisor.Scope.StateDir); !errors.Is(err, ErrNoRecord) {
-		t.Fatalf("record remains: %v", err)
+	if _, err := ReadRecord(supervisor.Scope.StateDir); err != nil {
+		t.Fatalf("stale record was removed: %v", err)
+	}
+}
+
+func TestStartReplacesStaleRecordWhenEndpointIsAbsent(t *testing.T) {
+	supervisor, _, inspector := testSupervisor(t)
+	writeLiveRecord(t, supervisor.Scope, inspector, 7000, "fixture:gone")
+	delete(inspector.identities, 7000)
+	result, err := supervisor.Start(context.Background(), StartOptions{Detach: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := ReadRecord(supervisor.Scope.StateDir)
+	if err != nil || record.PID != result.PID || result.PID == 7000 {
+		t.Fatalf("record = %+v, result = %+v, error = %v", record, result, err)
+	}
+}
+
+func TestStopAndRestartRefuseUnverifiedEndpoint(t *testing.T) {
+	for _, staleRecord := range []bool{false, true} {
+		name := "no record"
+		if staleRecord {
+			name = "stale record"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor, launcher, inspector := testSupervisor(t)
+			if staleRecord {
+				writeLiveRecord(t, supervisor.Scope, inspector, 7000, "fixture:gone")
+				delete(inspector.identities, 7000)
+			}
+			if err := os.WriteFile(supervisor.Scope.Socket, []byte("external endpoint"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := supervisor.Stop(context.Background()); !errors.Is(err, ErrAmbiguousState) {
+				t.Fatalf("Stop() = %v, want ambiguous state", err)
+			}
+			if _, err := supervisor.Restart(context.Background(), StartOptions{}); !errors.Is(err, ErrAmbiguousState) {
+				t.Fatalf("Restart() = %v, want ambiguous state", err)
+			}
+			if _, err := supervisor.Start(context.Background(), StartOptions{}); !errors.Is(err, ErrAmbiguousState) {
+				t.Fatalf("Start() = %v, want ambiguous state", err)
+			}
+			if supervisor.Inspect().State != StateAmbiguous || len(launcher.events) != 0 {
+				t.Fatalf("inspection or launcher events: %+v, %v", supervisor.Inspect(), launcher.events)
+			}
+			if _, err := os.Stat(supervisor.Scope.Socket); err != nil {
+				t.Fatalf("endpoint was removed: %v", err)
+			}
+		})
 	}
 }
 
@@ -318,8 +386,8 @@ func TestStopWaitsThroughTransientIdentityLookupErrors(t *testing.T) {
 	if err := supervisor.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop() = %v", err)
 	}
-	if _, err := ReadRecord(supervisor.Scope.StateDir); !errors.Is(err, ErrNoRecord) {
-		t.Fatalf("record remains: %v", err)
+	if _, err := ReadRecord(supervisor.Scope.StateDir); err != nil {
+		t.Fatalf("record was removed by supervisor: %v", err)
 	}
 }
 

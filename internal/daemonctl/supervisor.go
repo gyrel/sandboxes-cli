@@ -165,8 +165,8 @@ func (s *Supervisor) prepareStart() (Record, bool, error) {
 			return Record{}, false, fmt.Errorf("%w: socket %s exists without a verified control record; remove it only after confirming no daemon is running", ErrAmbiguousState, s.Scope.Socket)
 		}
 	case errors.Is(err, ErrProcessNotFound):
-		if err := s.removeStaleRecord(); err != nil {
-			return Record{}, false, err
+		if socketPathExists(s.Scope.Socket) {
+			return Record{}, false, fmt.Errorf("%w: endpoint exists but the recorded process is gone; stop the external daemon manually and verify the endpoint before removing stale state", ErrAmbiguousState)
 		}
 	default:
 		return Record{}, false, fmt.Errorf("refusing to start daemon: %w", err)
@@ -178,17 +178,6 @@ func (s *Supervisor) prepareStart() (Record, bool, error) {
 		return Record{}, false, err
 	}
 	return Record{}, false, nil
-}
-
-func (s *Supervisor) removeStaleRecord() error {
-	record, err := ReadRecord(s.Scope.StateDir)
-	if err != nil {
-		return err
-	}
-	if err := removeStaleSocket(s.Scope.Socket); err != nil {
-		return fmt.Errorf("remove stale daemon socket: %w", err)
-	}
-	return RemoveRecord(s.Scope.StateDir, record)
 }
 
 func (s *Supervisor) runningResult(record Record) StartResult {
@@ -287,9 +276,15 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoRecord):
+			if socketPathExists(s.Scope.Socket) {
+				return fmt.Errorf("%w: endpoint exists without a verified control record; the daemon may have been started externally, stop it manually after verifying its identity", ErrAmbiguousState)
+			}
 			return nil
 		case errors.Is(err, ErrProcessNotFound):
-			return s.removeStaleRecord()
+			if socketPathExists(s.Scope.Socket) {
+				return fmt.Errorf("%w: endpoint exists but the recorded process is gone; a daemon may have been started externally, stop it manually after verifying its identity", ErrAmbiguousState)
+			}
+			return nil
 		default:
 			return fmt.Errorf("refusing to stop daemon: %w", err)
 		}
@@ -309,7 +304,12 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	if err := s.waitStopped(ctx, record); err != nil {
 		return err
 	}
-	return RemoveRecord(s.Scope.StateDir, record)
+	if socketPathExists(s.Scope.Socket) {
+		return fmt.Errorf("%w: recorded daemon stopped but its endpoint still exists; verify the endpoint before removing stale state", ErrAmbiguousState)
+	}
+	// The daemon removes its own record during shutdown. Do not remove it here:
+	// another daemon may have published a replacement while this one exited.
+	return nil
 }
 
 func (s *Supervisor) waitStopped(ctx context.Context, record Record) error {
@@ -375,6 +375,9 @@ func (s *Supervisor) Inspect() Inspection {
 	}
 	switch {
 	case errors.Is(err, ErrProcessNotFound):
+		if socketPathExists(s.Scope.Socket) {
+			return Inspection{State: StateAmbiguous, Err: fmt.Errorf("%w: endpoint exists but the recorded process is gone", ErrAmbiguousState)}
+		}
 		return Inspection{State: StateStopped}
 	case errors.Is(err, ErrNoRecord):
 		if socketPathExists(s.Scope.Socket) {

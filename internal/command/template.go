@@ -22,6 +22,16 @@ save/load/rm are not implemented: this build does not snapshot or import
 sandbox images. Use --image or a local kit for a custom image.
 `
 
+const templateListUsage = `usage: rsbx template ls [--format table|json|yaml] [--json]
+
+List built-in agent template images.
+`
+
+const templateInspectUsage = `usage: rsbx template inspect NAME [--json]
+
+Show the pinned image, command and status for one template.
+`
+
 type templateOutput struct {
 	Name    string `json:"name" yaml:"name"`
 	Image   string `json:"image,omitempty" yaml:"image,omitempty"`
@@ -55,8 +65,10 @@ func (r *Runner) template(args []string) int {
 }
 
 func (r *Runner) templateList(args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("template ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, templateListUsage) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
@@ -66,7 +78,7 @@ func (r *Runner) templateList(args []string) int {
 		return r.flagParseFailure("template ls", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprint(r.Err, templateUsage)
+		_, _ = fmt.Fprint(r.Err, templateListUsage)
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -111,8 +123,10 @@ func (r *Runner) templateList(args []string) int {
 }
 
 func (r *Runner) templateInspect(args []string) int {
+	args = reorderFlagArgs(args, nil)
 	fs := flag.NewFlagSet("template inspect", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, templateInspectUsage) }
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -121,7 +135,7 @@ func (r *Runner) templateInspect(args []string) int {
 		return r.flagParseFailure("template inspect", err)
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprint(r.Err, "usage: rsbx template inspect NAME [--json]\n")
+		_, _ = fmt.Fprint(r.Err, templateInspectUsage)
 		return 2
 	}
 	rows, err := templateRows()

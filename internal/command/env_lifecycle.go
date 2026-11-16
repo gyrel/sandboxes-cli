@@ -67,7 +67,7 @@ type environmentCreateOptions struct {
 
 func parseEnvironmentCreateOptions(r *Runner, args []string) (environmentCreateOptions, error) {
 	fs := flag.NewFlagSet("env create", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "apply without prompting")
 	fs.BoolVar(force, "f", false, "apply without prompting")
 	name := fs.String("name", "", "override the environment sandbox name")
@@ -75,7 +75,7 @@ func parseEnvironmentCreateOptions(r *Runner, args []string) (environmentCreateO
 	fs.Var(&envArguments, "env-arg", "value for a declared environment argument (repeatable)")
 	fs.Var(&envArgumentFiles, "env-args-file", "file of name=value environment arguments (repeatable)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env create [PATH...] [--force] [--name NAME]\n\nApply the supported environment plan and create a sandbox without attaching.\nUnsupported fields fail closed.\n")
+		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env create [PATH...] [--force] [--name NAME]\n\nApply the supported environment plan and create a sandbox without attaching.\nUnsupported fields fail closed.\n")
 	}
 	valueFlags := map[string]bool{nameFlag: true, envArgFlag: true, envArgsFileFlag: true}
 	if err := fs.Parse(reorderFlagArgs(args, valueFlags)); err != nil {
@@ -343,7 +343,7 @@ func consumeEnvironmentExecFlag(args []string, index int) ([]string, []string, i
 
 func isEnvironmentExecBooleanFlag(arg string) bool {
 	switch arg {
-	case "-i", "--interactive", "-t", "--tty", "-it", "-ti":
+	case "-i", interactiveFlag, "-t", ttyFlag, combinedTTYFlag, combinedTTYRev:
 		return true
 	default:
 		return false

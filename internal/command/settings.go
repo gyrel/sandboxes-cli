@@ -35,6 +35,22 @@ defaults.cpus, defaults.memory_mib, sandbox.disk.dockerVolume,
 mcp.remote.allowedHosts (restart required).
 Unknown keys are rejected.
 `
+	settingsListUsage = `usage: rsbx settings ls [--format table|json|yaml] [--json]
+
+List the full setting catalog and the effective source of each value.
+`
+	settingsGetUsage = `usage: rsbx settings get KEY [--json] [--format table|json|yaml]
+
+Print one setting value or its full catalog record.
+`
+	settingsSetUsage = `usage: rsbx settings set KEY VALUE
+
+Set a validated setting override in the host settings file.
+`
+	settingsUnsetUsage = `usage: rsbx settings unset KEY
+
+Remove a setting override and restore the built-in default.
+`
 	settingDockerVolume   = "sandbox.disk.dockerVolume"
 	settingMCPRemoteHosts = "mcp.remote.allowedHosts"
 )
@@ -81,8 +97,10 @@ func (r *Runner) settingsPath() string {
 }
 
 func (r *Runner) settingsList(args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("settings ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, settingsListUsage) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
@@ -92,7 +110,7 @@ func (r *Runner) settingsList(args []string) int {
 		return r.flagParseFailure("settings ls", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings ls [--format table|json|yaml]")
+		_, _ = fmt.Fprint(r.Err, settingsListUsage)
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -196,6 +214,7 @@ func (r *Runner) settingsGet(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("settings get", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, settingsGetUsage) }
 	jsonOutput := fs.Bool("json", false, "print the full setting record")
 	format := fs.String("format", "", "output format: table, json or yaml")
 	if err := fs.Parse(args); err != nil {
@@ -253,8 +272,12 @@ func (r *Runner) printSettingRecord(row settingOutput, selected string) int {
 }
 
 func (r *Runner) settingsSet(args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, settingsSetUsage)
+		return 0
+	}
 	if len(args) != 2 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings set KEY VALUE")
+		_, _ = fmt.Fprint(r.Err, settingsSetUsage)
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -278,8 +301,12 @@ func (r *Runner) settingsSet(args []string) int {
 }
 
 func (r *Runner) settingsUnset(args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, settingsUnsetUsage)
+		return 0
+	}
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings unset KEY")
+		_, _ = fmt.Fprint(r.Err, settingsUnsetUsage)
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())

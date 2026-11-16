@@ -97,12 +97,12 @@ func TestMCPApprovalPromptsHideArgumentValues(t *testing.T) {
 func TestMCPHostCommandsDocumentSecretAndApprovalLimits(t *testing.T) {
 	var out, stderr strings.Builder
 	runner := &Runner{Out: &out, Err: &stderr, In: strings.NewReader("")}
-	if code := runner.Run(context.Background(), []string{"mcp", "add", "--help"}); code != 0 || !strings.Contains(stderr.String(), "secret set mcp:") {
-		t.Fatalf("mcp add help code=%d stderr=%q", code, stderr.String())
+	if code := runner.Run(context.Background(), []string{"mcp", "add", "--help"}); code != 0 || !strings.Contains(out.String(), "secret set mcp:") || stderr.Len() != 0 {
+		t.Fatalf("mcp add help code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
-	stderr.Reset()
-	if code := runner.Run(context.Background(), []string{"mcp", "call", "--help"}); code != 0 || !strings.Contains(stderr.String(), "values are hidden") {
-		t.Fatalf("mcp call help code=%d stderr=%q", code, stderr.String())
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"mcp", "call", "--help"}); code != 0 || !strings.Contains(out.String(), "values are hidden") || stderr.Len() != 0 {
+		t.Fatalf("mcp call help code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
 }
 

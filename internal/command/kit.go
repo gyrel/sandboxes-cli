@@ -31,6 +31,16 @@ Commands:
   ls [DIR]                                  list local .yaml kits
 `
 
+const kitInspectUsage = `usage: rsbx kit inspect FILE_OR_DIR [--format table|json|yaml] [--json]
+
+Validate and print a local kit definition.
+`
+
+const kitListUsage = `usage: rsbx kit ls [DIR]
+
+List local .yaml kit files in DIR (default: current directory).
+`
+
 func (r *Runner) kit(args []string) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, kitUsage)
@@ -51,18 +61,23 @@ func (r *Runner) kit(args []string) int {
 }
 
 func (r *Runner) kitInspect(args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, kitInspectUsage)
+		return 0
+	}
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("kit inspect", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	if err := fs.Parse(moveKitInspectFlags(args)); err != nil {
+	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("kit inspect", err)
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx kit inspect FILE_OR_DIR [--format table|json|yaml]")
+		_, _ = fmt.Fprint(r.Err, kitInspectUsage)
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -141,33 +156,13 @@ func (r *Runner) printV3Kit(doc *kit.V3Descriptor, selected string) int {
 	}
 }
 
-func moveKitInspectFlags(args []string) []string {
-	flags := make([]string, 0, len(args))
-	positionals := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			positionals = append(positionals, args[i+1:]...)
-			break
-		}
-		if !strings.HasPrefix(arg, "-") {
-			positionals = append(positionals, arg)
-			continue
-		}
-		flags = append(flags, arg)
-		if arg == formatFlag || arg == "-format" {
-			if i+1 < len(args) {
-				i++
-				flags = append(flags, args[i])
-			}
-		}
-	}
-	return append(flags, positionals...)
-}
-
 func (r *Runner) kitList(args []string) int {
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		_, _ = fmt.Fprint(r.Out, kitListUsage)
+		return 0
+	}
 	if len(args) > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx kit ls [DIR]")
+		_, _ = fmt.Fprint(r.Err, kitListUsage)
 		return 2
 	}
 	dir := "."

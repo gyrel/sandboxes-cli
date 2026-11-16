@@ -14,6 +14,21 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
+const execUsage = `usage: rsbx exec [-i] [-t] [-w DIR] [-e KEY=VALUE] [--env-file FILE] [-u uid[:gid]] SANDBOX COMMAND [ARG...]
+
+Run a command in an existing sandbox, starting it first if it is stopped.
+Flags may appear before, between or after arguments; use -- to end flag parsing.
+
+Flags:
+  -i, --interactive        keep stdin open
+  -t, --tty                allocate a terminal
+  -w, --workdir DIR        guest working directory
+  -e, --env KEY=VALUE      environment override (repeatable)
+      --env-file FILE      read environment overrides from a file (repeatable)
+  -u, --user USER          uid[:gid] or name[:group]
+  -h, --help               show this help
+`
+
 type execOptions struct {
 	workdir string
 	env     []string
@@ -32,7 +47,8 @@ func (f *stringListFlag) Set(value string) error {
 // exec runs a command in an existing sandbox.
 func (r *Runner) exec(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, execUsage) }
 	var opts execOptions
 	var envFlags, envFiles stringListFlag
 	var interactive, tty bool
@@ -47,14 +63,14 @@ func (r *Runner) exec(ctx context.Context, args []string) int {
 	fs.Var(&envFiles, "env-file", "read KEY=VALUE overrides from a file")
 	fs.StringVar(&opts.user, "u", "", "uid[:gid] or name[:group]")
 	fs.StringVar(&opts.user, "user", "", "uid[:gid] or name[:group]")
-	if err := fs.Parse(expandExecFlags(args)); err != nil {
+	if err := fs.Parse(reorderExecArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("exec", err)
 	}
 	if fs.NArg() < 2 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx exec [-i] [-t] [-w DIR] [-e KEY=VALUE] [--env-file FILE] [-u uid[:gid]] SANDBOX COMMAND [ARG...]")
+		_, _ = fmt.Fprint(r.Err, execUsage)
 		return 125
 	}
 	env, err := buildExecEnv(envFlags, envFiles)
@@ -100,13 +116,73 @@ func expandExecFlags(args []string) []string {
 		if execFlagTakesValue(arg) && !strings.Contains(arg, "=") && i+1 < len(args) {
 			return append(expanded, append([]string{arg, args[i+1]}, expandExecFlags(args[i+2:])...)...)
 		}
-		if arg == "-it" || arg == "-ti" {
+		if arg == combinedTTYFlag || arg == combinedTTYRev {
 			expanded = append(expanded, "-i", "-t")
 		} else {
 			expanded = append(expanded, arg)
 		}
 	}
 	return expanded
+}
+
+// reorderExecArgs accepts exec flags before, between or after positional
+// arguments while keeping the command and its arguments in order. Known exec
+// flags are moved ahead of the sandbox; unknown dash-prefixed tokens after the
+// sandbox stay with the command so command flags are not consumed. A literal
+// -- ends flag parsing, exactly like the other commands.
+func reorderExecArgs(args []string) []string {
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	endOfFlags := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			endOfFlags = true
+			break
+		}
+		if arg == combinedTTYFlag || arg == combinedTTYRev {
+			flags = append(flags, "-i", "-t")
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals = append(positionals, arg)
+			continue
+		}
+		name, _, hasValue := strings.Cut(arg, "=")
+		switch {
+		case isExecBooleanFlag(name):
+			flags = append(flags, arg)
+		case execFlagTakesValue(name):
+			flags = append(flags, arg)
+			if !hasValue && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+		case len(positionals) == 0:
+			// An unknown flag before the sandbox is still an error.
+			flags = append(flags, arg)
+		default:
+			// After the sandbox, leave unknown dash-prefixed tokens to the
+			// command; users can use -- to be explicit.
+			positionals = append(positionals, arg)
+		}
+	}
+	reordered := make([]string, 0, len(flags)+len(positionals)+1)
+	reordered = append(reordered, flags...)
+	if endOfFlags {
+		reordered = append(reordered, "--")
+	}
+	return append(reordered, positionals...)
+}
+
+func isExecBooleanFlag(name string) bool {
+	switch name {
+	case "-i", interactiveFlag, "-t", ttyFlag, helpShort, helpFlag:
+		return true
+	default:
+		return false
+	}
 }
 
 func execFlagTakesValue(arg string) bool {

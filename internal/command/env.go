@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -48,13 +49,13 @@ func (r *Runner) environment(ctx context.Context, args []string) int {
 
 func (r *Runner) environmentPlan(args []string) int {
 	fs := flag.NewFlagSet("env plan", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
 	name := fs.String("name", "", "override the environment sandbox name")
 	var envArguments, envArgumentFiles repeatedStringFlag
 	fs.Var(&envArguments, "env-arg", "value for an argument declared in sbxenv.yaml (repeatable)")
 	fs.Var(&envArgumentFiles, "env-args-file", "file of name=value environment arguments (repeatable)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nYAML values expand env.projectDir and env.fileDir references. Declared ports are validated and displayed without opening sockets. Argument values are validated, redacted, and interpolated once into YAML values; kit arguments are unsupported.\n  --name NAME                 override the sandbox name\n  --env-arg name=value        set a declared environment argument (repeatable; overrides files)\n  --env-args-file PATH        read name=value arguments (repeatable)\n\nValues passed through --env-arg may be visible in host process listings; use --env-args-file for sensitive values. This is a static preview only; it does not apply changes or inspect daemon state.\n")
+		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nYAML values expand env.projectDir and env.fileDir references. Declared ports are validated and displayed without opening sockets. Argument values are validated, redacted, and interpolated once into YAML values; kit arguments are unsupported.\n  --name NAME                 override the sandbox name\n  --env-arg name=value        set a declared environment argument (repeatable; overrides files)\n  --env-args-file PATH        read name=value arguments (repeatable)\n\nValues passed through --env-arg may be visible in host process listings; use --env-args-file for sensitive values. This is a static preview only; it does not apply changes or inspect daemon state.\n")
 	}
 	valueFlags := map[string]bool{nameFlag: true, envArgFlag: true, envArgsFileFlag: true}
 	if err := fs.Parse(reorderFlagArgs(args, valueFlags)); err != nil {

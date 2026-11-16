@@ -266,9 +266,24 @@ func displayPortProtocol(protocol, hostIP string) string {
 	return base + family
 }
 
+const portsUsage = `usage: rsbx ports [--publish SPEC] [--unpublish SPEC] [--format table|json|yaml] SANDBOX
+
+List, publish or unpublish sandbox ports. Flags may appear before, between or
+after arguments; use -- to end flag parsing.
+
+Flags:
+      --publish SPEC      publish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO] (repeatable)
+      --unpublish SPEC    unpublish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO] (repeatable)
+      --format FORMAT     output format: table, json or yaml
+      --json              output in JSON format
+  -h, --help              show this help
+`
+
 func (r *Runner) ports(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, "--publish": true, "--unpublish": true})
 	fs := flag.NewFlagSet("ports", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, portsUsage) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	var publishFlags, unpublishFlags stringListFlag
@@ -278,10 +293,10 @@ func (r *Runner) ports(ctx context.Context, args []string) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		return 2
+		return r.flagParseFailure("ports", err)
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx ports [--publish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO]] [--unpublish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO]] [--format table|json|yaml] SANDBOX")
+		_, _ = fmt.Fprint(r.Err, portsUsage)
 		return 2
 	}
 	if len(publishFlags) > 0 || len(unpublishFlags) > 0 {

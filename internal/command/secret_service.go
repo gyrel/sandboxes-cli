@@ -613,6 +613,7 @@ func (r *Runner) removeSecretChoice(ctx context.Context, client sdk.Client, choi
 
 //nolint:gocognit,gocyclo,cyclop,funlen // one command renders two credential types and three formats.
 func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, sandboxFlag: true, serviceFlag: true})
 	fs := flag.NewFlagSet("secret ls", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")

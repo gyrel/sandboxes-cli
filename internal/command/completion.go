@@ -11,7 +11,7 @@ import (
 var completionTree = map[string][]string{
 	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, removeFlag, newFlag, helpShort, helpFlag},
 	commandCreate:     {nameFlag, "--workspace", publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, cpusFlag, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag},
-	commandExec:       {"-i", "--interactive", "-t", "--tty", "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
+	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
 	commandGet:        {},
@@ -19,14 +19,14 @@ var completionTree = map[string][]string{
 	policyCommand:     {formatFlag, jsonFlag, sandboxFlag},
 	startCommand:      {graceFlag, formatFlag, jsonFlag},
 	stopCommand:       {graceFlag, formatFlag, jsonFlag},
-	"rm":              {"-f", forceFlag, "--all", formatFlag, jsonFlag},
+	"rm":              {"-f", forceFlag, allFlag, formatFlag, jsonFlag},
 	"prune":           {"--dry-run", "-f", forceFlag, "--filter", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
 	"wait":            {},
 	"attach":          {"--shell", helpShort, helpFlag},
-	"login":           {usernameFlag, "--password-stdin"},
+	"login":           {usernameFlag, passwordStdinFlag},
 	"logout":          {"-f", forceFlag},
-	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, tokenFlag, "-t", forceFlag, "-f", refFlag, commandFlag, globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
+	secretCommand:     {registryFlag, usernameFlag, passwordStdinFlag, allSandboxesFlag, allFlag, "--dry-run", sandboxFlag, oauthFlag, tokenFlag, "-t", forceFlag, "-f", refFlag, commandFlag, globalFlag, "-g", serviceFlag, "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	mcpCommand:        {commandFlag, mcpArgsFlagName, "--dir", formatFlag, jsonFlag, quietLongFlag, forceFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	commandAgents:     {formatFlag, jsonFlag},
@@ -267,7 +267,7 @@ func flagsTakingValue(flags []string) []string {
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
 		usernameFlag: true, registryFlag: true, sandboxFlag: true,
 		"--socket": true, envArgFlag: true, envArgsFileFlag: true, refreshFlag: true,
-		"--service": true, refFlag: true, commandFlag: true, tokenFlag: true,
+		serviceFlag: true, refFlag: true, commandFlag: true, tokenFlag: true,
 	}
 	out := make([]string, 0, len(flags))
 	for _, flag := range flags {

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Accept interspersed flags for `ports`, `policy`, `secret`, `settings`, `cp`,
+  `exec`, `get`, `wait`, `agents`, `mcp`, `env`, `kit` and `template`: flags now
+  work before, between and after positional arguments, and a literal `--` ends
+  flag parsing. `exec` keeps command arguments in order while moving recognized
+  exec flags.
+- Make help consistent for every command and subcommand: `rsbx CMD --help` and
+  `rsbx help CMD` print to stdout and exit 0 instead of writing to stderr,
+  printing nothing, or failing with exit 2.
+
 ## v0.0.50 — 2026-11-15
 
 - Validate the daemon-published clone endpoint as a random per-sandbox token

@@ -21,6 +21,11 @@ install or supervise a host service. Run rheicd/sandboxesd from your process
 manager instead.
 `
 
+const daemonStatusUsage = `usage: rsbx daemon status [--json]
+
+Show the daemon socket, version and sandbox counts.
+`
+
 func (r *Runner) daemon(args []string) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, daemonUsage)
@@ -56,15 +61,16 @@ type daemonStatusOutput struct {
 func (r *Runner) daemonStatus(args []string) int {
 	fs := flag.NewFlagSet("daemon status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, daemonStatusUsage) }
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("daemon status", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx daemon status [--json]")
+		_, _ = fmt.Fprint(r.Err, daemonStatusUsage)
 		return 2
 	}
 	out := daemonStatusOutput{Socket: r.Socket, State: stateUnavailable}

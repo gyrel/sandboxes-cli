@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.0.53 — 2026-11-16
+
+### Fixed
+
+- `daemon stop` no longer reports success when an endpoint exists without a
+  verified daemon control record. It refuses to signal an unverified process
+  and explains that an externally started daemon must be stopped manually.
+- `daemon start` and `restart` preserve unverified endpoints and control
+  records rather than removing state that could belong to another process.
+  After a crash, verify any remaining endpoint before removing it manually.
+
 ## v0.0.52 — 2026-11-16
 
 ### Changed

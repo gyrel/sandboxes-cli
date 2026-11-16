@@ -98,16 +98,19 @@ func TestAgentCreateAcceptsReadOnlyAdditionalWorkspace(t *testing.T) {
 	}
 }
 
-func TestAgentlessCreateKeepsReadOnlyPrimaryWorkspace(t *testing.T) {
+func TestCreateRejectsLegacyNameGrammar(t *testing.T) {
 	workspace := t.TempDir()
-	sandbox := &recordingCreateSandbox{}
+	called := false
 	var output bytes.Buffer
-	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
-	if code := runner.Run(context.Background(), []string{"create", "local", workspace + ":ro"}); code != 0 {
-		t.Fatalf("exit=%d output=%q", code, output.String())
+	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) {
+		called = true
+		return fakeClient{}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"create", "local", workspace}); code != 2 || called {
+		t.Fatalf("exit=%d connected=%t output=%q", code, called, output.String())
 	}
-	if len(sandbox.request.Workspaces) != 1 || !sandbox.request.Workspaces[0].ReadOnly {
-		t.Fatalf("workspaces=%+v", sandbox.request.Workspaces)
+	if !strings.Contains(output.String(), `unknown agent "local"`) {
+		t.Fatalf("output=%q", output.String())
 	}
 }
 

@@ -34,7 +34,6 @@ const (
 	commandRun        = "run"
 	envArgFlag        = "--env-arg"
 	envArgsFileFlag   = "--env-args-file"
-	workspaceLabel    = "workspace"
 	commandGet        = "get"
 	commandInspect    = "inspect"
 	commandReset      = "reset"
@@ -53,16 +52,14 @@ const (
 	originLocal       = "local"
 )
 
-const createUsage = `usage: rsbx create [AGENT] [PATH...] [--name NAME] [flags]
+const createUsage = `usage: rsbx create AGENT [PATH...] [--name NAME] [flags]
 
 Create a sandbox for an agent. Use ` + "`rsbx agents`" + ` to list launchable built-in
-agents and their pinned images. Omit PATH for no workspace mount. An agent's
-primary workspace must be read/write; additional workspaces may use :ro or
-:readonly. Agentless sandboxes can use a read-only primary workspace.
+agents and their pinned images. Omit PATH for no workspace mount. The primary
+workspace must be read/write; additional PATHs may use :ro or :readonly.
 
 Flags:
   --name NAME                 sandbox name
-  --workspace PATH[:ro]       additional workspace (repeatable)
   --clone                     use a private in-guest Git clone of PATH
   -p, --publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
                               publish a TCP/UDP guest port (repeatable)
@@ -203,7 +200,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.version(ctx, rest[1:])
 	case commandCreate:
 		return r.create(ctx, rest[1:])
-	case "ls", commandList:
+	case "ls":
 		return r.list(ctx, rest[1:])
 	case commandGet:
 		return r.get(ctx, rest[1:])
@@ -211,7 +208,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.start(ctx, rest[1:])
 	case stopCommand:
 		return r.stop(ctx, rest[1:])
-	case "rm", commandDelete:
+	case "rm":
 		return r.remove(ctx, rest[1:])
 	case "wait":
 		return r.wait(ctx, rest[1:])
@@ -324,7 +321,7 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.accountLogin(ctx, args), true
 	case "logout":
 		return r.accountLogout(ctx, args), true
-	case secretCommand, "secrets":
+	case secretCommand:
 		return r.secret(ctx, args), true
 	case "prune":
 		return r.prune(ctx, args), true
@@ -1590,27 +1587,13 @@ func formatMemoryMiB(mib uint32) string {
 
 func parseCreatePositionals(positionals []string, nameFlag string) (string, string, []string, error) {
 	if len(positionals) == 0 {
-		return "", "", nil, errors.New("usage: rsbx create [AGENT] [PATH...] [--name NAME] [--cpus N] [--memory SIZE] [--image REF]")
+		return "", "", nil, errors.New("usage: rsbx create AGENT [PATH...] [--name NAME] [--cpus N] [--memory SIZE] [--image REF]")
 	}
-	agent := ""
-	paths := []string(nil)
-	name := nameFlag
-	if isAgentName(positionals[0]) {
-		agent = positionals[0]
-		paths = positionals[1:]
-	} else {
-		if name != "" {
-			return "", "", nil, errors.New("--name requires an agent argument (for example: rsbx create --name dev shell PATH)")
-		}
-		name = positionals[0]
-		paths = positionals[1:]
+	agent := positionals[0]
+	if err := validateRunAgent(agent); err != nil {
+		return "", "", nil, err
 	}
-	if agent != "" {
-		if err := validateRunAgent(agent); err != nil {
-			return "", "", nil, err
-		}
-	}
-	return name, agent, paths, nil
+	return nameFlag, agent, positionals[1:], nil
 }
 
 // resolveTemplateImage applies the Docker sbx baseline --template alias.
@@ -1636,13 +1619,6 @@ func validateCreateResources(cpus uint, memory string) (uint32, uint32, error) {
 	return cpuCount, memoryMiB, nil
 }
 
-func resolveCreateWorkspaces(workspaceFlags stringListFlag, paths []string) ([]sdk.Workspace, error) {
-	combined := make(stringListFlag, 0, len(workspaceFlags)+len(paths))
-	combined = append(combined, workspaceFlags...)
-	combined = append(combined, paths...)
-	return resolveWorkspaces(combined, false)
-}
-
 //nolint:gocyclo,cyclop,funlen // create accepts the full documented flag matrix.
 func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool, error) {
 	fs := flag.NewFlagSet(commandCreate, flag.ContinueOnError)
@@ -1651,8 +1627,6 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	template := fs.String("template", "", "container image to use for the sandbox (alias for --image)")
 	fs.StringVar(template, "t", "", "container image to use for the sandbox (alias for --image)")
 	nameFlag := fs.String("name", "", "sandbox name")
-	var workspaceFlags stringListFlag
-	fs.Var(&workspaceFlags, workspaceLabel, "host workspace path, optionally suffixed with :ro (repeatable)")
 	var publishFlags stringListFlag
 	fs.Var(&publishFlags, "publish", "publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6] (repeatable)")
 	fs.Var(&publishFlags, "p", "publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6] (repeatable; alias for --publish)")
@@ -1667,7 +1641,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	cpus := fs.Uint("cpus", 0, "CPUs (0 selects the daemon default)")
 	memory := fs.String("memory", "", "memory limit such as 512m or 2g (empty selects the daemon default)")
 	fs.StringVar(memory, "m", "", "memory limit (alias for --memory)")
-	profile := fs.String("policy-profile", "", "egress profile: deny-all, balanced or sbx-compat")
+	profile := fs.String("policy-profile", "", "egress profile: allow-all, balanced, deny-all or sbx-compat")
 	privileged := fs.Bool("docker", false, "run the dedicated Docker profile")
 	cloneMode := fs.Bool("clone", false, "run the agent on a private in-guest clone of PATH")
 	kitPath := fs.String("kit", "", "apply a local kit definition")
@@ -1700,12 +1674,12 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	}
 	var oauthCredentials []sdk.OAuthCredential
 	if *kitPath != "" {
-		kitPaths := []string(workspaceFlags)
+		kitPaths := make([]string, 0, len(paths))
 		kitEnv := []string(envFlags)
 		if err := applyKit(ctx, *kitPath, &agent, &imageRef, profile, &kitPaths, &kitEnv, &oauthCredentials); err != nil {
 			return createOptions{}, false, err
 		}
-		workspaceFlags = kitPaths
+		paths = append(kitPaths, paths...)
 		envFlags = stringListFlag(kitEnv)
 	}
 	applyAgentDefaults(agent, &imageRef, privileged)
@@ -1713,7 +1687,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	if err != nil {
 		return createOptions{}, false, err
 	}
-	workspaces, cloneOptions, err := prepareCreateWorkspaces(ctx, workspaceFlags, paths, denyWriteFlags, *cloneMode, agent != "")
+	workspaces, cloneOptions, err := prepareCreateWorkspaces(ctx, paths, denyWriteFlags, *cloneMode)
 	if err != nil {
 		return createOptions{}, false, err
 	}
@@ -1751,15 +1725,15 @@ func reorderCreateArgs(fs *flag.FlagSet, args []string) []string {
 
 var errPrimaryWorkspaceReadOnly = errors.New("primary workspace must be read/write (remove ':ro' or ':readonly')")
 
-func prepareCreateWorkspaces(ctx context.Context, workspaceFlags stringListFlag, paths, denyWrites []string, clone, agent bool) ([]sdk.Workspace, *sdk.CloneOptions, error) {
+func prepareCreateWorkspaces(ctx context.Context, paths, denyWrites []string, clone bool) ([]sdk.Workspace, *sdk.CloneOptions, error) {
 	for _, target := range denyWrites {
-		workspaceFlags = append(workspaceFlags, target+":ro")
+		paths = append(paths, target+":ro")
 	}
-	workspaces, err := resolveCreateWorkspaces(workspaceFlags, paths)
+	workspaces, err := resolveWorkspaces(paths, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	if agent && len(workspaces) > 0 && workspaces[0].ReadOnly {
+	if len(workspaces) > 0 && workspaces[0].ReadOnly {
 		return nil, nil, errPrimaryWorkspaceReadOnly
 	}
 	return applyCreateCloneMode(ctx, clone, workspaces)

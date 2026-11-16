@@ -95,9 +95,36 @@ func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
 			t.Errorf("secret %s flag is missing from completion tree", expected)
 		}
 	}
-	for _, expected := range []string{"import", "ls", "list", "set", "set-custom", "rm", "remove", "delete", "unset"} {
+	for _, expected := range []string{"import", "ls", "list", "set", "rm", "remove", "delete", "unset"} {
 		if !slices.Contains(completionSubcommands[secretCommand], expected) {
 			t.Errorf("secret %s command is missing from completion tree", expected)
+		}
+	}
+}
+
+func TestCompletionOmitsUnimplementedStubs(t *testing.T) {
+	if slices.Contains(completionSubcommands[secretCommand], "set-custom") {
+		t.Error("secret set-custom is not implemented and must not be suggested")
+	}
+	for _, name := range []string{"save", "load", "rm"} {
+		if slices.Contains(completionSubcommands[templateCommand], name) {
+			t.Errorf("template %s is not implemented and must not be suggested", name)
+		}
+	}
+}
+
+func TestCompletionOmitsUndocumentedListAliases(t *testing.T) {
+	for _, command := range []string{kitCommand, settingsCommand, templateCommand} {
+		if slices.Contains(completionSubcommands[command], commandList) {
+			t.Errorf("%s list alias is undocumented and must not be suggested", command)
+		}
+	}
+}
+
+func TestCompletionListsImplementedPolicySubcommands(t *testing.T) {
+	for _, expected := range []string{"filesystem", "init", "profile", "log", "refresh", "reset"} {
+		if !slices.Contains(completionSubcommands[policyCommand], expected) {
+			t.Errorf("policy %s subcommand is missing from completion tree", expected)
 		}
 	}
 }

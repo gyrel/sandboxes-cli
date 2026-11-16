@@ -327,7 +327,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage)
 		return 0
 	}
-	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, "--protocol": true})
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, protocolFlag: true})
 	fs := flag.NewFlagSet("policy check network", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage) }
@@ -538,64 +538,6 @@ func parsePolicyNameTarget(target string) (string, uint16, error) {
 	return host, port, nil
 }
 
-// evaluatePolicyName evaluates domain rules for a hostname. Deny rules win
-// across both scopes.
-func evaluatePolicyName(allow, deny []sdk.NetworkRule, protocol, name string, port uint16) (bool, string) {
-	matches := func(rules []sdk.NetworkRule) string {
-		for i := range rules {
-			rule := rules[i]
-			if rule.Domain == "" {
-				continue
-			}
-			ruleProtocol := rule.Protocol
-			if ruleProtocol == "" {
-				ruleProtocol = tcpProtocol
-			}
-			if ruleProtocol != protocol || (rule.Port != 0 && rule.Port != port) {
-				continue
-			}
-			if domainRuleMatches(rule.Domain, name) {
-				return rule.Domain
-			}
-		}
-		return ""
-	}
-	if domain := matches(deny); domain != "" {
-		return false, "deny rule " + domain
-	}
-	if domain := matches(allow); domain != "" {
-		return true, "allow rule " + domain
-	}
-	return false, reasonDefaultDeny
-}
-
-func domainRuleMatches(pattern, name string) bool {
-	pattern = strings.ToLower(strings.TrimSuffix(pattern, "."))
-	name = strings.ToLower(strings.TrimSuffix(name, "."))
-	switch {
-	case strings.HasPrefix(pattern, "**."):
-		suffix := strings.TrimPrefix(pattern, "**.")
-		return name != suffix && strings.HasSuffix(name, "."+suffix)
-	case strings.HasPrefix(pattern, "*."):
-		suffix := strings.TrimPrefix(pattern, "*.")
-		label, rest, found := strings.Cut(name, ".")
-		return found && label != "" && rest == suffix
-	}
-	patternLabels := strings.Split(pattern, ".")
-	nameLabels := strings.Split(name, ".")
-	if len(patternLabels) != len(nameLabels) {
-		return false
-	}
-	for i := range patternLabels {
-		glob := strings.ReplaceAll(patternLabels[i], "[!", "[^")
-		ok, err := path.Match(glob, nameLabels[i])
-		if err != nil || !ok {
-			return false
-		}
-	}
-	return true
-}
-
 // parsePolicyTarget extracts a host and optional port from an IPv4/IPv6
 // literal or an http(s) URL. A zero port means "any port".
 func parsePolicyTarget(target string) (net.IP, uint16, error) {
@@ -635,39 +577,6 @@ func parseURLPolicyTarget(target string) (net.IP, uint16, error) {
 		return net.ParseIP(host), 80, nil
 	}
 	return nil, 0, fmt.Errorf("URL scheme %q requires an explicit port", parsed.Scheme)
-}
-
-// evaluatePolicyTarget evaluates rules for a host; a zero port matches rules
-// for any port (deny still wins over a narrower allow).
-func evaluatePolicyTarget(allow, deny []sdk.NetworkRule, protocol string, ip net.IP, port uint16) (bool, string) {
-	if port != 0 {
-		return evaluatePolicy(allow, deny, protocol, ip, port)
-	}
-	matches := func(rules []sdk.NetworkRule) string {
-		for i := range rules {
-			rule := rules[i]
-			ruleProtocol := rule.Protocol
-			if ruleProtocol == "" {
-				ruleProtocol = tcpProtocol
-			}
-			if ruleProtocol != protocol {
-				continue
-			}
-			_, network, err := net.ParseCIDR(rule.CIDR)
-			if err != nil || !network.Contains(ip) {
-				continue
-			}
-			return rule.CIDR
-		}
-		return ""
-	}
-	if cidr := matches(deny); cidr != "" {
-		return false, "deny rule " + cidr
-	}
-	if cidr := matches(allow); cidr != "" {
-		return true, "allow rule " + cidr
-	}
-	return false, reasonDefaultDeny
 }
 
 func (r *Runner) policyList(ctx context.Context, args []string) int {
@@ -735,7 +644,7 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 		return 2
 	}
 	profile := args[0]
-	if profile != "allow-all" && profile != policyProfileBalanced && profile != policyProfileDenyAll {
+	if profile != policyProfileAllowAll && profile != policyProfileBalanced && profile != policyProfileDenyAll {
 		_, _ = fmt.Fprintln(r.Err, "profile must be allow-all, balanced or deny-all")
 		return 2
 	}
@@ -878,13 +787,13 @@ func policyRules(sb *sdk.Sandbox) []policyRuleOutput {
 	for _, workspace := range sb.Workspaces {
 		readID := filesystemRuleID(workspace.Path, "read")
 		out = append(out, policyRuleOutput{RuleID: readID, SandboxID: sb.Name, Scope: scope, ResourceType: filesystemKeyword,
-			Action: actionAllow, Provenance: workspaceLabel, Origin: originLocal, Path: workspace.Path, Access: "read"})
+			Action: actionAllow, Provenance: "workspace", Origin: originLocal, Path: workspace.Path, Access: "read"})
 		action := actionAllow
 		if workspace.ReadOnly {
 			action = actionDeny
 		}
 		out = append(out, policyRuleOutput{RuleID: filesystemRuleID(workspace.Path, "write"), SandboxID: sb.Name, Scope: scope, ResourceType: filesystemKeyword,
-			Action: action, Provenance: workspaceLabel, Origin: originLocal, Path: workspace.Path, Access: "write"})
+			Action: action, Provenance: "workspace", Origin: originLocal, Path: workspace.Path, Access: "write"})
 	}
 	return out
 }
@@ -1212,7 +1121,9 @@ Commands:
   inspect RULE_ID|SANDBOX [--format ...]  show one rule or sandbox policy
   log [SANDBOX] [--type all|network] [--limit N]
                                           show gateway audit decisions
-  refresh/reset/approval                  not implemented; fail closed
+  refresh                                 re-apply policy to running sandboxes
+  reset [--force]                         remove custom global rules
+  approval                                not implemented; fails closed
   allow SANDBOX CIDR[:PORT]               add an allow rule (legacy local grammar)
   deny SANDBOX CIDR[:PORT]                add a deny rule (legacy local grammar)
   rm SANDBOX CIDR[:PORT]                  remove an allow or deny rule
@@ -1229,6 +1140,6 @@ Commands:
   org [--format table|json|yaml]          show the effective organization policy,
                                           enforced vs advisory rules, or an empty state
 
-policy refresh/reset/approval need daemon support and fail closed.
-Default is deny-all.
+policy approval needs daemon support and fails closed.
+Default is allow-all, matching the Docker sbx baseline; deny-all remains selectable.
 `

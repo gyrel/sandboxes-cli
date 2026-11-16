@@ -451,12 +451,12 @@
     "value": ""
   },
   {
-    "default": "deny-all",
-    "description": "Default network policy profile for new sandboxes: deny-all, balanced, sbx-compat",
+    "default": "allow-all",
+    "description": "Default network policy profile for new sandboxes: allow-all, balanced, deny-all, sbx-compat",
     "key": "policy.profile",
     "source": "default",
     "type": "string",
-    "value": "deny-all"
+    "value": "allow-all"
   },
   {
     "default": 0,

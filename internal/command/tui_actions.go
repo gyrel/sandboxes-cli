@@ -77,9 +77,9 @@ func (m *createFormModel) validate() error {
 	}
 	profile := strings.TrimSpace(m.values[3])
 	switch profile {
-	case "", policyProfileDenyAll, policyProfileBalanced, policyProfileCompat:
+	case "", policyProfileAllowAll, policyProfileDenyAll, policyProfileBalanced, policyProfileCompat:
 	default:
-		return errors.New("policy profile must be deny-all, balanced or sbx-compat")
+		return errors.New("policy profile must be allow-all, deny-all, balanced or sbx-compat")
 	}
 	workspace := strings.TrimSpace(m.values[4])
 	if workspace == "" {

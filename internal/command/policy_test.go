@@ -227,30 +227,6 @@ func TestPolicyInitAndProfile(t *testing.T) {
 	}
 }
 
-func TestEvaluatePolicyName(t *testing.T) {
-	allow := []sdk.NetworkRule{
-		{Protocol: "tcp", Domain: "*.example.com", Port: 443},
-		{Protocol: "tcp", Domain: "api[12].example.net", Port: 443},
-	}
-	deny := []sdk.NetworkRule{{Protocol: "tcp", Domain: "secret.example.com", Port: 443}}
-	for _, tc := range []struct {
-		name string
-		want bool
-	}{
-		{"api.example.com", true},
-		{"a.b.example.com", false},
-		{"example.com", false},
-		{"api1.example.net", true},
-		{"api3.example.net", false},
-		{"secret.example.com", false},
-	} {
-		got, _ := evaluatePolicyName(allow, deny, "tcp", tc.name, 443)
-		if got != tc.want {
-			t.Fatalf("evaluatePolicyName(%q)=%v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestFilesystemPolicyOutputAndCheck(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{
 		ID: "sb-1", Name: "dev",
@@ -345,14 +321,13 @@ func (f fakePolicyCheck) Check(ctx context.Context, id, protocol, address, domai
 			continue
 		}
 		if domain != "" {
-			allowed, reason := evaluatePolicyName(item.Allow, item.Deny, protocol, domain, port)
-			return sdk.PolicyDecision{Allowed: allowed, Reason: reason}, nil
+			return sdk.PolicyDecision{Allowed: false, Reason: reasonDefaultDeny}, nil
 		}
 		ip := net.ParseIP(address)
 		if ip == nil {
 			return sdk.PolicyDecision{}, errors.New("invalid address")
 		}
-		allowed, reason := evaluatePolicyTarget(item.Allow, item.Deny, protocol, ip, port)
+		allowed, reason := evaluatePolicy(item.Allow, item.Deny, protocol, ip, port)
 		return sdk.PolicyDecision{Allowed: allowed, Reason: reason}, nil
 	}
 	return sdk.PolicyDecision{Allowed: false, Reason: "default deny"}, nil

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## v0.0.54 — 2026-11-16
+
+### Removed
+
+- Remove the legacy `create NAME` grammar and the repeated `--workspace` flag.
+  `create` now requires `AGENT` and accepts workspace paths only as positional
+  `PATH...` arguments.
+- Remove undocumented command aliases: top-level `list`, `delete` and `secrets`,
+  plus `list` on `kit`, `settings` and `template`. Documented aliases on
+  `agents`, `skills` and `secret` remain.
+- Remove the dead local policy-profile and domain-evaluation duplicates that
+  only tests reached after policy checks moved to the daemon.
+- Remove completion suggestions for the unimplemented `secret set-custom` and
+  `template save|load|rm` placeholders, and list the implemented policy
+  subcommands instead.
+
+### Changed
+
+- Help and README now describe the implemented `policy refresh`, `policy reset`
+  and `policy check filesystem` paths, allow `policy.profile=allow-all`, list
+  `allow-all` as the default `--policy-profile` value, and state the actual
+  allow-all default egress profile.
+- Update API to v0.0.28 and Go SDK to v0.0.26; the local RPC contract remains 0.0.27.
+- Correct release candidate validation when the changelog begins with `Unreleased`.
+
 ### Fixed
 
 - `daemon stop` now stops a daemon that was started outside
@@ -16,13 +41,6 @@
   process whose endpoint is unreachable is reported as running with the error
   and exit status 1, but without a version or API line. Version and API
   information still come only from the live daemon.
-
-## v0.0.54 — 2026-11-16
-
-### Changed
-
-- Update API to v0.0.28 and Go SDK to v0.0.26; the local RPC contract remains 0.0.27.
-- Correct release candidate validation when the changelog begins with `Unreleased`.
 
 ## v0.0.53 — 2026-11-16
 

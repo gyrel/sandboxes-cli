@@ -52,7 +52,7 @@ func (r *Runner) kit(args []string) int {
 		return 0
 	case commandInspect:
 		return r.kitInspect(args[1:])
-	case "ls", commandList:
+	case "ls":
 		return r.kitList(args[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx kit: unknown subcommand %q\n", args[0])

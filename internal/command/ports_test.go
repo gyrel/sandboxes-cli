@@ -90,13 +90,13 @@ func TestCreatePassesPublishedPorts(t *testing.T) {
 	sandbox := &recordingCreateSandbox{}
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
-	if code := runner.Run(context.Background(), []string{"create", "--publish", "8080:3000", "--publish", "8443:443/tcp", "dev"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"create", "--publish", "8080:3000", "--publish", "8443:443/tcp", "shell"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 	if len(sandbox.request.Ports) != 2 || sandbox.request.Ports[0].Host != 8080 || sandbox.request.Ports[1].Guest != 443 {
 		t.Fatalf("ports=%+v", sandbox.request.Ports)
 	}
-	if code := runner.Run(context.Background(), []string{"create", "--publish", "8080:3000", "--publish", "8080:4000", "dev"}); code != 2 {
+	if code := runner.Run(context.Background(), []string{"create", "--publish", "8080:3000", "--publish", "8080:4000", "shell"}); code != 2 {
 		t.Fatalf("duplicate host exit=%d", code)
 	}
 }

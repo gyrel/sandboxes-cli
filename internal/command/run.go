@@ -63,7 +63,7 @@ Flags:
                                   repeatable; accepts [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
       --allow-network CIDR[:PORT] allow egress CIDR rule (repeatable; optional udp: prefix)
       --deny-network CIDR[:PORT]  deny egress CIDR rule (repeatable; optional udp: prefix)
-      --policy-profile PROFILE    deny-all, balanced, or opt-in sbx-compat
+      --policy-profile PROFILE    allow-all (default), deny-all, balanced, or sbx-compat
       --docker                    run the dedicated Docker profile
       --cpus N                    CPUs for a new sandbox (0 selects the daemon default)
   -m, --memory SIZE               memory limit for a new sandbox, such as 512m or 2g
@@ -99,6 +99,8 @@ Examples:
 	publishShort      = "-p"
 	publishFlag       = "--publish"
 	policyProfileFlag = "--policy-profile"
+	protocolFlag      = "--protocol"
+	logTypeFlag       = "--type"
 	dockerFlag        = "--docker"
 	allowFlag         = "--allow-network"
 	denyFlag          = "--deny-network"
@@ -1045,15 +1047,6 @@ func validateRunRequest(opts runOptions, agent string) error {
 
 func validateRunAgent(name string) error {
 	return validateAgent(name)
-}
-
-func isAgentName(value string) bool {
-	registry, err := agentRegistry()
-	if err != nil {
-		return false
-	}
-	_, ok := registry.Lookup(value)
-	return ok
 }
 
 func runArgv(name string, agentArgs []string) []string {

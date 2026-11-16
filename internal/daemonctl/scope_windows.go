@@ -3,9 +3,15 @@
 package daemonctl
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
 
 func defaultStateDir() string {
@@ -32,18 +38,15 @@ func stateDirForSocket(socket string) (string, error) {
 
 func socketPathExists(socket string) bool {
 	if strings.HasPrefix(strings.ToLower(socket), `\\.\pipe\`) {
-		return false
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel()
+		conn, err := winio.DialPipeContext(ctx, socket)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		return !errors.Is(err, windows.ERROR_FILE_NOT_FOUND)
 	}
 	_, err := os.Lstat(socket)
 	return err == nil || !os.IsNotExist(err)
-}
-
-func removeStaleSocket(socket string) error {
-	if strings.HasPrefix(strings.ToLower(socket), `\\.\pipe\`) {
-		return nil
-	}
-	if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }

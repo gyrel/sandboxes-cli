@@ -67,7 +67,9 @@ Flags:
 
 const daemonStopUsage = `Usage: rsbx daemon stop [flags]
 
-Stop the local daemon. A stopped daemon is not an error.
+Stop the local daemon. A stopped daemon is not an error. If the endpoint has
+no verified control record, stop the external daemon manually after verifying
+its identity. Stale endpoints must be verified before manual removal.
 
 Flags:
   -h, --help   Show this help

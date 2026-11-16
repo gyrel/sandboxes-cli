@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -24,6 +27,9 @@ const (
 	diagnoseWarn  = "warn"
 	diagnoseSkip  = "skip"
 	diagnoseUsage = "usage: rsbx diagnose [--format table|json|yaml|github-issue] [--json]"
+
+	diagnoseFormatGitHubIssue = "github-issue"
+	diagnoseReportVersion     = "1.0"
 )
 
 type diagnoseCheck struct {
@@ -38,14 +44,40 @@ type diagnoseSection struct {
 }
 
 type diagnoseReport struct {
-	Sections []diagnoseSection `json:"sections" yaml:"sections"`
+	Sections      []diagnoseSection `json:"sections" yaml:"sections"`
+	DaemonVersion string            `json:"-" yaml:"-"`
+}
+
+// diagnoseOutputCheck is the flattened, externally visible check shape. Every
+// field is always present so consumers can rely on a stable schema.
+type diagnoseOutputCheck struct {
+	Name    string `json:"name" yaml:"name"`
+	Status  string `json:"status" yaml:"status"`
+	Message string `json:"message" yaml:"message"`
+	Detail  string `json:"detail" yaml:"detail"`
+	Hint    string `json:"hint" yaml:"hint"`
+}
+
+type diagnoseSummary struct {
+	Pass int `json:"pass" yaml:"pass"`
+	Warn int `json:"warn" yaml:"warn"`
+	Fail int `json:"fail" yaml:"fail"`
+	Skip int `json:"skip" yaml:"skip"`
+}
+
+// diagnoseFlatReport is the external JSON/YAML representation. Sections are
+// kept internally for text rendering but flattened for machine formats.
+type diagnoseFlatReport struct {
+	Version string                `json:"version" yaml:"version"`
+	Checks  []diagnoseOutputCheck `json:"checks" yaml:"checks"`
+	Summary diagnoseSummary       `json:"summary" yaml:"summary"`
 }
 
 func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool(listFormatJSON, false, "output in JSON format")
+	format := fs.String("format", listFormatTable, "output format: table, json, yaml or github-issue")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = fmt.Fprintln(r.Out, diagnoseUsage)
@@ -55,32 +87,105 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	}
 	if fs.NArg() != 0 {
 		_, _ = fmt.Fprintln(r.Err, diagnoseUsage)
-		return 2
+		return 1
 	}
-	selected, err := resolveOperationFormat(*format, *jsonOutput)
+	selected, err := resolveDiagnoseFormat(fs, *format, *jsonOutput)
 	if err != nil {
 		r.error(err)
-		return 2
+		return 1
 	}
 	report := r.collectDiagnoseReport(ctx)
+	if err := r.renderDiagnose(report, selected); err != nil {
+		r.error(err)
+		return 1
+	}
+	return diagnoseExitCode(report)
+}
+
+func resolveDiagnoseFormat(fs *flag.FlagSet, format string, jsonOutput bool) (string, error) {
+	var jsonSet, formatSet bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == listFormatJSON {
+			jsonSet = true
+		}
+		if f.Name == "format" {
+			formatSet = true
+		}
+	})
+	if jsonSet && formatSet {
+		return "", errors.New("--json and --format cannot be combined")
+	}
+	if format == diagnoseFormatGitHubIssue {
+		return format, nil
+	}
+	return resolveOperationFormat(format, jsonOutput)
+}
+
+func (r *Runner) renderDiagnose(report diagnoseReport, selected string) error {
 	switch selected {
+	case diagnoseFormatGitHubIssue:
+		return r.writeDiagnoseGitHubIssue(report)
 	case listFormatJSON:
 		encoder := json.NewEncoder(r.Out)
 		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(report); err != nil {
-			r.error(err)
-			return 1
-		}
+		return encoder.Encode(flattenDiagnoseReport(report))
 	case listFormatYAML:
-		data, err := yaml.Marshal(report)
+		data, err := yaml.Marshal(flattenDiagnoseReport(report))
 		if err != nil {
-			r.error(err)
-			return 1
+			return err
 		}
-		_, _ = r.Out.Write(data)
+		n, err := r.Out.Write(data)
+		if err != nil {
+			return err
+		}
+		if n != len(data) {
+			return io.ErrShortWrite
+		}
+		return nil
 	default:
 		r.writeDiagnoseText(report)
+		return nil
 	}
+}
+
+func flattenDiagnoseReport(report diagnoseReport) diagnoseFlatReport {
+	flat := diagnoseFlatReport{
+		Version: diagnoseReportVersion,
+		Checks:  make([]diagnoseOutputCheck, 0),
+	}
+	for _, section := range report.Sections {
+		for _, check := range section.Checks {
+			message, detail := diagnoseMessage(check)
+			flat.Checks = append(flat.Checks, diagnoseOutputCheck{Name: check.Name, Status: check.Status, Message: message, Detail: detail})
+			switch check.Status {
+			case diagnosePass:
+				flat.Summary.Pass++
+			case diagnoseWarn:
+				flat.Summary.Warn++
+			case diagnoseFail:
+				flat.Summary.Fail++
+			case diagnoseSkip:
+				flat.Summary.Skip++
+			}
+		}
+	}
+	return flat
+}
+
+// diagnoseMessage separates the short result from its useful supporting data.
+func diagnoseMessage(check diagnoseCheck) (string, string) {
+	if check.Status == diagnosePass {
+		switch check.Name {
+		case "CLI binary", "mkfs.erofs", "mkfs.ext4":
+			return "found", check.Detail
+		case "Virtualization":
+			return "supported", check.Detail
+		}
+	}
+	return check.Detail, ""
+}
+
+func diagnoseExitCode(report diagnoseReport) int {
 	for _, section := range report.Sections {
 		for _, check := range section.Checks {
 			if check.Status == diagnoseFail {
@@ -116,13 +221,14 @@ func (r *Runner) collectDiagnoseReport(ctx context.Context) diagnoseReport {
 		r.checkStorageDirectories(),
 		r.checkStoragePermissions(),
 		checkDiskSpace(diagnoseStateDir(r.Socket)),
-		diagnoseCheck{Name: "ZFS offset sync", Status: diagnoseSkip, Detail: "state directory is not on ZFS"})
+		diagnoseCheck{Name: "ZFS offset sync", Status: diagnoseSkip, Detail: "ZFS filesystem detection is not implemented"})
 
 	connection := diagnoseSection{Title: "CONNECTION"}
-	connection.Checks = append(connection.Checks, r.checkDaemonHealth(checkCtx))
+	health, daemonVersion := r.checkDaemonHealth(checkCtx)
+	connection.Checks = append(connection.Checks, health)
 	connection.Checks = append(connection.Checks, r.checkDaemon(checkCtx)...)
 
-	return diagnoseReport{Sections: []diagnoseSection{installation, platform, storage, connection}}
+	return diagnoseReport{Sections: []diagnoseSection{installation, platform, storage, connection}, DaemonVersion: daemonVersion}
 }
 
 func (r *Runner) checkCLIBinary() diagnoseCheck {
@@ -264,24 +370,24 @@ func (r *Runner) checkDaemon(ctx context.Context) []diagnoseCheck {
 
 // checkDaemonHealth grades daemon reachability separately so the connection
 // section carries the same check count as the sbx baseline.
-func (r *Runner) checkDaemonHealth(ctx context.Context) diagnoseCheck {
+func (r *Runner) checkDaemonHealth(ctx context.Context) (diagnoseCheck, string) {
 	check := diagnoseCheck{Name: "Daemon"}
 	client, err := r.client()
 	if err != nil {
 		check.Status = diagnoseFail
 		check.Detail = err.Error()
-		return check
+		return check, ""
 	}
 	defer func() { _ = client.Close() }()
 	info, err := sdk.Version(client).Get(ctx)
 	if err != nil {
 		check.Status = diagnoseFail
 		check.Detail = err.Error()
-		return check
+		return check, ""
 	}
 	check.Status = diagnosePass
 	check.Detail = "healthy (v" + info.Version + ")"
-	return check
+	return check, "v" + info.Version
 }
 
 func markDaemonUnreachable(checks []diagnoseCheck, err error) []diagnoseCheck {
@@ -403,27 +509,96 @@ func joinComma(values []string) string {
 	return out
 }
 
+func diagnoseStatusMarker(status string) string {
+	switch status {
+	case diagnosePass:
+		return "✓"
+	case diagnoseFail:
+		return "✗"
+	case diagnoseWarn:
+		return "!"
+	case diagnoseSkip:
+		return "⊘"
+	default:
+		return "?"
+	}
+}
+
+func escapeDiagnoseMarkdown(value string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"\\", "\\\\",
+		"|", "\\|",
+		"<", "&lt;",
+		">", "&gt;",
+		"`", "\\`",
+		"\r\n", "<br>",
+		"\r", "<br>",
+		"\n", "<br>",
+	)
+	return replacer.Replace(value)
+}
+
+func (r *Runner) writeDiagnoseGitHubIssue(report diagnoseReport) error {
+	flat := flattenDiagnoseReport(report)
+	var out bytes.Buffer
+	_, _ = fmt.Fprintln(&out, "### sbx diagnose report")
+	_, _ = fmt.Fprintln(&out)
+	_, _ = fmt.Fprintf(&out, "**OS:** %s\n", escapeDiagnoseMarkdown(runtime.GOOS))
+	_, _ = fmt.Fprintf(&out, "**Arch:** %s\n", escapeDiagnoseMarkdown(runtime.GOARCH))
+	daemonVersion := report.DaemonVersion
+	if daemonVersion == "" {
+		daemonVersion = "unknown"
+	}
+	_, _ = fmt.Fprintf(&out, "**DS Version:** %s\n", escapeDiagnoseMarkdown(daemonVersion))
+	_, _ = fmt.Fprintln(&out)
+	_, _ = fmt.Fprintln(&out, "| Check | Status | Message |")
+	_, _ = fmt.Fprintln(&out, "|-------|--------|---------|")
+	for _, check := range flat.Checks {
+		_, _ = fmt.Fprintf(&out, "| %s | %s | %s |\n",
+			escapeDiagnoseMarkdown(check.Name),
+			diagnoseStatusMarker(check.Status),
+			escapeDiagnoseMarkdown(check.Message))
+	}
+	data, err := json.MarshalIndent(flat, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(&out)
+	_, _ = fmt.Fprintln(&out, "<details>")
+	_, _ = fmt.Fprintln(&out, "<summary>Full JSON output</summary>")
+	_, _ = fmt.Fprintln(&out)
+	_, _ = fmt.Fprintln(&out, "```json")
+	_, _ = fmt.Fprintln(&out, string(data))
+	_, _ = fmt.Fprintln(&out, "```")
+	_, _ = fmt.Fprintln(&out)
+	_, _ = fmt.Fprintln(&out, "</details>")
+	n, err := r.Out.Write(out.Bytes())
+	if err != nil {
+		return err
+	}
+	if n != out.Len() {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
 func (r *Runner) writeDiagnoseText(report diagnoseReport) {
 	passed, failed, warned, skipped := 0, 0, 0, 0
 	for _, section := range report.Sections {
 		_, _ = fmt.Fprintln(r.Out, section.Title)
 		for _, check := range section.Checks {
-			marker := "?"
 			switch check.Status {
 			case diagnosePass:
-				marker = "✓"
 				passed++
 			case diagnoseFail:
-				marker = "✗"
 				failed++
 			case diagnoseWarn:
-				marker = "!"
 				warned++
 			case diagnoseSkip:
-				marker = "⊘"
 				skipped++
 			}
-			_, _ = fmt.Fprintf(r.Out, "  %s %s", marker, check.Name)
+			_, _ = fmt.Fprintf(r.Out, "  %s %s", diagnoseStatusMarker(check.Status), check.Name)
 			if check.Detail != "" {
 				_, _ = fmt.Fprintf(r.Out, " — %s", check.Detail)
 			}

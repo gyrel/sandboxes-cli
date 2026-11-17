@@ -90,8 +90,7 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	format := fs.String("format", listFormatTable, "output format: table, json, yaml or github-issue")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprintln(r.Out, diagnoseUsage)
-			return 0
+			return r.showCommandHelp(diagnoseHelp())
 		}
 		return r.flagParseFailure("diagnose", err)
 	}

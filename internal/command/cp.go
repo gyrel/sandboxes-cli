@@ -42,7 +42,7 @@ func (r *Runner) cp(ctx context.Context, args []string) int {
 	fs.SetOutput(io.Discard)
 	follow := fs.Bool("L", false, "follow a top-level source symbolic link")
 	fs.BoolVar(follow, "follow-link", false, "follow a top-level source symbolic link")
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, cpUsage) }
+	fs.Usage = func() { r.showCommandHelp(cpHelp()) }
 	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0

@@ -36,9 +36,7 @@ func (f *mcpArgsFlag) Set(value string) error {
 
 func (r *Runner) mcp(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag {
-		_, _ = fmt.Fprintln(r.Out, "usage: rsbx mcp <ls|add|call|rm> [flags]")
-		_, _ = fmt.Fprintln(r.Out, "commands: ls, add, call, rm")
-		return 0
+		return r.showCommandHelp(mcpHelp())
 	}
 	switch args[0] {
 	case "ls":
@@ -68,7 +66,7 @@ Remove an MCP server registration.
 func (r *Runner) mcpList(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("mcp ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, mcpListUsage) }
+	fs.Usage = func() { r.showCommandHelp(mcpListHelp()) }
 	jsonOutput := fs.Bool("json", false, "write JSON")
 	quiet := fs.Bool("quiet", false, "print server names only")
 	format := fs.String("format", "", "output format: table or json")
@@ -147,11 +145,7 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 	fs.Var(&serverArgs, "args", "comma-separated MCP executable arguments (repeatable)")
 	fs.Var(&headerArgs, "header", "Docker-compatible alias for a host-vault remote header; values must contain ${placeholder}")
 	fs.Var(&secretHeaderArgs, "secret-header", "host-vault remote header as Name:Value with ${placeholder}")
-	fs.Usage = func() {
-		_, _ = fmt.Fprintf(r.Out, "Usage: rsbx mcp add NAME %s EXECUTABLE [--args ARG] [--dir PATH]\n", commandFlag)
-		_, _ = fmt.Fprintln(r.Out, "       rsbx mcp add NAME --url https://HOST/mcp [--header|--secret-header 'Name: value with ${PLACEHOLDER}']")
-		_, _ = fmt.Fprintln(r.Out, "Both remote header flags accept host-vault references only; literal values are rejected. Store values with rsbx secret set mcp:NAME:PLACEHOLDER. Remote servers are limited to the daemon's allowed hosts.")
-	}
+	fs.Usage = func() { r.showCommandHelp(mcpAddHelp()) }
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{commandFlag: true, "--dir": true, mcpArgsFlagName: true, "--url": true, "--header": true, "--secret-header": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -360,10 +354,7 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("mcp call", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&raw, strings.TrimPrefix(mcpArgsFlagName, "--"), "{}", "JSON object passed to the tool")
-	fs.Usage = func() {
-		_, _ = fmt.Fprintln(r.Out, "Usage: rsbx mcp call SANDBOX SERVER TOOL [--args JSON]")
-		_, _ = fmt.Fprintln(r.Out, "Requests daemon-trusted approval before invoking the host MCP server. Argument values are hidden in the prompt; do not pass secrets.")
-	}
+	fs.Usage = func() { r.showCommandHelp(mcpCallHelp()) }
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{mcpArgsFlagName: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -437,7 +428,7 @@ func mcpCallApprovalMessage(server, tool, sandbox string, arguments map[string]j
 func (r *Runner) mcpRemove(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("mcp rm", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, mcpRemoveUsage) }
+	fs.Usage = func() { r.showCommandHelp(mcpRemoveHelp()) }
 	force := fs.Bool("force", false, "skip confirmation")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

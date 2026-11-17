@@ -93,12 +93,12 @@ func TestDaemonGrammarAndExitCodes(t *testing.T) {
 		wantNoEvent bool
 	}{
 		{name: "no subcommand", args: []string{"daemon"}, wantCode: 2, wantOut: []string{"Usage: rsbx daemon COMMAND"}},
-		{name: "root help", args: []string{"daemon", "--help"}, wantOut: []string{"Usage: rsbx daemon COMMAND", "log-level set"}},
-		{name: "start help", args: []string{"daemon", "start", "--help"}, wantOut: []string{"Usage: rsbx daemon start", "--detach"}},
-		{name: "stop help", args: []string{"daemon", "stop", "-h"}, wantOut: []string{"Usage: rsbx daemon stop"}},
-		{name: "restart help", args: []string{"daemon", "restart", "--help"}, wantOut: []string{"Usage: rsbx daemon restart"}},
-		{name: "log-level help", args: []string{"daemon", "log-level", "--help"}, wantOut: []string{"Usage: rsbx daemon log-level", "general, proxy or all"}},
-		{name: "status help", args: []string{"daemon", "status", "--help"}, wantOut: []string{"Usage: rsbx daemon status", "status, socket and logs"}},
+		{name: "root help", args: []string{"daemon", "--help"}, wantOut: []string{"Description:", "  rsbx daemon COMMAND", "log-level"}},
+		{name: "start help", args: []string{"daemon", "start", "--help"}, wantOut: []string{"Usage:", "  rsbx daemon start", "--detach"}},
+		{name: "stop help", args: []string{"daemon", "stop", "-h"}, wantOut: []string{"  rsbx daemon stop", "Flags:"}},
+		{name: "restart help", args: []string{"daemon", "restart", "--help"}, wantOut: []string{"  rsbx daemon restart", "--policy string"}},
+		{name: "log-level help", args: []string{"daemon", "log-level", "--help"}, wantOut: []string{"  rsbx daemon log-level", "general, proxy or all"}},
+		{name: "status help", args: []string{"daemon", "status", "--help"}, wantOut: []string{"  rsbx daemon status", "status, socket and logs"}},
 		{name: "unknown subcommand", args: []string{"daemon", "bogus"}, wantCode: 2, wantOut: []string{"unknown daemon subcommand", "rsbx daemon --help"}},
 		{
 			name: "start detached with policy", args: []string{"daemon", "start", "--detach", "--policy", "balanced"},

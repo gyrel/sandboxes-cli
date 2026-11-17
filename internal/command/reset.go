@@ -28,8 +28,7 @@ func (r *Runner) reset(ctx context.Context, args []string) int {
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, resetUsage)
-			return 0
+			return r.showCommandHelp(resetHelp())
 		}
 		return r.flagParseFailure("reset", err)
 	}

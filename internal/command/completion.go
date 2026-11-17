@@ -68,8 +68,7 @@ func completionCommands() []string {
 
 func (r *Runner) completion(args []string) int {
 	if len(args) == 1 && (args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag) {
-		_, _ = fmt.Fprint(r.Out, "usage: rsbx completion bash|zsh|fish|powershell\n")
-		return 0
+		return r.showCommandHelp(completionHelp())
 	}
 	if len(args) != 1 {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx completion bash|zsh|fish|powershell")

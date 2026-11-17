@@ -210,8 +210,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		return 2
 	}
 	if opts.help {
-		_, _ = fmt.Fprint(r.Out, runUsage)
-		return 0
+		return r.showCommandHelp(runHelp())
 	}
 	agent, workspacePaths, workspacesExplicit, err := parseRunPositionals(positionals)
 	if err != nil {

@@ -519,7 +519,7 @@ func TestSecretSetHelpDocumentsInteractiveServiceChoiceAndLimits(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"secret", "set", "--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string      Use a 1Password op:// reference or AWS Secrets Manager ARN", "--command string  Run a host shell command to resolve a secret (can access host files)", "--refresh string", "--no-verify", "--show-error", "Registry credentials", "An existing credential in the same scope is not replaced unless --force is", "--registry string", "--password-stdin", "Cross-host registry authentication endpoints are not supported yet."} {
+	for _, expected := range []string{"Description:", "Usage:", "Flags:", "[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string", "Use a 1Password op:// reference or AWS Secrets Manager ARN", "--command string", "Run a host shell command to resolve a secret (can access host files)", "--refresh string", "--no-verify", "--show-error", "Registry credentials", "An existing credential in the same scope is not replaced unless --force is", "--registry string", "--password-stdin", "Cross-host registry authentication endpoints are not supported yet."} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("help lacks %q: %s", expected, out.String())
 		}
@@ -532,7 +532,7 @@ func TestRootHelpListsSupportedAndUnsupportedDockerCommandFamilies(t *testing.T)
 	if code := runner.Run(context.Background(), []string{"--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"Sandbox commands:", "Management commands:", "agents, daemon", "mcp, policy", "Other commands:", "completion", "Experimental commands:", "setup", "Extensions:", "reset", "template", "Unsupported Docker Sandboxes commands:", "move, ttl, volume", "--socket PATH"} {
+	for _, expected := range []string{"Sandbox Commands:", "Management Commands:", "agents, daemon", "mcp, policy", "Other Commands:", "completion", "Experimental Commands:", "setup", "reset", "template", "Unsupported Docker Sandboxes Commands:", "move, ttl, volume", "--socket PATH"} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("root help lacks %q: %s", expected, out.String())
 		}
@@ -787,7 +787,7 @@ func TestSecretCustomFailsClosedAndImportHelpIsAvailable(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"secret", "set-custom", "--help"}); code != 0 {
 		t.Fatalf("set-custom help exit=%d output=%q", code, output.String())
 	}
-	for _, expected := range []string{"Status:", "Unsupported.", "--host", "will not store or inject"} {
+	for _, expected := range []string{"Description:", "Usage:", "Flags:", "Unsupported.", "will not store or inject"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("set-custom help lacks %q: %s", expected, output.String())
 		}

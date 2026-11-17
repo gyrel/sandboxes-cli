@@ -48,8 +48,7 @@ func (r *Runner) kit(args []string) int {
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprint(r.Out, kitUsage)
-		return 0
+		return r.showCommandHelp(kitHelp())
 	case commandInspect:
 		return r.kitInspect(args[1:])
 	case "ls":
@@ -62,8 +61,7 @@ func (r *Runner) kit(args []string) int {
 
 func (r *Runner) kitInspect(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, kitInspectUsage)
-		return 0
+		return r.showCommandHelp(kitInspectHelp())
 	}
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("kit inspect", flag.ContinueOnError)
@@ -158,8 +156,7 @@ func (r *Runner) printV3Kit(doc *kit.V3Descriptor, selected string) int {
 
 func (r *Runner) kitList(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, kitListUsage)
-		return 0
+		return r.showCommandHelp(kitListHelp())
 	}
 	if len(args) > 1 {
 		_, _ = fmt.Fprint(r.Err, kitListUsage)

@@ -74,9 +74,7 @@ func parseEnvironmentCreateOptions(r *Runner, args []string) (environmentCreateO
 	var envArguments, envArgumentFiles repeatedStringFlag
 	fs.Var(&envArguments, "env-arg", "value for a declared environment argument (repeatable)")
 	fs.Var(&envArgumentFiles, "env-args-file", "file of name=value environment arguments (repeatable)")
-	fs.Usage = func() {
-		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env create [PATH...] [--force] [--name NAME]\n\nApply the supported environment plan and create a sandbox without attaching.\nUnsupported fields fail closed.\n")
-	}
+	fs.Usage = func() { r.showCommandHelp(envCreateHelp()) }
 	valueFlags := map[string]bool{nameFlag: true, envArgFlag: true, envArgsFileFlag: true}
 	if err := fs.Parse(reorderFlagArgs(args, valueFlags)); err != nil {
 		return environmentCreateOptions{}, err
@@ -201,9 +199,7 @@ func buildEnvironmentCreateRequest(plan envfile.Plan, environment map[string]str
 
 func (r *Runner) environmentExec(ctx context.Context, args []string) int {
 	if environmentExecHelpRequested(args) {
-		_, _ = fmt.Fprintln(r.Out, "Usage: rsbx env exec [flags] [PATH...] [-- COMMAND [ARG...]]")
-		_, _ = fmt.Fprintln(r.Out, "Runs a command in a matching existing environment sandbox, starting it if stopped. Without --, positional arguments are the command and the environment path defaults to the current directory.")
-		return 0
+		return r.showCommandHelp(envExecHelp())
 	}
 	createArgs, execArgs, command, err := splitEnvironmentExecArgs(args)
 	if err != nil {
@@ -451,8 +447,7 @@ func createEnvironmentRunSandbox(ctx context.Context, client sdk.Client, name st
 
 func (r *Runner) environmentRemove(ctx context.Context, args []string) int {
 	if slices.Contains(args, helpFlag) || slices.Contains(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env rm [PATH...] [--force] [--name NAME]\n\nRemove the sandbox matching this environment's name, agent, and workspace. Global credential bindings are not removed.\n")
-		return 0
+		return r.showCommandHelp(envRemoveHelp())
 	}
 	options, err := parseEnvironmentCreateOptions(r, args)
 	if err != nil {
@@ -538,7 +533,7 @@ func parseEnvironmentRunOptions(r *Runner, args []string) (environmentCreateOpti
 		head = args[:separator]
 	}
 	if slices.Contains(head, helpFlag) || slices.Contains(head, helpShort) {
-		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env run [PATH...] [--detach] [--force] [--name NAME] [-- AGENT-ARGS...]\n\nCreate an environment if absent, then start and attach to its configured agent. Existing matching sandboxes are reused without re-provisioning.\n")
+		_ = r.showCommandHelp(envRunHelp())
 		return environmentCreateOptions{}, nil, false, flag.ErrHelp
 	}
 	head, agentArgs := splitAgentArgs(args)

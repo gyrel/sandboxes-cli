@@ -157,13 +157,11 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		return r.policyReset(ctx, args[1:])
 	case "approval":
 		if hasFlag(args[1:], helpFlag) || hasFlag(args[1:], helpShort) {
-			_, _ = fmt.Fprint(r.Out, policyUsage)
-			return 0
+			return r.showCommandHelp(policyApprovalHelp())
 		}
 		return r.policyUnsupported("approval", "approval-gated operations are not implemented, so no approvals can be pending")
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprint(r.Out, policyUsage)
-		return 0
+		return r.showCommandHelp(policyHelp())
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx policy: unknown subcommand %q\n", args[0])
 		_, _ = fmt.Fprint(r.Err, policyUsage)
@@ -175,9 +173,7 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 // sandboxes immediately.
 func (r *Runner) policyRefresh(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprintln(r.Out, "usage: rsbx policy refresh")
-		_, _ = fmt.Fprintln(r.Out, "Re-apply the effective policy to running sandboxes.")
-		return 0
+		return r.showCommandHelp(policyRefreshHelp())
 	}
 	if len(args) != 0 {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy refresh")
@@ -209,8 +205,7 @@ func (r *Runner) policyReset(ctx context.Context, args []string) int {
 			continue
 		}
 		if arg == helpFlag || arg == helpShort {
-			_, _ = fmt.Fprintln(r.Out, "usage: rsbx policy reset [--force]")
-			return 0
+			return r.showCommandHelp(policyResetHelp())
 		}
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy reset [--force]")
 		return 2
@@ -275,8 +270,7 @@ func (r *Runner) policyNetworkScope(cmdPath string, args []string) (sandboxName 
 
 func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, policyMutateNetworkUsage(action))
-		return 0
+		return r.showCommandHelp(policyMutateNetworkHelp(action))
 	}
 	sandboxName, rest, code := r.policyNetworkScope("policy "+action+" network", args)
 	if code >= 0 {
@@ -325,13 +319,12 @@ func (r *Runner) policyMutateGlobal(ctx context.Context, action, value string) i
 //nolint:funlen,gocyclo,cyclop // one command parses flags, resolves the target and reports.
 func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage)
-		return 0
+		return r.showCommandHelp(policyCheckNetworkHelp())
 	}
 	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, protocolFlag: true})
 	fs := flag.NewFlagSet("policy check network", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyCheckNetworkUsage) }
+	fs.Usage = func() { r.showCommandHelp(policyCheckNetworkHelp()) }
 	sandboxName := fs.String("sandbox", "", "scope the check to one sandbox")
 	protocol := fs.String("protocol", tcpProtocol, "protocol to evaluate: tcp or udp")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
@@ -584,7 +577,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("policy ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyListUsage) }
+	fs.Usage = func() { r.showCommandHelp(policyListHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
@@ -643,8 +636,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 
 func (r *Runner) policyInit(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, policyInitUsage)
-		return 0
+		return r.showCommandHelp(policyInitHelp())
 	}
 	if len(args) != 1 {
 		_, _ = fmt.Fprint(r.Err, policyInitUsage)
@@ -672,8 +664,7 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 
 func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, policyProfileUsage)
-		return 0
+		return r.showCommandHelp(policyProfileHelp())
 	}
 	if len(args) > 1 || (len(args) == 1 && args[0] != "ls" && args[0] != commandList) {
 		_, _ = fmt.Fprint(r.Err, policyProfileUsage)
@@ -696,8 +687,7 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 
 func (r *Runner) policyMutate(ctx context.Context, action string, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, policyMutateUsage(action))
-		return 0
+		return r.showCommandHelp(policyMutateHelp(action))
 	}
 	if len(args) != 2 {
 		_, _ = fmt.Fprint(r.Err, policyMutateUsage(action))
@@ -730,8 +720,7 @@ func (r *Runner) policyMutate(ctx context.Context, action string, args []string)
 
 func (r *Runner) policyCheck(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, policyCheckUsage)
-		return 0
+		return r.showCommandHelp(policyCheckHelp())
 	}
 	if len(args) != 3 && len(args) != 4 {
 		_, _ = fmt.Fprint(r.Err, policyCheckUsage)
@@ -818,7 +807,7 @@ func (r *Runner) policyCheckFilesystem(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true})
 	fs := flag.NewFlagSet("policy check filesystem", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, policyCheckFilesystemUsage) }
+	fs.Usage = func() { r.showCommandHelp(policyCheckFilesystemHelp()) }
 	sandboxName := fs.String("sandbox", "", "scope the check to one sandbox")
 	write := fs.Bool("write", false, "check write access instead of read")
 	if err := fs.Parse(args); err != nil {

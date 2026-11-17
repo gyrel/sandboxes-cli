@@ -52,57 +52,7 @@ const (
 	originLocal       = "local"
 )
 
-const createUsage = `usage: rsbx create AGENT [PATH...] [--name NAME] [flags]
-
-Create a sandbox for an agent. Use ` + "`rsbx agents`" + ` to list launchable built-in
-agents and their pinned images. Omit PATH for no workspace mount. The primary
-workspace must be read/write; additional PATHs may use :ro or :readonly.
-
-Flags:
-  --name NAME                 sandbox name
-  --clone                     use a private in-guest Git clone of PATH
-  -p, --publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
-                              publish a TCP/UDP guest port (repeatable)
-  --allow-network CIDR[:PORT] allow egress (repeatable)
-  --deny-network CIDR[:PORT]  deny egress (repeatable)
-  -t, --template REF          container image to use for the sandbox
-  --image REF                 image override
-  --kit FILE                  apply a local kit definition
-  --deny-write PATH           mount PATH read-only (repeatable)
-  --cpus N                    CPU count for a new sandbox
-  -m, --memory SIZE           memory limit (binary units)
-  --docker                    run the dedicated Docker profile
-  --idempotency-key KEY       idempotency key
-  -e, --env KEY=VALUE         environment for every process (repeatable)
-  --env-file FILE             read environment overrides from a file (repeatable)
-`
-
 var errMissingSandboxTargets = errors.New("requires at least 1 argument")
-
-const removeUsage = `usage: rsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all
-
-Remove one or more sandboxes. Flags may appear before, between or after sandbox
-names; use -- to end flag parsing. Without --force, every named sandbox must be
-stopped: if any sandbox is running or otherwise not stopped, the whole command
-fails and nothing is removed. Stop those sandboxes first, or pass --force to
-remove them anyway. --force also skips confirmation. --all removes every
-sandbox. Structured output is an array of {action, resource, name} records,
-matching sbx rm --json.
-
-Examples:
-  rsbx rm --force api
-  rsbx rm api --force
-  rsbx rm api --force worker
-  rsbx rm --force -- --literal-name
-`
-
-const pruneUsage = `usage: rsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
-
-Remove stopped sandboxes. --dry-run lists candidates without removing them;
---force skips confirmation. With --dry-run, structured output is the sbx
-envelope {"would_remove":[...],"skipped_unknown_stop":[...]}; actual removals
-use the same {action, resource, name} records as sbx rm --json.
-`
 
 // Runner executes commands against a local daemon.
 type Runner struct {
@@ -484,18 +434,7 @@ func (r *Runner) openLoginBrowser(url string) {
 }
 
 func (r *Runner) loginUsage() {
-	_, _ = fmt.Fprintln(r.Out, "Description:")
-	_, _ = fmt.Fprintln(r.Out, "  Sign in to Docker")
-	_, _ = fmt.Fprintln(r.Out, "\nUsage:")
-	_, _ = fmt.Fprintln(r.Out, "  rsbx login [flags]")
-	_, _ = fmt.Fprintln(r.Out, "\nExamples:")
-	_, _ = fmt.Fprintln(r.Out, "  rsbx login")
-	_, _ = fmt.Fprintln(r.Out, "\n  # Non-interactive sign-in, for CI")
-	_, _ = fmt.Fprintln(r.Out, "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
-	_, _ = fmt.Fprintln(r.Out, "\nFlags:")
-	_, _ = fmt.Fprintln(r.Out, "  -h, --help              help for login")
-	_, _ = fmt.Fprintln(r.Out, "      --password-stdin    Read password or access token from stdin")
-	_, _ = fmt.Fprintln(r.Out, "      --username string   Docker username for non-interactive login")
+	_ = r.showCommandHelp(loginHelp())
 }
 
 func readDockerPassword(input io.Reader) ([]byte, error) {
@@ -528,19 +467,7 @@ func readDockerPassword(input io.Reader) ([]byte, error) {
 func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() {
-		_, _ = fmt.Fprintln(r.Out, "Description:")
-		_, _ = fmt.Fprintln(r.Out, "  Stop running local sandboxes and sign out of Docker")
-		_, _ = fmt.Fprintln(r.Out, "\nUsage:")
-		_, _ = fmt.Fprintln(r.Out, "  rsbx logout [flags]")
-		_, _ = fmt.Fprintln(r.Out, "\nExamples:")
-		_, _ = fmt.Fprintln(r.Out, "  rsbx logout")
-		_, _ = fmt.Fprintln(r.Out, "\n  # Skip the confirmation prompt")
-		_, _ = fmt.Fprintln(r.Out, "  rsbx logout --force")
-		_, _ = fmt.Fprintln(r.Out, "\nFlags:")
-		_, _ = fmt.Fprintln(r.Out, "  -f, --force   Skip confirmation prompt")
-		_, _ = fmt.Fprintln(r.Out, "  -h, --help    help for logout")
-	}
+	fs.Usage = func() { _ = r.showCommandHelp(logoutHelp()) }
 	force := fs.Bool("force", false, "skip confirmation")
 	forceShort := fs.Bool("f", false, "skip confirmation")
 	if err := fs.Parse(args); err != nil {
@@ -690,10 +617,7 @@ func (r *Runner) secret(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) secretHelp() int {
-	_, _ = fmt.Fprintln(r.Out, "usage: rsbx secret <import|set|ls|list|rm|remove|delete|unset> [flags]")
-	_, _ = fmt.Fprintln(r.Out, "commands: import, ls (alias: list), set, rm (aliases: remove, delete, unset; service secrets and registry credentials)")
-	_, _ = fmt.Fprintln(r.Out, "set-custom is not implemented; custom secret values are never stored or injected")
-	return 0
+	return r.showCommandHelp(secretHelp())
 }
 
 func (r *Runner) secretSetCommand(ctx context.Context, args []string) int {
@@ -742,156 +666,19 @@ func (r *Runner) secretExtendedCommand(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) secretCustomHelp() int {
-	const usage = `Description:
-  Docker sbx supports custom secrets by storing a placeholder in the sandbox and
-  replacing it in matching outbound request headers. Rheic does not implement
-  custom-secret storage or proxy substitution yet.
-
-Status:
-  Unsupported. This command will not store or inject a secret.
-
-Usage:
-  rsbx secret set-custom [flags]
-
-Docker sbx option families include --host, --env, --name, --placeholder,
---header, --format, --value, --token, --ref, --command, --sandbox, and --refresh.
-Passing these options to Rheic currently fails closed.
-`
-	if _, err := io.WriteString(r.Out, usage); err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
+	return r.showCommandHelp(secretCustomHelp())
 }
 
 func (r *Runner) secretSetHelp() int {
-	const usage = `Description:
-  Create a service secret or registry credential. Existing credentials are not
-  replaced unless --force is passed, in every scope.
-
-Available services:
-  anthropic, copilot, cursor, devin, droid, github, google, groq, mistral,
-  nebius, openai, openrouter, xai
-
-Usage:
-  rsbx secret set [SERVICE] [flags]
-
-When SERVICE is omitted, choose it with the arrow keys and Enter. Press q or
-Escape to cancel. Values are stored in the host credential vault. Without
---force, an existing value is never overwritten and the command fails with an
-error naming the service and scope. For scripts, pass SERVICE explicitly and
-provide the value with --token or standard input.
-
-Registry credentials
-  Use --registry to store a registry credential. Without --sandbox or
-  --all-sandboxes, it is host-only and is not injected into sandboxes.
-  --all-sandboxes enables brokered use in all sandboxes; --sandbox scopes it
-  to one sandbox. Credentials are provided to the host broker, not guest env.
-  An existing credential in the same scope is not replaced unless --force is
-  passed. Cross-host registry authentication endpoints are not supported yet.
-
-Examples:
-  rsbx secret set github
-  rsbx secret set openai --sandbox my-sandbox
-  rsbx secret set openai --oauth
-  rsbx secret set github -t VALUE
-  printf '%s' "$GHCR_TOKEN" | rsbx secret set --registry ghcr.io \
-    --username USER --password-stdin
-  printf '%s' "$GHCR_TOKEN" | rsbx secret set --registry ghcr.io \
-    --username USER --password-stdin --all-sandboxes
-
-Flags:
-      --sandbox string  Scope the secret to one sandbox
-  -t, --token string   Secret value (less secure: visible in shell history)
-      --oauth           Sign in to the global OpenAI account on the host
-      --ref string      Use a 1Password op:// reference or AWS Secrets Manager ARN
-      --command string  Run a host shell command to resolve a secret (can access host files)
-      --refresh string  Refresh source on-demand or after a duration (default: 55m)
-      --no-verify       Store a source without resolving it now
-      --show-error      Show provider stderr on initial verification failure (may contain secrets)
-      --registry string Registry hostname for pull credentials
-      --username string Registry username
-      --password-stdin Read registry password or token from stdin
-      --all-sandboxes   Enable brokered registry use in every sandbox
-  -f, --force           Overwrite an existing secret or registry credential
-  -h, --help            Show this help
-`
-	if _, err := io.WriteString(r.Out, usage); err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
+	return r.showCommandHelp(secretSetHelp())
 }
 
 func (r *Runner) secretRemoveHelp() int {
-	const usage = `Description:
-  Remove a service or registry credential. Removing a credential that is not
-  stored prints one message and succeeds, so repeated cleanup is safe.
-
-Usage:
-  rsbx secret rm [SERVICE] [flags]
-  rsbx secret rm --registry HOST [flags]
-  rsbx secret rm --all [--force]
-
-Aliases:
-  rm, remove, delete, unset
-
-Examples:
-  rsbx secret rm
-  rsbx secret rm openai
-  rsbx secret rm openai --sandbox my-sandbox
-  rsbx secret rm openai --oauth
-  rsbx secret rm --registry ghcr.io --all-sandboxes --force
-
-Flags:
-      --oauth             Remove host-side OpenAI OAuth credentials
-      --all               Remove inventoried Rheic credentials across scopes
-      --registry string   Registry hostname; without a scope flag removes host-only and all-sandboxes credentials
-      --all-sandboxes     Remove the all-sandboxes registry credential (requires --registry)
-      --sandbox string    Scope service or registry credentials to one sandbox
-  -f, --force             Delete without confirmation prompt
-  -h, --help              Show this help
-`
-	if _, err := io.WriteString(r.Out, usage); err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
+	return r.showCommandHelp(secretRemoveHelp())
 }
 
 func (r *Runner) secretListHelp() int {
-	const usage = `Description:
-  List stored secrets across global and sandbox scopes. Secret values are never
-  displayed. Use --global or --sandbox to limit the inventory, and --service to
-  filter by provider.
-
-Usage:
-  rsbx secret ls [flags]
-
-Aliases:
-  ls, list
-
-Examples:
-  rsbx secret ls
-  rsbx secret ls -g
-  rsbx secret ls --sandbox my-sandbox
-  rsbx secret ls --service github
-  rsbx secret ls --json
-
-Flags:
-      --format string   Output format: table, json or yaml
-  -g, --global          Only list global secrets
-  -h, --help            Show this help
-      --json            Output in JSON format
-  -q, --quiet           Only display secret names
-      --sandbox string  Only list secrets scoped to one sandbox
-      --service string  Filter by secret service name
-`
-	if _, err := io.WriteString(r.Out, usage); err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
+	return r.showCommandHelp(secretListHelp())
 }
 
 func (r *Runner) serviceSecretRemoveAll(ctx context.Context, args []string) int {
@@ -1482,8 +1269,7 @@ type createOptions struct {
 func (r *Runner) create(ctx context.Context, args []string) int {
 	opts, help, err := parseCreateOptions(ctx, args)
 	if help {
-		_, _ = fmt.Fprint(r.Out, createUsage)
-		return 0
+		return r.showCommandHelp(createHelp())
 	}
 	if parseErr, ok := asFlagParseError(err); ok {
 		return r.flagParseFailure(commandCreate, parseErr.err)
@@ -1805,8 +1591,7 @@ type removeOptions struct {
 func (r *Runner) remove(ctx context.Context, args []string) int {
 	opts, help, err := parseRemoveOptions(args)
 	if help {
-		_, _ = fmt.Fprint(r.Out, removeUsage)
-		return 0
+		return r.showCommandHelp(removeHelp())
 	}
 	if parseErr, ok := asFlagParseError(err); ok {
 		return r.flagParseFailure("rm", parseErr.err)
@@ -2087,8 +1872,7 @@ func (r *Runner) lifecycle(ctx context.Context, args []string) int {
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{graceFlag: true, formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, lifecycleUsage())
-			return 0
+			return r.showCommandHelp(stopHelp())
 		}
 		return r.flagParseFailure(stopCommand, err)
 	}
@@ -2159,40 +1943,35 @@ func (r *Runner) client() (sdk.Client, error) {
 }
 
 func (r *Runner) usage() {
-	const help = `Rheic Sandboxes manages isolated local environments for coding agents.
+	const help = `Description:
+  Rheic Sandboxes manages isolated local environments for coding agents.
 
 Usage:
   rsbx COMMAND
 
-Sandbox commands:
+Sandbox Commands:
   run, attach, create, exec, cp, ls, stop, rm, prune, ports
 
-Management commands:
+Management Commands:
   agents, daemon, diagnose, env, login, logout, mcp, policy, reset, secret, settings, tui
 
-Other commands:
+Experimental Commands:
+  kit, setup, skills, template
+
+Other Commands:
   completion  Generate a shell completion script (bash, zsh, fish, powershell)
   version     Show client and daemon versions
 
-Experimental commands:
-  setup       Read-only host readiness check (experimental)
-
-Extensions:
-  kit       Inspect local kit files; registry kits and builders are unavailable
-  template  List and inspect built-in templates
-
-Experimental:
-  skills    Import, list and remove host-side agent skills
-  setup     Read-only host readiness check (experimental)
-
-Unsupported Docker Sandboxes commands:
+Unsupported Docker Sandboxes Commands:
   move, ttl, volume
 
 Flags:
-      --socket PATH  Local daemon endpoint
-  -h, --help         Show command help
+  -h, --help   help for rsbx
 
-Use "rsbx COMMAND --help" for command details.
+Global Flags:
+      --socket PATH   Local daemon endpoint
+
+Use "rsbx COMMAND --help" for more information about a command.
 `
 	if _, err := io.WriteString(r.Out, help); err != nil {
 		r.error(err)

@@ -26,8 +26,7 @@ type pruneOptions struct {
 func (r *Runner) prune(ctx context.Context, args []string) int {
 	opts, help, err := parsePruneOptions(args)
 	if help {
-		_, _ = fmt.Fprint(r.Out, pruneUsage)
-		return 0
+		return r.showCommandHelp(pruneHelp())
 	}
 	if parseErr, ok := asFlagParseError(err); ok {
 		return r.flagParseFailure("prune", parseErr.err)

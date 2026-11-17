@@ -205,7 +205,7 @@ func TestSkillsHelpAndDispatch(t *testing.T) {
 	if code := rootRunner.Run(context.Background(), []string{"--help"}); code != 0 {
 		t.Fatalf("root help exit=%d output=%q", code, rootOutput.String())
 	}
-	if !strings.Contains(rootOutput.String(), "Experimental:") || !strings.Contains(rootOutput.String(), "skills") {
+	if !strings.Contains(rootOutput.String(), "Experimental Commands:") || !strings.Contains(rootOutput.String(), "skills") {
 		t.Fatalf("root help does not label skills experimental: %q", rootOutput.String())
 	}
 }

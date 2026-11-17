@@ -400,8 +400,10 @@ best-effort upstream revocation. For clients that accept a bearer token through
 `OPENAI_API_KEY`, configure the explicit host broker reference when creating a
 sandbox: `rsbx run --env 'OPENAI_API_KEY=${oauth:openai}' ...`. The guest gets
 only a placeholder; the daemon refreshes and injects the host token on requests
-to `api.openai.com`. The built-in OpenAI OAuth route is supported. Generic kit OAuth declarations
-are represented in the API contract, but custom token-endpoint interception and
+to the scoped ChatGPT Codex backend (`chatgpt.com/backend-api/codex/`). Paths
+outside that prefix, unrelated domains and denied resolved addresses fail
+closed before the credential is forwarded. Generic kit OAuth declarations are
+represented in the API contract, but custom token-endpoint interception and
 credential-file setup are not enabled by this daemon yet.
 
 `rsbx run codex` uses host credentials before starting the agent. An explicit
@@ -409,8 +411,10 @@ credential-file setup are not enabled by this daemon yet.
 checks secret metadata (never secret values) and uses a stored OpenAI API key
 through the service proxy when one applies to the selected sandbox. If no API
 key applies, it checks the host OAuth account, starts login when needed, and
-passes only the OAuth proxy reference into Codex. This selection is limited to
-the built-in Codex run path; `create` does not start an interactive login.
+passes only the OAuth proxy reference into Codex. The attached session also
+points Codex at the local broker and supplies a non-secret `CODEX_API_KEY`
+placeholder; the guest never receives the host token. This selection is limited
+to the built-in Codex run path; `create` does not start an interactive login.
 
 A local kit can select the built-in OpenAI host OAuth flow:
 

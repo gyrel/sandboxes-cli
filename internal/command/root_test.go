@@ -594,8 +594,11 @@ func TestAccountCommandsUseAccountService(t *testing.T) {
 		if code := runner.Run(context.Background(), args); code != 0 || !called {
 			t.Fatalf("%s: exit=%d client called=%t output=%q", command, code, called, out.String())
 		}
-		if command == "login" && (!strings.Contains(out.String(), "Docker verification code: ABCD-EFGH") || !strings.Contains(out.String(), "Press Enter to open https://login.example/device") || !strings.Contains(out.String(), "If the browser does not open, visit the URL above and enter the code.") || !strings.Contains(out.String(), "Waiting for Docker authorization")) {
-			t.Fatalf("login omitted the device code or Enter handoff prompt: %q", out.String())
+		if command == "login" && (!strings.Contains(out.String(), "Your one-time device confirmation code is: ABCD-EFGH") || !strings.Contains(out.String(), "Open this URL to sign in: https://login.example/device") || !strings.Contains(out.String(), "Waiting for authentication...") || !strings.Contains(out.String(), "docker-subscription-service-agreement")) {
+			t.Fatalf("login omitted the device code or sign-in handoff text: %q", out.String())
+		}
+		if command == "login" && !strings.Contains(out.String(), "Signed in.") {
+			t.Fatalf("login did not report the completed sign-in: %q", out.String())
 		}
 		if strings.Contains(out.String(), "synthetic-token") {
 			t.Fatalf("account command consumed or printed registry input: %q", out.String())
@@ -621,7 +624,7 @@ func TestAccountCommandsUseAccountService(t *testing.T) {
 	}
 }
 
-func TestLoginEOFCancelsBeforeDeviceHandoff(t *testing.T) {
+func TestLoginDoesNotRequireStdinHandoff(t *testing.T) {
 	var out bytes.Buffer
 	completed := false
 	interactive := interactiveAccountFunc(func(ctx context.Context, _ string, handoff func(context.Context, sdk.DeviceLoginInfo) error) error {
@@ -634,8 +637,51 @@ func TestLoginEOFCancelsBeforeDeviceHandoff(t *testing.T) {
 	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
 		return fakeClient{interactive: interactive}, nil
 	}}
-	if code := runner.Run(context.Background(), []string{"login"}); code == 0 || completed {
-		t.Fatalf("EOF should cancel before opening the browser, exit=%d completed=%t output=%q", code, completed, out.String())
+	if code := runner.Run(context.Background(), []string{"login"}); code != 0 || !completed {
+		t.Fatalf("login should continue to browser sign-in without terminal input, exit=%d completed=%t output=%q", code, completed, out.String())
+	}
+}
+
+func TestLoginReportsExistingSession(t *testing.T) {
+	var out bytes.Buffer
+	interactiveCalled := false
+	interactive := interactiveAccountFunc(func(context.Context, string, func(context.Context, sdk.DeviceLoginInfo) error) error {
+		interactiveCalled = true
+		return nil
+	})
+	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+		return fakeClient{
+			interactive:     interactive,
+			accountStatuses: fakeAccountStatus{statuses: map[string]bool{dockerAccountProvider: true}},
+		}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"login"}); code != 0 || interactiveCalled {
+		t.Fatalf("existing session should skip the device flow: exit=%d interactive=%t output=%q", code, interactiveCalled, out.String())
+	}
+	if got := strings.TrimSpace(out.String()); got != "You are signed in" {
+		t.Fatalf("unexpected signed-in output %q", got)
+	}
+}
+
+func TestLoginArgumentErrorsMatchReference(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"login", "extra-arg"}, want: "error: unknown command \"extra-arg\" for \"rsbx login\"\n  try: rsbx login --help\n"},
+		{args: []string{"login", "--username", "alice"}, want: "error: --username requires --password-stdin\n  try: rsbx login --help\n"},
+		{args: []string{"login", "--password-stdin"}, want: "error: --password-stdin requires --username\n  try: rsbx login --help\n"},
+		{args: []string{"login", "--bogus"}, want: "error: unknown flag: --bogus\n  try: rsbx login --help\n"},
+	} {
+		var out bytes.Buffer
+		clientCalled := false
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("synthetic-token\n"), NewClient: func(string) (sdk.Client, error) {
+			clientCalled = true
+			return fakeClient{}, nil
+		}}
+		if code := runner.Run(context.Background(), test.args); code != 1 || clientCalled || out.String() != test.want {
+			t.Fatalf("%v: exit=%d client-called=%t output=%q want=%q", test.args, code, clientCalled, out.String(), test.want)
+		}
 	}
 }
 
@@ -651,7 +697,7 @@ func TestLoginDockerPATReadsOneLineFromStdin(t *testing.T) {
 	if pat.username != "alice" || string(pat.password) != "synthetic-token" {
 		t.Fatalf("unexpected PAT login: %#v", pat)
 	}
-	if strings.Contains(out.String(), "synthetic-token") || !strings.Contains(out.String(), "Logged in") {
+	if strings.Contains(out.String(), "synthetic-token") || !strings.Contains(out.String(), "Signed in.") {
 		t.Fatalf("unexpected login output %q", out.String())
 	}
 }

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+## v0.0.58 — 2026-11-17
+
+### Changed
+
+- `policy ls` reports the reference baseline rules for the allow-all profile
+  (`default-allow-all`, `default-fs-read-allow-all`,
+  `default-fs-write-allow-all`, `provenance.created_via: "default"`); the table
+  uses the reference `POLICY / SOURCE / APPLIES TO / SUMMARY` grouping, and
+  `policy inspect` keeps the per-rule detail view.
+- `--help` uses the reference layout for every command: `Description`, `Usage`,
+  `Aliases`, `Examples`, `Flags` and `Global Flags` with a real flag table. The
+  top-level help uses the reference section names and no longer lists `setup`
+  twice.
+
 ## v0.0.57 — 2026-11-17
 
 ### Removed

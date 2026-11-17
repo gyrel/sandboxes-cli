@@ -1467,6 +1467,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	profile := fs.String("policy-profile", "", "egress profile: allow-all, balanced, deny-all or sbx-compat")
 	privileged := fs.Bool("docker", false, "run the dedicated Docker profile")
 	cloneMode := fs.Bool("clone", false, "run the agent on a private in-guest clone of PATH")
+	fs.Bool("no-progress", false, "suppress progress output")
 	kitPath := fs.String("kit", "", "apply a local kit definition")
 	var denyWriteFlags stringListFlag
 	fs.Var(&denyWriteFlags, "deny-write", "mount PATH read-only (repeatable)")

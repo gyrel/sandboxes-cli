@@ -125,3 +125,15 @@ func TestAgentRunRejectsReadOnlyPrimaryWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateNoProgressAfterAgent(t *testing.T) {
+	sandbox := &recordingCreateSandbox{}
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil }}
+	if code := runner.Run(context.Background(), []string{"create", "shell", "--no-progress"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if sandbox.request.Agent != shellAgent {
+		t.Fatalf("agent=%q", sandbox.request.Agent)
+	}
+}

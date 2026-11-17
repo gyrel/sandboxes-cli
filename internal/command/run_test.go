@@ -345,8 +345,11 @@ spec:
 	if len(sandboxes.created.OAuthCredentials) != 0 {
 		t.Fatalf("fixed OpenAI provider config must stay daemon-managed: %#v", sandboxes.created.OAuthCredentials)
 	}
-	if !reflect.DeepEqual(sessions.req.Env, []string{"OPENAI_API_KEY=${oauth:openai}"}) {
+	if !reflect.DeepEqual(sessions.req.Env, []string{"OPENAI_API_KEY=${oauth:openai}", "CODEX_API_KEY=rheic-proxy-placeholder"}) {
 		t.Fatalf("agent env=%q", sessions.req.Env)
+	}
+	if len(sessions.req.Argv) < 3 || sessions.req.Argv[0] != "codex" || sessions.req.Argv[1] != "-c" || sessions.req.Argv[2] != "openai_base_url=http://127.0.0.1:3128/backend-api/codex" {
+		t.Fatalf("agent argv=%q", sessions.req.Argv)
 	}
 }
 
@@ -517,6 +520,7 @@ func TestValidateOAuthProxyEnvironmentRejectsOverrides(t *testing.T) {
 	for _, env := range [][]string{
 		{openAIOAuthEnvRef, "OPENAI_API_KEY=explicit-key"},
 		{openAIOAuthEnvRef, "OPENAI_BASE_URL=https://attacker.invalid"},
+		{openAIOAuthEnvRef, "CODEX_API_KEY=explicit-key"},
 		{openAIOAuthEnvRef, openAIOAuthEnvRef},
 	} {
 		if err := validateOAuthProxyEnvironment(env); err == nil {
@@ -1145,5 +1149,22 @@ func TestRunRMWarnsBeforeRemovingCloneSandbox(t *testing.T) {
 		if !strings.Contains(stderr.String(), part) {
 			t.Fatalf("stderr=%q, want %q", stderr.String(), part)
 		}
+	}
+}
+
+func TestCodexOAuthSessionDoesNotModifyCustomCommand(t *testing.T) {
+	argv := []string{"/bin/sh", "-c", "true"}
+	env := []string{openAIOAuthEnvRef}
+	gotArgv, gotEnv := codexOAuthSession(codexAgentName, argv, env)
+	if !reflect.DeepEqual(gotArgv, argv) || !reflect.DeepEqual(gotEnv, env) {
+		t.Fatalf("custom command changed: %q %q", gotArgv, gotEnv)
+	}
+}
+
+func TestExplicitCodexKeyDoesNotStartOAuth(t *testing.T) {
+	env := []string{"CODEX_API_KEY=synthetic-test-key"}
+	got, err := prepareAgentCredentials(context.Background(), fakeClient{}, codexAgentName, "", env)
+	if err != nil || !reflect.DeepEqual(got, env) {
+		t.Fatalf("credentials=%q err=%v", got, err)
 	}
 }

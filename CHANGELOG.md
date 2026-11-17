@@ -4,6 +4,7 @@
 
 - Match Docker sbx rejection of detached exec with exit status 125.
 - Accept `create --no-progress`; create does not emit progress output.
+- Configure the Codex command to use the host OAuth broker when an OAuth reference is selected.
 
 ## v0.0.58 — 2026-11-17
 

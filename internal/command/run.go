@@ -409,6 +409,9 @@ func prepareAgentCredentials(ctx context.Context, client sdk.Client, agent, sand
 		}
 		return env, nil
 	}
+	if agent == codexAgentName && hasEnvironmentKey(env, "CODEX_API_KEY") {
+		return env, nil
+	}
 	if agent == "opencode" || agent == "docker-agent" {
 		return prepareMultiProviderCredentials(ctx, client, sandboxName, env)
 	}
@@ -689,7 +692,8 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 			closeOnEOF = fileClosesOnEOF(file)
 		}
 	}
-	code := r.execSessionMode(ctx, client, sandbox.ID, runArgv(agent, agentArgs), execOptions{workdir: cloneWorkdir, env: resources.env}, interactive, tty, closeOnEOF)
+	argv, sessionEnv := codexOAuthSession(agent, runArgv(agent, agentArgs), resources.env)
+	code := r.execSessionMode(ctx, client, sandbox.ID, argv, execOptions{workdir: cloneWorkdir, env: sessionEnv}, interactive, tty, closeOnEOF)
 	if opts.remove {
 		r.warnCloneRemoval(sandbox)
 		if err := r.removeRunSandbox(ctx, client, sandbox); err != nil {
@@ -1058,6 +1062,18 @@ func runArgv(name string, agentArgs []string) []string {
 		return append(defaults, agentArgs...)
 	}
 	return append([]string(nil), agentArgs...)
+}
+
+// codexOAuthSession selects the host broker for the Codex executable only.
+func codexOAuthSession(agent string, argv, env []string) ([]string, []string) {
+	if agent != codexAgentName || !usesOpenAIOAuthReference(env) || len(argv) == 0 || argv[0] != codexAgentName {
+		return argv, env
+	}
+	configured := make([]string, 0, len(argv)+2)
+	configured = append(configured, argv[0], "-c", "openai_base_url=http://127.0.0.1:3128/backend-api/codex")
+	configured = append(configured, argv[1:]...)
+	sessionEnv := append(append([]string(nil), env...), "CODEX_API_KEY=rheic-proxy-placeholder")
+	return configured, sessionEnv
 }
 
 func runTerminal(input any) (interactive, tty bool) {

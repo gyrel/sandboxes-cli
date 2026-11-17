@@ -41,6 +41,7 @@ func validateOAuthProxyEnvironment(env []string) error {
 	markerCount := 0
 	openAIKeyCount := 0
 	baseURLCount := 0
+	codexKeyCount := 0
 	for _, entry := range env {
 		key, _, found := strings.Cut(entry, "=")
 		if !found {
@@ -52,11 +53,14 @@ func validateOAuthProxyEnvironment(env []string) error {
 		if key == openAIAPIKeyEnv {
 			openAIKeyCount++
 		}
+		if key == "CODEX_API_KEY" {
+			codexKeyCount++
+		}
 		if key == openAIBaseURLEnv {
 			baseURLCount++
 		}
 	}
-	if markerCount > 1 || markerCount == 1 && (openAIKeyCount != 1 || baseURLCount > 0) {
+	if markerCount > 1 || markerCount == 1 && (openAIKeyCount != 1 || baseURLCount > 0 || codexKeyCount > 0) {
 		return errors.New("OpenAI OAuth kit reference conflicts with an explicit or duplicate OpenAI environment value")
 	}
 	return nil

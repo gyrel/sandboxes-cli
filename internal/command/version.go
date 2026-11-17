@@ -94,11 +94,6 @@ func (r *Runner) version(ctx context.Context, args []string) int {
 	} else {
 		_, _ = fmt.Fprintf(r.Out, "rsbx version %s\n", report.Client.Version)
 	}
-	if report.Server.State == sandboxStateRunning {
-		_, _ = fmt.Fprintf(r.Out, "server %s (api %s)\n", report.Server.Version, report.Server.APIVersion)
-	} else {
-		_, _ = fmt.Fprintf(r.Out, "server unavailable: %s\n", report.Server.Error)
-	}
 	return 0
 }
 

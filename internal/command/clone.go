@@ -211,7 +211,7 @@ func (r *Runner) probeCloneEndpoint(ctx context.Context, sandboxName string, end
 			return ctx.Err()
 		}
 	}
-	return fmt.Errorf("the clone endpoint for sandbox %s is not reachable; run 'rsbx stop %s' and 'rsbx start %s' to republish it", sandboxName, sandboxName, sandboxName)
+	return fmt.Errorf("the clone endpoint for sandbox %s is not reachable; run 'rsbx stop %s' and 'rsbx run --name %s' to republish it", sandboxName, sandboxName, sandboxName)
 }
 
 func cloneSourceWorkspaceFromSandbox(sb *sdk.Sandbox) string {
@@ -247,7 +247,10 @@ func canonicalCloneSourcePath(path string) (string, error) {
 	return filepath.Clean(canonical), nil
 }
 
-func (r *Runner) reconcileCloneLifecycle(ctx context.Context, client sdk.Client, id string, active bool) error {
+// reconcileCloneLifecycle verifies the clone state after a lifecycle change.
+// Stops keep the host remote: its loopback endpoint is refreshed after the next
+// successful start or reattach, and user edits remain untouched.
+func (r *Runner) reconcileCloneLifecycle(ctx context.Context, client sdk.Client, id string) error {
 	sb, err := client.Sandboxes().Get(ctx, id)
 	if err != nil {
 		return err
@@ -255,12 +258,6 @@ func (r *Runner) reconcileCloneLifecycle(ctx context.Context, client sdk.Client,
 	if sb.Clone == nil {
 		return nil
 	}
-	if active {
-		_, err := r.activateCloneSandbox(ctx, sb, "")
-		return err
-	}
-	// Keep the remote while stopped. Its loopback endpoint is refreshed after
-	// the next successful start/reattach, and user edits remain untouched.
 	return nil
 }
 

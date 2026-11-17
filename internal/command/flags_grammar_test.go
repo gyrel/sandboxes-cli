@@ -79,89 +79,82 @@ func TestRemoveAcceptsInterspersedFlags(t *testing.T) {
 	}
 }
 
-func TestLifecycleAcceptsInterspersedFlags(t *testing.T) {
+func TestStopAcceptsInterspersedFlags(t *testing.T) {
 	items := []sdk.Sandbox{
 		{ID: "sb-1", Name: "one"},
 		{ID: "sb-2", Name: "two"},
 		{ID: "sb-dash", Name: "--json"},
 	}
-	for _, command := range []string{startCommand, stopCommand} {
-		t.Run(command, func(t *testing.T) {
-			tests := []struct {
-				name       string
-				args       []string
-				wantCode   int
-				wantTarget []string
-				wantOps    int
-				wantOutput []string
-			}{
-				{
-					name:       "flag before arguments",
-					args:       []string{command, "--json", "one"},
-					wantTarget: []string{"sb-1"},
-					wantOps:    1,
-				},
-				{
-					name:       "flag after arguments",
-					args:       []string{command, "one", "--json"},
-					wantTarget: []string{"sb-1"},
-					wantOps:    1,
-				},
-				{
-					name:       "value flag after arguments",
-					args:       []string{command, "one", "--format", "json"},
-					wantTarget: []string{"sb-1"},
-					wantOps:    1,
-				},
-				{
-					name:       "flag between arguments",
-					args:       []string{command, "one", "--json", "two"},
-					wantTarget: []string{"sb-1", "sb-2"},
-					wantOps:    2,
-				},
-				{
-					name:       "value flag between arguments",
-					args:       []string{command, "one", "--format", "json", "two"},
-					wantTarget: []string{"sb-1", "sb-2"},
-					wantOps:    2,
-				},
-				{
-					name:       "terminator keeps flag-like name positional",
-					args:       []string{command, "--json", "--", "--json"},
-					wantTarget: []string{"sb-dash"},
-					wantOps:    1,
-				},
-				{
-					name:       "unknown flag before arguments still errors",
-					args:       []string{command, "--bogus", "one"},
-					wantCode:   1,
-					wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx " + command + " --help"},
-				},
-				{
-					name:       "unknown flag after arguments still errors",
-					args:       []string{command, "one", "--bogus"},
-					wantCode:   1,
-					wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx " + command + " --help"},
-				},
+	const command = stopCommand
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantTarget []string
+		wantOps    int
+		wantOutput []string
+	}{
+		{
+			name:       "flag before arguments",
+			args:       []string{command, "--json", "one"},
+			wantTarget: []string{"sb-1"},
+			wantOps:    1,
+		},
+		{
+			name:       "flag after arguments",
+			args:       []string{command, "one", "--json"},
+			wantTarget: []string{"sb-1"},
+			wantOps:    1,
+		},
+		{
+			name:       "value flag after arguments",
+			args:       []string{command, "one", "--format", "json"},
+			wantTarget: []string{"sb-1"},
+			wantOps:    1,
+		},
+		{
+			name:       "flag between arguments",
+			args:       []string{command, "one", "--json", "two"},
+			wantTarget: []string{"sb-1", "sb-2"},
+			wantOps:    2,
+		},
+		{
+			name:       "value flag between arguments",
+			args:       []string{command, "one", "--format", "json", "two"},
+			wantTarget: []string{"sb-1", "sb-2"},
+			wantOps:    2,
+		},
+		{
+			name:       "terminator keeps flag-like name positional",
+			args:       []string{command, "--json", "--", "--json"},
+			wantTarget: []string{"sb-dash"},
+			wantOps:    1,
+		},
+		{
+			name:       "unknown flag before arguments still errors",
+			args:       []string{command, "--bogus", "one"},
+			wantCode:   1,
+			wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx " + command + " --help"},
+		},
+		{
+			name:       "unknown flag after arguments still errors",
+			args:       []string{command, "one", "--bogus"},
+			wantCode:   1,
+			wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx " + command + " --help"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sandbox := &lifecycleSandbox{items: append([]sdk.Sandbox(nil), items...)}
+			runner, out := lifecycleRunner(sandbox)
+			if code := runner.Run(context.Background(), tt.args); code != tt.wantCode {
+				t.Fatalf("exit=%d want=%d output=%q", code, tt.wantCode, out.String())
 			}
-			for _, tt := range tests {
-				t.Run(tt.name, func(t *testing.T) {
-					sandbox := &lifecycleSandbox{items: append([]sdk.Sandbox(nil), items...)}
-					runner, out := lifecycleRunner(sandbox)
-					if code := runner.Run(context.Background(), tt.args); code != tt.wantCode {
-						t.Fatalf("exit=%d want=%d output=%q", code, tt.wantCode, out.String())
-					}
-					targets := sandbox.starts
-					if command == stopCommand {
-						targets = sandbox.stops
-					}
-					if got, want := strings.Join(targets, ","), strings.Join(tt.wantTarget, ","); got != want {
-						t.Fatalf("targets=%q want=%q output=%q", got, want, out.String())
-					}
-					assertOperationCount(t, out.String(), tt.wantOps)
-					assertOutputContains(t, out.String(), tt.wantOutput)
-				})
+			if got, want := strings.Join(sandbox.stops, ","), strings.Join(tt.wantTarget, ","); got != want {
+				t.Fatalf("targets=%q want=%q output=%q", got, want, out.String())
 			}
+			assertOperationCount(t, out.String(), tt.wantOps)
+			assertOutputContains(t, out.String(), tt.wantOutput)
 		})
 	}
 }
@@ -220,62 +213,6 @@ func TestListAcceptsInterspersedFlags(t *testing.T) {
 	}
 }
 
-func TestGetAcceptsInterspersedFlagsAndTerminator(t *testing.T) {
-	items := []sdk.Sandbox{
-		{ID: "sb-1", Name: "one"},
-		{ID: "sb-dash", Name: "--help"},
-	}
-	tests := []struct {
-		name       string
-		args       []string
-		wantCode   int
-		wantOutput []string
-	}{
-		{
-			name:       "flag before arguments",
-			args:       []string{"get", "--help"},
-			wantOutput: []string{"usage: rsbx get"},
-		},
-		{
-			name:       "flag after arguments",
-			args:       []string{"get", "one", "--help"},
-			wantOutput: []string{"usage: rsbx get"},
-		},
-		{
-			name:       "flag between arguments",
-			args:       []string{"get", "one", "--help", "two"},
-			wantOutput: []string{"usage: rsbx get"},
-		},
-		{
-			name:       "terminator keeps flag-like name positional",
-			args:       []string{"get", "--", "--help"},
-			wantOutput: []string{"id: sb-dash"},
-		},
-		{
-			name:       "unknown flag before arguments still errors",
-			args:       []string{"get", "--bogus", "one"},
-			wantCode:   1,
-			wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx get --help"},
-		},
-		{
-			name:       "unknown flag after arguments still errors",
-			args:       []string{"get", "one", "--bogus"},
-			wantCode:   1,
-			wantOutput: []string{"error: unknown flag: --bogus", "try: rsbx get --help"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sandbox := &lifecycleSandbox{items: append([]sdk.Sandbox(nil), items...)}
-			runner, out := lifecycleRunner(sandbox)
-			if code := runner.Run(context.Background(), tt.args); code != tt.wantCode {
-				t.Fatalf("exit=%d want=%d output=%q", code, tt.wantCode, out.String())
-			}
-			assertOutputContains(t, out.String(), tt.wantOutput)
-		})
-	}
-}
-
 func TestHelpTextShowsBothFlagPositions(t *testing.T) {
 	tests := []struct {
 		name string
@@ -288,11 +225,6 @@ func TestHelpTextShowsBothFlagPositions(t *testing.T) {
 			want: []string{"rsbx rm --force api", "rsbx rm api --force"},
 		},
 		{
-			name: "start",
-			args: []string{"start", "--help"},
-			want: []string{"rsbx start --format json api", "rsbx start api --format json"},
-		},
-		{
 			name: "stop",
 			args: []string{"stop", "--help"},
 			want: []string{"rsbx stop --format json api", "rsbx stop api --format json"},
@@ -301,11 +233,6 @@ func TestHelpTextShowsBothFlagPositions(t *testing.T) {
 			name: "ls",
 			args: []string{"ls", "--help"},
 			want: []string{"rsbx ls --json", "rsbx ls --limit 10 --format yaml"},
-		},
-		{
-			name: "get",
-			args: []string{"get", "--help"},
-			want: []string{"rsbx get -- --literal-name"},
 		},
 	}
 	for _, tt := range tests {

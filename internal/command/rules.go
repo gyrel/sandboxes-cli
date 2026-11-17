@@ -108,26 +108,3 @@ func resolveNetworkRules(values []string) ([]sdk.NetworkRule, error) {
 	}
 	return rules, nil
 }
-
-func formatRules(rules []sdk.NetworkRule) string {
-	if len(rules) == 0 {
-		return "-"
-	}
-	parts := make([]string, 0, len(rules))
-	for i := range rules {
-		port := ""
-		if rules[i].Port != 0 {
-			port = fmt.Sprintf(":%d", rules[i].Port)
-		}
-		protocol := rules[i].Protocol
-		if protocol == "" {
-			protocol = tcpProtocol
-		}
-		target := rules[i].CIDR
-		if rules[i].Domain != "" {
-			target = rules[i].Domain
-		}
-		parts = append(parts, fmt.Sprintf("%s:%s%s", protocol, target, port))
-	}
-	return strings.Join(parts, ", ")
-}

@@ -25,6 +25,13 @@ type lifecycleSandbox struct {
 func (s *lifecycleSandbox) List(context.Context, sdk.ListOptions) (*sdk.Page[sdk.Sandbox], error) {
 	return &sdk.Page[sdk.Sandbox]{Items: s.items}, nil
 }
+func (s *lifecycleSandbox) Start(_ context.Context, id string) (*sdk.Operation, error) {
+	s.starts = append(s.starts, id)
+	if s.startErr != nil {
+		return nil, s.startErr
+	}
+	return &sdk.Operation{ID: "op-start", State: sdk.StateDone}, nil
+}
 func (s *lifecycleSandbox) Get(_ context.Context, id string) (*sdk.Sandbox, error) {
 	for i := range s.items {
 		if s.items[i].ID == id || s.items[i].Name == id {
@@ -35,13 +42,6 @@ func (s *lifecycleSandbox) Get(_ context.Context, id string) (*sdk.Sandbox, erro
 	return nil, errors.New("not found")
 }
 
-func (s *lifecycleSandbox) Start(_ context.Context, id string) (*sdk.Operation, error) {
-	s.starts = append(s.starts, id)
-	if s.startErr != nil {
-		return nil, s.startErr
-	}
-	return &sdk.Operation{ID: "op-start", State: sdk.StateDone}, nil
-}
 func (s *lifecycleSandbox) Stop(_ context.Context, id string, _ sdk.StopOptions) (*sdk.Operation, error) {
 	s.stops = append(s.stops, id)
 	return &sdk.Operation{ID: "op-stop", State: sdk.StateDone}, nil
@@ -190,7 +190,7 @@ func TestRemovePartialFailureReturnsOne(t *testing.T) {
 	}
 }
 
-func TestStopAndStartMultipleSandboxes(t *testing.T) {
+func TestStopMultipleSandboxes(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
 		{ID: "sb-1", Name: "one"}, {ID: "sb-2", Name: "two"},
 	}}
@@ -200,12 +200,6 @@ func TestStopAndStartMultipleSandboxes(t *testing.T) {
 	}
 	if strings.Join(sandbox.stops, ",") != "sb-1,sb-2" {
 		t.Fatalf("stops=%v", sandbox.stops)
-	}
-	if code := runner.Run(context.Background(), []string{"start", "one", "two"}); code != 0 {
-		t.Fatalf("start exit=%d output=%q", code, out.String())
-	}
-	if strings.Join(sandbox.starts, ",") != "sb-1,sb-2" {
-		t.Fatalf("starts=%v", sandbox.starts)
 	}
 }
 

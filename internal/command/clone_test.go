@@ -553,7 +553,7 @@ func TestActivateCloneSandboxUnreachableEndpointLeavesConfigUntouched(t *testing
 		return nil, errors.New("connection refused")
 	}}
 	_, err = runner.activateCloneSandbox(context.Background(), cloneTestSandbox("demo", 4321), root)
-	want := "the clone endpoint for sandbox demo is not reachable; run 'rsbx stop demo' and 'rsbx start demo' to republish it"
+	want := "the clone endpoint for sandbox demo is not reachable; run 'rsbx stop demo' and 'rsbx run --name demo' to republish it"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
 	}
@@ -639,7 +639,7 @@ func TestActivateCloneSandboxDialTimeoutIsUnreachable(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}}
 	_, err = runner.activateCloneSandbox(context.Background(), cloneTestSandbox("demo", 4321), root)
-	want := "the clone endpoint for sandbox demo is not reachable; run 'rsbx stop demo' and 'rsbx start demo' to republish it"
+	want := "the clone endpoint for sandbox demo is not reachable; run 'rsbx stop demo' and 'rsbx run --name demo' to republish it"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
 	}

@@ -219,6 +219,7 @@ func execHelp() commandHelp {
 			"rsbx exec -u root my-sandbox apt-get update",
 		},
 		Flags: []commandFlagHelp{
+			{Short: "d", Name: "detach", Description: "detached mode (not supported)"},
 			{Short: "e", Name: helpNameEnv, Value: helpNameStringArray, Description: "environment override (repeatable)"},
 			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: "read environment overrides from a file (repeatable)"},
 			{Short: "h", Name: helpCommand, Description: "help for exec"},

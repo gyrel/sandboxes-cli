@@ -48,24 +48,19 @@ func (f *stringListFlag) Set(value string) error {
 func (r *Runner) exec(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { r.showCommandHelp(execHelp()) }
+	fs.Usage = func() {}
 	var opts execOptions
 	var envFlags, envFiles stringListFlag
-	var interactive, tty bool
-	fs.BoolVar(&interactive, "i", false, "keep stdin open")
-	fs.BoolVar(&interactive, "interactive", false, "keep stdin open")
-	fs.BoolVar(&tty, "t", false, "allocate a terminal")
-	fs.BoolVar(&tty, "tty", false, "allocate a terminal")
-	fs.StringVar(&opts.workdir, "workdir", "", "guest working directory")
-	fs.StringVar(&opts.workdir, "w", "", "guest working directory")
-	fs.Var(&envFlags, "e", "KEY=VALUE environment override")
-	fs.Var(&envFlags, "env", "KEY=VALUE environment override")
-	fs.Var(&envFiles, "env-file", "read KEY=VALUE overrides from a file")
-	fs.StringVar(&opts.user, "u", "", "uid[:gid] or name[:group]")
-	fs.StringVar(&opts.user, "user", "", "uid[:gid] or name[:group]")
-	if err := fs.Parse(reorderExecArgs(args)); err != nil {
+	var interactive, tty, detached bool
+	registerExecFlags(fs, &opts, &envFlags, &envFiles, &interactive, &tty, &detached)
+	err := fs.Parse(reorderExecArgs(args))
+	if detached {
+		_, _ = fmt.Fprintln(r.Err, "error: --detach is not supported for exec; omit -d to run the command in the foreground\n  try: rsbx exec --help")
+		return 125
+	}
+	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return r.showCommandHelp(execHelp())
 		}
 		return r.flagParseFailure("exec", err)
 	}
@@ -105,6 +100,22 @@ func (r *Runner) exec(ctx context.Context, args []string) int {
 		return 125
 	}
 	return code
+}
+
+func registerExecFlags(fs *flag.FlagSet, opts *execOptions, envFlags, envFiles *stringListFlag, interactive, tty, detached *bool) {
+	fs.BoolVar(detached, "d", false, "detached exec is unsupported")
+	fs.BoolVar(detached, "detach", false, "detached exec is unsupported")
+	fs.BoolVar(interactive, "i", false, "keep stdin open")
+	fs.BoolVar(interactive, "interactive", false, "keep stdin open")
+	fs.BoolVar(tty, "t", false, "allocate a terminal")
+	fs.BoolVar(tty, "tty", false, "allocate a terminal")
+	fs.StringVar(&opts.workdir, "workdir", "", "guest working directory")
+	fs.StringVar(&opts.workdir, "w", "", "guest working directory")
+	fs.Var(envFlags, "e", "KEY=VALUE environment override")
+	fs.Var(envFlags, "env", "KEY=VALUE environment override")
+	fs.Var(envFiles, "env-file", "read KEY=VALUE overrides from a file")
+	fs.StringVar(&opts.user, "u", "", "uid[:gid] or name[:group]")
+	fs.StringVar(&opts.user, "user", "", "uid[:gid] or name[:group]")
 }
 
 func expandExecFlags(args []string) []string {
@@ -178,7 +189,7 @@ func reorderExecArgs(args []string) []string {
 
 func isExecBooleanFlag(name string) bool {
 	switch name {
-	case "-i", interactiveFlag, "-t", ttyFlag, helpShort, helpFlag:
+	case "-i", interactiveFlag, "-t", ttyFlag, "-d", detachFlag, helpShort, helpFlag:
 		return true
 	default:
 		return false

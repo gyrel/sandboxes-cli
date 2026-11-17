@@ -154,7 +154,7 @@ func TestPolicyListAnnotatesOrigin(t *testing.T) {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 	rendered := out.String()
-	for _, want := range []string{"ORIGIN", "local", "org", "10.0.0.0/8", "203.0.113.7/32"} {
+	for _, want := range []string{"POLICY", "SOURCE", "APPLIES TO", "SUMMARY", "local", "org", "network: 1 allow", "network: 1 deny"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("policy ls output missing %q:\n%s", want, rendered)
 		}

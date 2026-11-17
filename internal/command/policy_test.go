@@ -63,7 +63,7 @@ func TestPolicyListAndCheck(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"policy", "ls", "dev"}); code != 0 {
 		t.Fatalf("ls exit=%d output=%q", code, out.String())
 	}
-	if !strings.Contains(out.String(), "10.0.0.0/8") || !strings.Contains(out.String(), "deny") {
+	if !strings.Contains(out.String(), "sandbox:dev") || !strings.Contains(out.String(), "network: 1 allow, 1 deny") {
 		t.Fatalf("ls output=%q", out.String())
 	}
 	out.Reset()

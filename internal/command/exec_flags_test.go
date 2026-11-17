@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -113,5 +114,16 @@ func TestExecSkipsUnsetBareHostEnvironment(t *testing.T) {
 	}
 	if len(executor.request.Env) != 0 {
 		t.Fatalf("env=%q", executor.request.Env)
+	}
+}
+
+func TestExecDetachRejectedBeforeConnecting(t *testing.T) {
+	for _, args := range [][]string{{"exec", "-d", "example", "true"}, {"exec", "--detach", "example", "--help"}} {
+		called := false
+		var output bytes.Buffer
+		r := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { called = true; return nil, errors.New("unexpected") }}
+		if code := r.Run(context.Background(), args); code != 125 || called || !strings.Contains(output.String(), "--detach is not supported for exec") {
+			t.Fatalf("args=%q code=%d called=%t output=%q", args, code, called, output.String())
+		}
 	}
 }

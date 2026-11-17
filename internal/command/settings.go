@@ -82,8 +82,7 @@ func (r *Runner) settings(args []string) int {
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprint(r.Out, settingsUsage)
-		return 0
+		return r.showCommandHelp(settingsHelp())
 	case "ls":
 		return r.settingsList(args[1:])
 	case commandGet:
@@ -110,7 +109,7 @@ func (r *Runner) settingsList(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("settings ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, settingsListUsage) }
+	fs.Usage = func() { r.showCommandHelp(settingsListHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
@@ -288,7 +287,7 @@ func (r *Runner) settingsGet(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("settings get", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, settingsGetUsage) }
+	fs.Usage = func() { r.showCommandHelp(settingsGetHelp()) }
 	jsonOutput := fs.Bool("json", false, "print the full setting record")
 	format := fs.String("format", "", "output format: table, json or yaml")
 	if err := fs.Parse(args); err != nil {
@@ -347,8 +346,7 @@ func (r *Runner) printSettingRecord(row settingOutput, selected string) int {
 
 func (r *Runner) settingsSet(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, settingsSetUsage)
-		return 0
+		return r.showCommandHelp(settingsSetHelp())
 	}
 	if len(args) != 2 {
 		_, _ = fmt.Fprint(r.Err, settingsSetUsage)
@@ -376,8 +374,7 @@ func (r *Runner) settingsSet(args []string) int {
 
 func (r *Runner) settingsUnset(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
-		_, _ = fmt.Fprint(r.Out, settingsUnsetUsage)
-		return 0
+		return r.showCommandHelp(settingsUnsetHelp())
 	}
 	if len(args) != 1 {
 		_, _ = fmt.Fprint(r.Err, settingsUnsetUsage)

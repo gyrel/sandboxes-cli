@@ -23,8 +23,7 @@ func (r *Runner) removeSkills(ctx context.Context, args []string) int {
 	fs.BoolVar(force, "f", false, "skip confirmation")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{forceFlag: false, "-f": false})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, skillsRemoveUsage)
-			return 0
+			return r.showCommandHelp(skillsRemoveHelp())
 		}
 		return r.flagParseFailure("skills rm", err)
 	}

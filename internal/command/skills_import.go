@@ -52,8 +52,7 @@ func (r *Runner) importSkills(ctx context.Context, args []string) int {
 	fs.BoolVar(force, "f", false, "replace skill content previously imported by Rheic")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{forceFlag: false, "-f": false})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, skillsImportUsage)
-			return 0
+			return r.showCommandHelp(skillsImportHelp())
 		}
 		return r.flagParseFailure("skills import", err)
 	}

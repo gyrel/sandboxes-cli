@@ -45,8 +45,7 @@ func (r *Runner) version(ctx context.Context, args []string) int {
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, versionUsage)
-			return 0
+			return r.showCommandHelp(versionHelp())
 		}
 		return r.flagParseFailure("version", err)
 	}

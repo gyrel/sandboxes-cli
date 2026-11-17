@@ -46,8 +46,7 @@ type skillsListRecord struct {
 
 func (r *Runner) skills(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag {
-		_, _ = fmt.Fprint(r.Out, skillsUsage)
-		return 0
+		return r.showCommandHelp(skillsHelp())
 	}
 	switch args[0] {
 	case "ls", commandList:
@@ -72,8 +71,7 @@ func (r *Runner) listSkills(args []string) int {
 	fs.BoolVar(quiet, "q", false, "only display skill names")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprintln(r.Out, skillsListUsage)
-			return 0
+			return r.showCommandHelp(skillsListHelp())
 		}
 		return r.flagParseFailure("skills ls", err)
 	}

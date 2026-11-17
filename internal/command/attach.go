@@ -24,8 +24,7 @@ func (r *Runner) attach(ctx context.Context, args []string) int {
 	shell := fs.Bool("shell", false, "open /bin/sh instead of the agent command")
 	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, attachUsage)
-			return 0
+			return r.showCommandHelp(attachHelp())
 		}
 		return r.flagParseFailure("attach", err)
 	}

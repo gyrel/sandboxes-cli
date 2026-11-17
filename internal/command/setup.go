@@ -98,8 +98,7 @@ func (r *Runner) setup(ctx context.Context, args []string) int {
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, setupUsage)
-			return 0
+			return r.showCommandHelp(setupHelp())
 		}
 		return r.flagParseFailure(setupCommand, err)
 	}

@@ -49,8 +49,7 @@ func (r *Runner) template(args []string) int {
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprint(r.Out, templateUsage)
-		return 0
+		return r.showCommandHelp(templateHelp())
 	case "ls":
 		return r.templateList(args[1:])
 	case commandInspect:
@@ -68,7 +67,7 @@ func (r *Runner) templateList(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("template ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, templateListUsage) }
+	fs.Usage = func() { r.showCommandHelp(templateListHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
@@ -126,7 +125,7 @@ func (r *Runner) templateInspect(args []string) int {
 	args = reorderFlagArgs(args, nil)
 	fs := flag.NewFlagSet("template inspect", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, templateInspectUsage) }
+	fs.Usage = func() { r.showCommandHelp(templateInspectHelp()) }
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

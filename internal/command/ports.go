@@ -283,7 +283,7 @@ func (r *Runner) ports(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, "--publish": true, "--unpublish": true})
 	fs := flag.NewFlagSet("ports", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, portsUsage) }
+	fs.Usage = func() { r.showCommandHelp(portsHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	var publishFlags, unpublishFlags stringListFlag

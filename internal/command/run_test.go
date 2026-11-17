@@ -605,13 +605,13 @@ func TestRunHelpExitsZero(t *testing.T) {
 		t.Fatalf("exit=%d", code)
 	}
 	help := out.String()
-	if !strings.Contains(help, "usage: rsbx run") || !strings.Contains(help, "shell") {
+	if !strings.Contains(help, "  rsbx run") || !strings.Contains(help, "shell") {
 		t.Fatalf("unexpected help: %q", out.String())
 	}
 	for _, expected := range []string{
-		"[PATH...]", "--kit FILE", "--deny-write PATH", "--docker", "HOST_IP:]HOST_PORT", "tcp6|udp6",
+		"[PATH...]", "--kit string", "--deny-write stringArray", "--docker", "HOST_IP:]HOST_PORT", "tcp6|udp6",
 		"cloud sandboxes and remote/OCI kits are not supported", "it reuses automatically",
-		"Agent arguments after -- are passed to the agent", "rsbx run --new --name clean-shell --detach shell",
+		"Agent arguments after -- are", "rsbx run --new --name clean-shell --detach shell",
 	} {
 		if !strings.Contains(help, expected) {
 			t.Errorf("run help omitted %q: %q", expected, help)

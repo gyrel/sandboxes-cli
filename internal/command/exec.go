@@ -48,7 +48,7 @@ func (f *stringListFlag) Set(value string) error {
 func (r *Runner) exec(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, execUsage) }
+	fs.Usage = func() { r.showCommandHelp(execHelp()) }
 	var opts execOptions
 	var envFlags, envFiles stringListFlag
 	var interactive, tty bool

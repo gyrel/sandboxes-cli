@@ -15,21 +15,6 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-const listUsage = `usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]
-
-List sandboxes. table is the default; --json is equivalent to --format json;
--q prints only names. --limit N returns at most N sandboxes (1-1000); without
-it every sandbox is listed. JSON/YAML use the sbx ls schema: name, id, agent,
-status, last_used_at, workspaces and created_at. Flags may appear in any
-order; use -- to end flag parsing.
-
-Examples:
-  rsbx ls
-  rsbx ls --json
-  rsbx ls -q --limit 100
-  rsbx ls --limit 10 --format yaml
-`
-
 // sandboxPageSize is the daemon page size used when listing sandboxes. It is
 // independent of --limit, which caps the number of returned rows.
 const sandboxPageSize = 200
@@ -62,8 +47,7 @@ type sandboxOutput struct {
 func (r *Runner) list(ctx context.Context, args []string) int {
 	opts, help, err := parseListOptions(args)
 	if help {
-		_, _ = fmt.Fprint(r.Out, listUsage)
-		return 0
+		return r.showCommandHelp(listHelp())
 	}
 	if parseErr, ok := asFlagParseError(err); ok {
 		return r.flagParseFailure("ls", parseErr.err)

@@ -13,20 +13,6 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-const tuiUsage = `usage: rsbx tui [--refresh DURATION]
-
-Open the RHEIC sandbox dashboard.
-
-Keys:
-  ↑/↓ or j/k  select a sandbox
-  n            new sandbox (create flow)
-  s / x        start / stop the selected sandbox
-  d            remove the selected sandbox (asks first)
-  a            attach hint for the selected sandbox
-  r            refresh now
-  q or Esc     quit
-`
-
 const (
 	dashboardMinWidth   = 64
 	dashboardMinHeight  = 20
@@ -72,8 +58,7 @@ type dashboardModel struct {
 func (r *Runner) tui(ctx context.Context, args []string) int {
 	refreshEvery, help, err := parseTUIOptions(args)
 	if help {
-		_, _ = fmt.Fprint(r.Out, tuiUsage)
-		return 0
+		return r.showCommandHelp(tuiHelp())
 	}
 	if parseErr, ok := asFlagParseError(err); ok {
 		return r.flagParseFailure("tui", parseErr.err)

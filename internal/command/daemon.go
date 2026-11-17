@@ -54,17 +54,6 @@ Flags:
   -h, --help   Show this help
 `
 
-const daemonStartUsage = `Usage: rsbx daemon start [flags]
-
-Start the local daemon in the foreground; use --detach to run it in the
-background with logs in <state>/daemon.log.
-
-Flags:
-  -d, --detach          Run the daemon in the background
-      --policy string   Initialize policy: allow-all, balanced or deny-all
-  -h, --help            Show this help
-`
-
 const daemonStopUsage = `Usage: rsbx daemon stop [flags]
 
 Stop the local daemon. A stopped daemon is not an error. A daemon started
@@ -75,16 +64,6 @@ verified before manual removal.
 
 Flags:
   -h, --help   Show this help
-`
-
-const daemonRestartUsage = `Usage: rsbx daemon restart [flags]
-
-Stop the proven local daemon process, then start a new one.
-
-Flags:
-  -d, --detach          Run the daemon in the background
-      --policy string   Initialize policy: allow-all, balanced or deny-all
-  -h, --help            Show this help
 `
 
 const daemonLogLevelUsage = `Usage: rsbx daemon log-level [LEVEL]
@@ -134,8 +113,7 @@ func (r *Runner) daemon(args []string) int {
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprint(r.Out, daemonUsage)
-		return 0
+		return r.showCommandHelp(daemonHelp())
 	case startCommand:
 		return r.daemonStart(args[1:])
 	case stopCommand:
@@ -162,8 +140,7 @@ func (r *Runner) supervisor() (daemonSupervisor, error) {
 func (r *Runner) daemonStart(args []string) int {
 	opts, help, err := parseDaemonStartOptions("daemon start", args, r.Err)
 	if help {
-		_, _ = fmt.Fprint(r.Out, daemonStartUsage)
-		return 0
+		return r.showCommandHelp(daemonStartHelp())
 	}
 	if err != nil {
 		return r.flagParseFailure("daemon start", err)
@@ -174,8 +151,7 @@ func (r *Runner) daemonStart(args []string) int {
 func (r *Runner) daemonRestart(args []string) int {
 	opts, help, err := parseDaemonStartOptions("daemon restart", args, r.Err)
 	if help {
-		_, _ = fmt.Fprint(r.Out, daemonRestartUsage)
-		return 0
+		return r.showCommandHelp(daemonRestartHelp())
 	}
 	if err != nil {
 		return r.flagParseFailure("daemon restart", err)
@@ -240,8 +216,7 @@ func (r *Runner) daemonStop(args []string) int {
 	fs.SetOutput(r.Err)
 	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, daemonStopUsage)
-			return 0
+			return r.showCommandHelp(daemonStopHelp())
 		}
 		return r.flagParseFailure("daemon stop", err)
 	}
@@ -264,8 +239,7 @@ func (r *Runner) daemonStop(args []string) int {
 
 func (r *Runner) daemonLogLevel(args []string) int {
 	if len(args) > 0 && (args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag) {
-		_, _ = fmt.Fprint(r.Out, daemonLogLevelUsage)
-		return 0
+		return r.showCommandHelp(daemonLogLevelHelp())
 	}
 	if len(args) == 0 {
 		return r.showDaemonLogLevels()
@@ -356,8 +330,7 @@ func (r *Runner) daemonStatus(args []string) int {
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, daemonStatusUsage)
-			return 0
+			return r.showCommandHelp(daemonStatusHelp())
 		}
 		return r.flagParseFailure("daemon status", err)
 	}

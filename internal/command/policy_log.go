@@ -230,7 +230,7 @@ func (r *Runner) policyInspect(ctx context.Context, args []string) int {
 	defer func() { _ = client.Close() }()
 	selector := fs.Arg(0)
 	if rules, found := r.inspectRuleByID(ctx, client, selector); found {
-		if err := renderPolicyRules(r.Out, selected, rules); err != nil {
+		if err := renderPolicyRuleDetail(r.Out, selected, rules); err != nil {
 			r.error(err)
 			return 1
 		}
@@ -246,7 +246,7 @@ func (r *Runner) policyInspect(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	if err := renderPolicyRules(r.Out, selected, policyRules(sb)); err != nil {
+	if err := renderPolicyRuleDetail(r.Out, selected, policyRules(sb)); err != nil {
 		r.error(err)
 		return 1
 	}

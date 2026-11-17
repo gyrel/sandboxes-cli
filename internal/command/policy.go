@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -627,7 +628,13 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		rules = append(rules, policyRules(sb)...)
 	}
 	rules = r.appendOrgPolicyRules(ctx, rules)
-	if err := renderPolicyRules(r.Out, selected, rules); err != nil {
+	list := policyRulesOutput(rules)
+	if fs.NArg() == 0 {
+		if profile, err := sdk.Policies(client).GetPolicyProfile(ctx); err == nil && profile == policyProfileAllowAll {
+			list.Rules = append(defaultGlobalPolicyRules(), list.Rules...)
+		}
+	}
+	if err := renderPolicyRules(r.Out, selected, list); err != nil {
 		r.error(err)
 		return 1
 	}
@@ -1013,6 +1020,26 @@ func (rule policyRuleOutput) NetworkResource() string {
 	return target
 }
 
+// defaultGlobalPolicyRules is the baseline the reference client reports for the
+// allow-all profile. The filesystem defaults are not editable there because the
+// guest rootfs is read-only and the workspace policy is provisioned separately.
+func defaultGlobalPolicyRules() []policyRuleJSON {
+	mk := func(id, resourceType string, actions []string, editable bool) policyRuleJSON {
+		return policyRuleJSON{
+			ID: id, Name: id, PolicyID: policyIDForScope(policyGlobalScope),
+			Scope: policyGlobalScope, AppliesTo: "all", ResourceType: resourceType,
+			Decision: actionAllow, Resources: []string{"**"}, Origin: originLocal,
+			Layer: originLocal, Status: "active", Editable: editable,
+			Provenance: policyProvenanceOutput{CreatedVia: "default"}, Actions: actions,
+		}
+	}
+	return []policyRuleJSON{
+		mk("default-allow-all", networkKeyword, []string{policyNetworkActionPrefix + tcpProtocol}, true),
+		mk("default-fs-read-allow-all", "filesystem:read", []string{"fs:mount:read"}, false),
+		mk("default-fs-write-allow-all", "filesystem:write", []string{"fs:mount:read", "fs:mount:write"}, false),
+	}
+}
+
 func policyRulesOutput(rules []policyRuleOutput) policyListOutput {
 	out := policyListOutput{Rules: make([]policyRuleJSON, 0, len(rules))}
 	for i := range rules {
@@ -1021,8 +1048,99 @@ func policyRulesOutput(rules []policyRuleOutput) policyListOutput {
 	return out
 }
 
-//nolint:gocognit // one renderer covers both resource sections and three formats.
-func renderPolicyRules(out io.Writer, format string, rules []policyRuleOutput) error {
+// renderPolicyRules renders the reference table or machine output for a list.
+func renderPolicyRules(out io.Writer, format string, list policyListOutput) error {
+	if format == listFormatTable {
+		return renderPolicyTable(out, list)
+	}
+	if len(list.Rules) == 0 {
+		list.Rules = []policyRuleJSON{}
+	}
+	switch format {
+	case listFormatYAML:
+		data, err := yaml.Marshal(list)
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(data)
+		return err
+	default:
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(list)
+	}
+}
+
+// renderPolicyTable groups rules the way the reference client does: one row per
+// policy with a summary of its allow/deny counts per resource type.
+func renderPolicyTable(out io.Writer, list policyListOutput) error {
+	if len(list.Rules) == 0 {
+		_, err := fmt.Fprintln(out, "No policy rules (default deny)")
+		return err
+	}
+	type policyRow struct {
+		source, appliesTo string
+		order             []string
+		counts            map[string]map[string]int
+	}
+	rows := make([]*policyRow, 0, 4)
+	index := make(map[string]*policyRow)
+	keys := make([]string, 0, 4)
+	for i := range list.Rules {
+		rule := &list.Rules[i]
+		key := rule.PolicyID + "\x00" + rule.Origin + "\x00" + rule.AppliesTo
+		row, ok := index[key]
+		if !ok {
+			row = &policyRow{source: rule.Origin, appliesTo: rule.AppliesTo, counts: map[string]map[string]int{}}
+			index[key] = row
+			rows = append(rows, row)
+			keys = append(keys, key)
+		}
+		decisions, ok := row.counts[rule.ResourceType]
+		if !ok {
+			decisions = map[string]int{}
+			row.counts[rule.ResourceType] = decisions
+			row.order = append(row.order, rule.ResourceType)
+		}
+		decisions[rule.Decision]++
+	}
+	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "POLICY\tSOURCE\tAPPLIES TO\tSUMMARY")
+	for i, key := range keys {
+		row := rows[i]
+		policyID, _, _ := strings.Cut(key, "\x00")
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", policyID, row.source, row.appliesTo, summarizePolicyCounts(row.order, row.counts))
+	}
+	return tw.Flush()
+}
+
+func summarizePolicyCounts(order []string, counts map[string]map[string]int) string {
+	parts := make([]string, 0, len(order))
+	for _, resource := range order {
+		decisions := counts[resource]
+		names := make([]string, 0, len(decisions))
+		for decision := range decisions {
+			names = append(names, decision)
+		}
+		sort.Strings(names)
+		countsText := make([]string, 0, len(names))
+		for _, decision := range names {
+			countsText = append(countsText, fmt.Sprintf("%d %s", decisions[decision], decision))
+		}
+		label := resource
+		if strings.HasPrefix(resource, filesystemKeyword+":") {
+			label = filesystemKeyword + " " + strings.TrimPrefix(resource, filesystemKeyword+":")
+		}
+		parts = append(parts, label+": "+strings.Join(countsText, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// renderPolicyRuleDetail keeps the per-rule view used by `policy inspect`,
+// where the grouped summary table would hide the rule the user asked for.
+//
+//nolint:gocognit // one renderer covers the per-rule table and three formats.
+func renderPolicyRuleDetail(out io.Writer, format string, rules []policyRuleOutput) error {
 	switch format {
 	case listFormatTable:
 		if len(rules) == 0 {

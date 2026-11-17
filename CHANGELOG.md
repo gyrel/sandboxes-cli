@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.59 — 2026-11-18
 
 - Match Docker sbx rejection of detached exec with exit status 125.
 - Accept `create --no-progress`; create does not emit progress output.

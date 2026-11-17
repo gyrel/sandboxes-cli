@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.0.57 — 2026-11-17
+
+### Removed
+
+- Remove the top-level `start`, `get` and `wait` commands. Docker Sandboxes
+  `sbx v0.50.1` has no such commands (`sbx start|get|wait` report an unknown
+  command); starting a sandbox happens through `run` and `exec`. `stop` keeps
+  its table and structured output.
+
+### Changed
+
+- `rsbx ls` prints the reference table: no extra `PROFILE` column, status
+  markers (`● running`, `○ stopped`, `◌ <other>`) and week-based ages.
+- `version` prints a single client line, matching the reference client, instead
+  of also reporting a server line or a dial error when the daemon is stopped.
+- An unknown command reports `error: rsbx: unknown command: rsbx <name>` with a
+  `try: rsbx --help` hint and exit 1.
+
+### Fixed
+
+- Restore the documented top-level aliases `list`, `remove`, `delete` and
+  `secrets`; the legacy sweep removed them because only our README was checked.
+- Unknown sandboxes report `sandbox '<name>' not found` with a `try: rsbx ls`
+  hint in every command, matching the reference wording and exit codes.
+- `rsbx rm` without a target reports `error: requires at least 1 argument` with
+  a help hint and exit 1.
+
 ## v0.0.55 — 2026-11-17
 
 ### Changed

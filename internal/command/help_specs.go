@@ -148,6 +148,7 @@ func createHelp() commandHelp {
 			{Name: "kit", Value: helpValueString, Description: "apply a local kit definition"},
 			{Short: "m", Name: "memory", Value: helpValueString, Description: "memory limit such as 512m or 2g (empty selects the daemon default)"},
 			{Name: helpNameName, Value: helpValueString, Description: "sandbox name"},
+			{Name: "no-progress", Description: "suppress progress output"},
 			{Name: "policy-profile", Value: helpValueString, Description: "egress profile: allow-all, balanced, deny-all or sbx-compat"},
 			{Short: "p", Name: helpNamePublish, Value: helpNameStringArray, Description: "publish a guest port (repeatable): [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]"},
 			{Short: "t", Name: "template", Value: helpValueString, Description: "container image to use for the sandbox (alias for --image)"},

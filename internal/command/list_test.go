@@ -116,3 +116,23 @@ func TestListHelpExitsZero(t *testing.T) {
 		t.Fatalf("missing help: %q", out.String())
 	}
 }
+
+func TestSandboxTableMatchesReferenceLayout(t *testing.T) {
+	var out bytes.Buffer
+	created := time.Now().Add(-20 * 24 * time.Hour)
+	if err := writeSandboxTable(&out, []sdk.Sandbox{
+		{Name: "stopped-one", Agent: "codex", State: sdk.StateStopped, CreatedAt: created},
+		{Name: "running-one", Agent: "shell", State: sdk.StateRunning, CreatedAt: time.Now()},
+	}); err != nil {
+		t.Fatalf("write table: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "SANDBOX") || strings.Contains(text, "PROFILE") {
+		t.Fatalf("unexpected columns: %q", text)
+	}
+	for _, want := range []string{"○ stopped", "● running", "2w", "now"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("table omitted %q: %q", want, text)
+		}
+	}
+}

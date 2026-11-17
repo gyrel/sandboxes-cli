@@ -234,19 +234,27 @@ func listTime(value time.Time) string {
 
 func writeSandboxTable(out io.Writer, items []sdk.Sandbox) error {
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SANDBOX\tAGENT\tPROFILE\tSTATUS\tPORTS\tWORKSPACE\tCREATED")
+	_, _ = fmt.Fprintln(tw, "SANDBOX\tAGENT\tSTATUS\tPORTS\tWORKSPACE\tCREATED")
 	for i := range items {
 		sb := &items[i]
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sb.Name, formatAgent(sb.Agent), formatProfile(sb.PolicyProfile), sb.State, formatPorts(sb), formatWorkspaces(sb), formatAge(sb.CreatedAt))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", sb.Name, formatAgent(sb.Agent), formatStatus(sb.State), formatPorts(sb), formatWorkspaces(sb), formatAge(sb.CreatedAt))
 	}
 	return tw.Flush()
 }
 
-func formatProfile(profile string) string {
-	if profile == "" {
+// formatStatus renders the state with the reference status markers so the
+// table reads the same way as the Docker Sandboxes table.
+func formatStatus(state string) string {
+	switch state {
+	case sdk.StateRunning:
+		return "● " + state
+	case sdk.StateStopped:
+		return "○ " + state
+	case "":
 		return "-"
+	default:
+		return "◌ " + state
 	}
-	return profile
 }
 
 func formatAgent(agent string) string {
@@ -271,7 +279,9 @@ func formatAge(created time.Time) string {
 		return fmt.Sprintf("%dm", int(age.Minutes()))
 	case age < 24*time.Hour:
 		return fmt.Sprintf("%dh", int(age.Hours()))
-	default:
+	case age < 7*24*time.Hour:
 		return fmt.Sprintf("%dd", int(age.Hours()/24))
+	default:
+		return fmt.Sprintf("%dw", int(age.Hours()/(24*7)))
 	}
 }

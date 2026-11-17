@@ -77,6 +77,8 @@ Flags:
   --env-file FILE             read environment overrides from a file (repeatable)
 `
 
+var errMissingSandboxTargets = errors.New("requires at least 1 argument")
+
 const removeUsage = `usage: rsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all
 
 Remove one or more sandboxes. Flags may appear before, between or after sandbox
@@ -200,7 +202,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.version(ctx, rest[1:])
 	case commandCreate:
 		return r.create(ctx, rest[1:])
-	case "ls":
+	case "ls", commandList:
 		return r.list(ctx, rest[1:])
 	case commandGet:
 		return r.get(ctx, rest[1:])
@@ -208,7 +210,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.start(ctx, rest[1:])
 	case stopCommand:
 		return r.stop(ctx, rest[1:])
-	case "rm":
+	case "rm", commandRemove, commandDelete:
 		return r.remove(ctx, rest[1:])
 	case "wait":
 		return r.wait(ctx, rest[1:])
@@ -343,7 +345,7 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.accountLogin(ctx, args), true
 	case "logout":
 		return r.accountLogout(ctx, args), true
-	case secretCommand:
+	case secretCommand, secretsCommand:
 		return r.secret(ctx, args), true
 	case "prune":
 		return r.prune(ctx, args), true
@@ -1621,7 +1623,7 @@ func lookupSandboxForReport(ctx context.Context, client sdk.Client, id, name str
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("sandbox %q not found", name)
+		return nil, sandboxNotFoundError{name: name}
 	}
 	return sb, nil
 }
@@ -1889,6 +1891,9 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 	if parseErr, ok := asFlagParseError(err); ok {
 		return r.flagParseFailure("rm", parseErr.err)
 	}
+	if errors.Is(err, errMissingSandboxTargets) {
+		return r.commandError("rm", "requires at least 1 argument")
+	}
 	if err != nil {
 		r.error(err)
 		return 2
@@ -2031,8 +2036,11 @@ func parseRemoveOptions(args []string) (removeOptions, bool, error) {
 		}
 		return removeOptions{}, false, flagParseError{err: err}
 	}
-	if (*all && fs.NArg() != 0) || (!*all && fs.NArg() < 1) {
+	if *all && fs.NArg() != 0 {
 		return removeOptions{}, false, errors.New("usage: rsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all")
+	}
+	if !*all && fs.NArg() < 1 {
+		return removeOptions{}, false, errMissingSandboxTargets
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
 	if err != nil {
@@ -2346,7 +2354,18 @@ Use "rsbx COMMAND --help" for command details.
 	}
 }
 
+// sandboxNotFoundError reports an unknown sandbox with the reference wording so
+// every command prints the same message and the `try: rsbx ls` hint.
+type sandboxNotFoundError struct{ name string }
+
+func (e sandboxNotFoundError) Error() string { return fmt.Sprintf("sandbox '%s' not found", e.name) }
+
 func (r *Runner) error(err error) {
+	var missing sandboxNotFoundError
+	if errors.As(err, &missing) {
+		_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: rsbx ls\n", missing.Error())
+		return
+	}
 	var typed *sdk.Error
 	if errors.As(err, &typed) && typed.Message != "" {
 		_, _ = fmt.Fprintf(r.Err, "error: %s\n", typed.Message)

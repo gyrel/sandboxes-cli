@@ -179,6 +179,10 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 		t.Fatal("CLI run did not return the owned sandbox ID")
 	}
 	brokerSocket = p04CLIBrokerSocket(sandboxID)
+	restartSandbox := func() error {
+		_, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "run", "--detach", "--name", name, "--image", inputs.image, "--env", "OPENAI_API_KEY=${proxy:openai}", "shell", workspace)
+		return err
+	}
 	checkEnv := `test "$OPENAI_API_KEY" = rheic-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
 	execWithProxyEnv := func() (string, error) {
 		return runP04CLI(ctx, cliPath, cliSocket, cliEnv, "exec", "--env", "OPENAI_API_KEY=${proxy:openai}", name, "/bin/sh", "-c", checkEnv)
@@ -189,8 +193,8 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "stop", name); err != nil {
 		t.Fatalf("CLI stop failed: %v", err)
 	}
-	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "start", name); err != nil {
-		t.Fatalf("CLI start did not restore the broker: %v", err)
+	if err := restartSandbox(); err != nil {
+		t.Fatalf("CLI run did not restore the broker: %v", err)
 	}
 	if _, err := execWithProxyEnv(); err != nil {
 		t.Fatalf("CLI exec after restart did not receive proxy placeholder env: %v", err)
@@ -219,8 +223,8 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if err := startDaemon(); err != nil {
 		t.Fatalf("restart owned daemon after process death: %v", err)
 	}
-	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "start", name); err != nil {
-		t.Fatalf("CLI start did not recover the daemon-killed sandbox: %v", err)
+	if err := restartSandbox(); err != nil {
+		t.Fatalf("CLI run did not recover the daemon-killed sandbox: %v", err)
 	}
 	if err := requestP04CLIBrokerToken(ctx, brokerSocket); err != nil {
 		t.Fatalf("host broker did not recover after daemon restart: %v", err)
@@ -257,8 +261,8 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if err := startDaemon(); err != nil {
 		t.Fatalf("restart owned daemon after runtime process-group loss: %v", err)
 	}
-	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "start", name); err != nil {
-		t.Fatalf("CLI start did not recover after owned runtime process-group loss: %v", err)
+	if err := restartSandbox(); err != nil {
+		t.Fatalf("CLI run did not recover after owned runtime process-group loss: %v", err)
 	}
 	if err := requestP04CLIBrokerToken(ctx, brokerSocket); err != nil {
 		t.Fatalf("host broker did not recover after runtime process-group loss: %v", err)
@@ -282,7 +286,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	} else {
 		sandboxCreated = false
 	}
-	t.Log("PASS: CLI set/run/exec/stop/start; daemon SIGKILL closed the broker; complete owned containerd process-group loss recovered from persistent state; revoke denied later exec; rm and owned-resource cleanup")
+	t.Log("PASS: CLI set/run/exec/stop/run; daemon SIGKILL closed the broker; complete owned containerd process-group loss recovered from persistent state; revoke denied later exec; rm and owned-resource cleanup")
 }
 
 func killP04CLIProcessGroup(cmd *exec.Cmd, done <-chan struct{}) error {

@@ -96,36 +96,12 @@ Examples:
   rsbx rm --force -- --literal-name
 `
 
-const getUsage = `usage: rsbx get [--format table|json|yaml] [--json] SANDBOX
-
-Show one sandbox by name or ID. This is a Rheic extension: Docker sbx has no
-get command. The default table output is a detailed key/value block; JSON and
-YAML use the same field set as "rsbx ls". Flags may appear before or after the
-sandbox name; use -- to end flag parsing.
-
-Examples:
-  rsbx get api
-  rsbx get api --format json
-  rsbx get --json api
-  rsbx get --format yaml api
-  rsbx get -- --literal-name
-
-Flags:
-      --format table|json|yaml  output format
-      --json                    output in JSON format
-`
-
 const pruneUsage = `usage: rsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
 
 Remove stopped sandboxes. --dry-run lists candidates without removing them;
 --force skips confirmation. With --dry-run, structured output is the sbx
 envelope {"would_remove":[...],"skipped_unknown_stop":[...]}; actual removals
 use the same {action, resource, name} records as sbx rm --json.
-`
-
-const waitUsage = `usage: rsbx wait OPERATION_ID
-
-Wait for an operation to finish and print its final state.
 `
 
 // Runner executes commands against a local daemon.
@@ -204,16 +180,10 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.create(ctx, rest[1:])
 	case "ls", commandList:
 		return r.list(ctx, rest[1:])
-	case commandGet:
-		return r.get(ctx, rest[1:])
-	case startCommand:
-		return r.start(ctx, rest[1:])
 	case stopCommand:
 		return r.stop(ctx, rest[1:])
 	case "rm", commandRemove, commandDelete:
 		return r.remove(ctx, rest[1:])
-	case "wait":
-		return r.wait(ctx, rest[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "unknown command: %s\n", rest[0])
 		r.usage()
@@ -1823,56 +1793,8 @@ func applyCreateCloneMode(ctx context.Context, clone bool, workspaces []sdk.Work
 	return workspaces, &sdk.CloneOptions{SourceWorkspacePath: workspace.Path}, nil
 }
 
-func (r *Runner) get(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("get", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
-	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, getUsage)
-			return 0
-		}
-		return r.flagParseFailure(commandGet, err)
-	}
-	if fs.NArg() != 1 {
-		_, _ = fmt.Fprint(r.Err, getUsage)
-		return 2
-	}
-	selected, err := resolveOperationFormat(*format, *jsonOutput)
-	if err != nil {
-		r.error(err)
-		return 2
-	}
-	client, err := r.client()
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	defer func() { _ = client.Close() }()
-	id, err := findExecSandbox(ctx, client, fs.Arg(0))
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	sb, err := client.Sandboxes().Get(ctx, id)
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	if err := renderSandboxDetail(r.Out, selected, sb); err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
-}
-
-func (r *Runner) start(ctx context.Context, args []string) int {
-	return r.lifecycle(ctx, "start", args)
-}
-
 func (r *Runner) stop(ctx context.Context, args []string) int {
-	return r.lifecycle(ctx, "stop", args)
+	return r.lifecycle(ctx, args)
 }
 
 type removeOptions struct {
@@ -2138,79 +2060,42 @@ func affirmativeAnswer(answer string) bool {
 	return answer == answerShortYes || answer == answerYes
 }
 
-func (r *Runner) wait(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, waitUsage) }
-	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return r.flagParseFailure("wait", err)
-	}
-	if fs.NArg() != 1 {
-		_, _ = fmt.Fprint(r.Err, waitUsage)
-		return 2
-	}
-	client, err := r.client()
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	defer func() { _ = client.Close() }()
-	op, err := client.Operations().Wait(ctx, fs.Arg(0))
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	r.printOperation(op)
-	if op != nil && op.State == sdk.StateFailed {
-		return 1
-	}
-	return 0
-}
+func lifecycleUsage() string {
+	return `usage: rsbx stop [--format table|json|yaml] [--json] [flags] SANDBOX...
 
-func lifecycleUsage(name string) string {
-	verb := "Start"
-	details := ""
-	if name == stopCommand {
-		verb = "Stop"
-		details = "\nStructured output is an array of {action, resource, name} records, matching\nsbx stop --json.\n"
-	} else {
-		details = "\nStart fails closed when the daemon has no runtime backend; the sandbox\nis restored to stopped instead of reporting an unusable running state.\n"
-	}
-	return fmt.Sprintf(`usage: rsbx %s [--format table|json|yaml] [--json] [flags] SANDBOX...
-
-%s one or more sandboxes. Flags may appear before, between or after sandbox
+Stop one or more sandboxes. Flags may appear before, between or after sandbox
 names; use -- to end flag parsing.
-%s
+
+Structured output is an array of {action, resource, name} records, matching
+sbx stop --json.
+
 Examples:
-  rsbx %s --format json api
-  rsbx %s api --format json
-  rsbx %s api --format json worker
+  rsbx stop --format json api
+  rsbx stop api --format json
+  rsbx stop api --format json worker
 
 Flags:
       --grace DURATION            stop grace period
       --format table|json|yaml    output format
       --json                      output in JSON format
-`, name, verb, details, name, name, name)
+`
 }
 
-func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+func (r *Runner) lifecycle(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet(stopCommand, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	grace := fs.Duration("grace", 0, "grace period")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{graceFlag: true, formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			_, _ = fmt.Fprint(r.Out, lifecycleUsage(name))
+			_, _ = fmt.Fprint(r.Out, lifecycleUsage())
 			return 0
 		}
-		return r.flagParseFailure(name, err)
+		return r.flagParseFailure(stopCommand, err)
 	}
 	if fs.NArg() < 1 {
-		_, _ = fmt.Fprint(r.Err, lifecycleUsage(name))
+		_, _ = fmt.Fprint(r.Err, lifecycleUsage())
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -2225,30 +2110,21 @@ func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int 
 	}
 	defer func() { _ = client.Close() }()
 	failed := false
-	var operations []*sdk.Operation
 	completed := make([]string, 0, len(fs.Args()))
 	for _, target := range fs.Args() {
-		op, err := r.runLifecycleTarget(ctx, client, name, target, *grace)
-		if err != nil {
+		if _, err := r.runLifecycleTarget(ctx, client, target, *grace); err != nil {
 			r.error(err)
 			failed = true
 			continue
 		}
-		operations = append(operations, op)
 		completed = append(completed, target)
 		if selected == listFormatTable {
-			_, _ = fmt.Fprintf(r.Out, "%s sandbox %s\n", lifecyclePastTense(name), target)
+			_, _ = fmt.Fprintf(r.Out, "Stopped sandbox %s\n", target)
 		}
 	}
 	if selected != listFormatTable {
-		var renderErr error
-		if name == stopCommand {
-			renderErr = renderMutations(r.Out, selected, sandboxMutations("stopped", completed))
-		} else {
-			renderErr = renderOperations(r.Out, selected, operations)
-		}
-		if renderErr != nil {
-			r.error(renderErr)
+		if err := renderMutations(r.Out, selected, sandboxMutations("stopped", completed)); err != nil {
+			r.error(err)
 			return 1
 		}
 	}
@@ -2258,44 +2134,23 @@ func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int 
 	return 0
 }
 
-// runLifecycleTarget starts or stops one sandbox and returns its operation.
-func (r *Runner) runLifecycleTarget(ctx context.Context, client sdk.Client, name, target string, grace time.Duration) (*sdk.Operation, error) {
+// runLifecycleTarget stops one sandbox and returns its operation.
+func (r *Runner) runLifecycleTarget(ctx context.Context, client sdk.Client, target string, grace time.Duration) (*sdk.Operation, error) {
 	id, err := findExecSandbox(ctx, client, target)
 	if err != nil {
 		return nil, err
 	}
-	var op *sdk.Operation
-	if name == startCommand {
-		op, err = client.Sandboxes().Start(ctx, id)
-	} else {
-		op, err = client.Sandboxes().Stop(ctx, id, sdk.StopOptions{Grace: grace})
-	}
+	op, err := client.Sandboxes().Stop(ctx, id, sdk.StopOptions{Grace: grace})
 	if err != nil {
 		return nil, err
 	}
 	if op != nil && op.State == sdk.StateFailed {
-		return nil, fmt.Errorf("%s sandbox %s failed: %s", name, target, op.Error)
+		return nil, fmt.Errorf("%s sandbox %s failed: %s", stopCommand, target, op.Error)
 	}
-	if name == startCommand {
-		if err := r.requireRuntimeForStart(ctx, client, id, target); err != nil {
-			return nil, err
-		}
-	}
-	if err := r.reconcileCloneLifecycle(ctx, client, id, name == startCommand); err != nil {
+	if err := r.reconcileCloneLifecycle(ctx, client, id); err != nil {
 		return nil, err
 	}
 	return op, nil
-}
-
-func lifecyclePastTense(name string) string {
-	switch name {
-	case stopCommand:
-		return "Stopped"
-	case startCommand:
-		return "Started"
-	default:
-		return name + "ed"
-	}
 }
 
 func (r *Runner) client() (sdk.Client, error) {
@@ -2305,14 +2160,6 @@ func (r *Runner) client() (sdk.Client, error) {
 	return r.NewClient(r.Socket)
 }
 
-func (r *Runner) printOperation(op *sdk.Operation) {
-	if op == nil {
-		_, _ = fmt.Fprintln(r.Out, "ok")
-		return
-	}
-	_, _ = fmt.Fprintf(r.Out, "%s\t%s\t%s\t%s\n", op.ID, op.Kind, op.State, op.Error)
-}
-
 func (r *Runner) usage() {
 	const help = `Rheic Sandboxes manages isolated local environments for coding agents.
 
@@ -2320,7 +2167,7 @@ Usage:
   rsbx COMMAND
 
 Sandbox commands:
-  run, attach, create, exec, cp, ls, get, start, stop, rm, prune, wait, ports
+  run, attach, create, exec, cp, ls, stop, rm, prune, ports
 
 Management commands:
   agents, daemon, diagnose, env, login, logout, mcp, policy, reset, secret, settings, tui
@@ -2383,13 +2230,6 @@ func defaultSocket() string {
 		return ".sandboxes/sandboxesd.sock"
 	}
 	return filepath.Join(home, ".sandboxes", "sandboxesd.sock")
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	return t.UTC().Format(time.RFC3339)
 }
 
 func formatWorkspaces(sb *sdk.Sandbox) string {

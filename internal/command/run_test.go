@@ -277,7 +277,7 @@ func TestRunCloneRefreshesEndpointAfterStartBeforeAttaching(t *testing.T) {
 	if len(values) != 1 || values[0] != cloneTestEndpointURL(49152, "repo") {
 		t.Fatalf("host remote did not refresh from post-start endpoint: %#v", values)
 	}
-	if err := runner.reconcileCloneLifecycle(context.Background(), client, "sb-run", false); err != nil {
+	if err := runner.reconcileCloneLifecycle(context.Background(), client, "sb-run"); err != nil {
 		t.Fatalf("stop reconciliation failed: %v", err)
 	}
 	if got := gitConfigValues(t, configPath, "remote.sandbox-dev.url"); len(got) != 1 || got[0] != values[0] {
@@ -300,7 +300,7 @@ func TestRunCloneUnreachableEndpointLeavesGitConfigUntouched(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"run", "--clone", "--name", "dev", "shell", workspace}); code == 0 {
 		t.Fatalf("unreachable clone endpoint unexpectedly succeeded, stdout=%q stderr=%q", out.String(), stderr.String())
 	}
-	want := "the clone endpoint for sandbox dev is not reachable; run 'rsbx stop dev' and 'rsbx start dev' to republish it"
+	want := "the clone endpoint for sandbox dev is not reachable; run 'rsbx stop dev' and 'rsbx run --name dev' to republish it"
 	if !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}

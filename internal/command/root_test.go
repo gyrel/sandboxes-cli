@@ -51,6 +51,18 @@ func TestDocumentedTopLevelAliasesDispatch(t *testing.T) {
 	}
 }
 
+func TestRemovedExtraCommandsAreUnknown(t *testing.T) {
+	for _, name := range []string{"start", "get", "wait"} {
+		var out bytes.Buffer
+		if code := Run(context.Background(), []string{name}, &out, &out); code != 2 {
+			t.Fatalf("%s: exit=%d output=%q", name, code, out.String())
+		}
+		if !strings.Contains(out.String(), "unknown command") {
+			t.Fatalf("%s: output=%q", name, out.String())
+		}
+	}
+}
+
 func TestCreateUsesSDK(t *testing.T) {
 	var out bytes.Buffer
 	runner := &Runner{
@@ -211,26 +223,6 @@ func TestSocketFlagMissingValueAfterSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "flag needs an argument") {
 		t.Fatalf("output=%q", out.String())
-	}
-}
-
-func TestWaitFailedOperationReturnsFailure(t *testing.T) {
-	var out bytes.Buffer
-	runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
-		return fakeClient{operations: failedOperations{}}, nil
-	}}
-	if code := runner.Run(context.Background(), []string{"wait", "op-1"}); code != 1 {
-		t.Fatalf("exit code %d, output %q", code, out.String())
-	}
-}
-
-func TestWaitSuccessfulOperationReturnsSuccess(t *testing.T) {
-	var out bytes.Buffer
-	runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
-		return fakeClient{}, nil
-	}}
-	if code := runner.Run(context.Background(), []string{"wait", "op-1"}); code != 0 {
-		t.Fatalf("exit code %d, output %q", code, out.String())
 	}
 }
 
@@ -1041,26 +1033,9 @@ func (fakeEventStream) Close() error              { return nil }
 
 type fakeOperations struct{}
 
-type failedOperations struct{ fakeOperations }
-
-func (failedOperations) Wait(context.Context, string) (*sdk.Operation, error) {
-	return &sdk.Operation{ID: "op-1", State: sdk.StateFailed}, nil
-}
-
 func (fakeOperations) Get(context.Context, string) (*sdk.Operation, error) {
 	return &sdk.Operation{ID: "op-1", State: "done"}, nil
 }
 func (fakeOperations) Wait(context.Context, string) (*sdk.Operation, error) {
 	return &sdk.Operation{ID: "op-1", State: "done"}, nil
-}
-
-func TestGetResolvesSandboxName(t *testing.T) {
-	var out bytes.Buffer
-	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return fakeClient{}, nil }}
-	if code := runner.Run(context.Background(), []string{"get", "dev"}); code != 0 {
-		t.Fatalf("exit=%d output=%q", code, out.String())
-	}
-	if !strings.Contains(out.String(), "id: sb-1") || !strings.Contains(out.String(), "cpus:") {
-		t.Fatalf("unexpected get output: %q", out.String())
-	}
 }

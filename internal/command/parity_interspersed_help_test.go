@@ -15,7 +15,7 @@ import (
 // documentedHelpPaths lists every command and subcommand that exposes help.
 var documentedHelpPaths = [][]string{
 	{"run"}, {"attach"}, {"create"}, {"exec"}, {"cp"}, {"login"}, {"logout"},
-	{"ls"}, {"get"}, {"start"}, {"stop"}, {"rm"}, {"prune"}, {"wait"},
+	{"ls"}, {"stop"}, {"rm"}, {"prune"},
 	{"ports"}, {"diagnose"}, {"reset"}, {"tui"}, {"setup"}, {"completion"},
 	{"version"}, {"agents"}, {"agents", "ls"},
 	{"secret"}, {"secret", "import"}, {"secret", "ls"}, {"secret", "set"},
@@ -73,11 +73,8 @@ var positionalHelpProbes = []struct {
 	{[]string{"create"}, "shell"},
 	{[]string{"exec"}, "dev"},
 	{[]string{"cp"}, "dev:/tmp/file"},
-	{[]string{"get"}, "dev"},
-	{[]string{"start"}, "dev"},
 	{[]string{"stop"}, "dev"},
 	{[]string{"rm"}, "dev"},
-	{[]string{"wait"}, "op-1"},
 	{[]string{"ports"}, "dev"},
 	{[]string{"agents", "ls"}, "arg"},
 	{[]string{"secret", "import"}, "github"},

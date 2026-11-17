@@ -72,9 +72,9 @@ func TestCompletionRejectsUnknownShell(t *testing.T) {
 func TestCompletionCoversTopLevelCommandSurface(t *testing.T) {
 	expected := []string{
 		"agents", "attach", "completion", "cp", "create", "daemon", "diagnose", "env",
-		"exec", "get", "help", "kit", "login", "logout", "ls", "mcp", "move", "policy",
+		"exec", "help", "kit", "login", "logout", "ls", "mcp", "move", "policy",
 		"ports", "prune", "reset", "rm", "run", "secret", "settings", "setup", "skills",
-		"start", "stop", "template", "ttl", "tui", "version", "volume", "wait",
+		"stop", "template", "ttl", "tui", "version", "volume",
 	}
 	got := completionCommands()
 	for _, name := range expected {

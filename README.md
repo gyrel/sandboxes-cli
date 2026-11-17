@@ -128,9 +128,6 @@ rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" ls
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" ls --format json
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" ls -q
 rsbx tui
-rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" get <name-or-id>
-rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" get <name-or-id> --format json
-rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" start one two
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" stop one two
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" rm [--force] one two
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" rm --all --force
@@ -147,7 +144,6 @@ rsbx setup                         # experimental read-only host check
 rsbx setup --format json
 rsbx completion bash > /tmp/rsbx-completion.bash
 source /tmp/rsbx-completion.bash
-rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" wait <operation-id>
 rsbx secret set --registry ghcr.io --username <registry-user>
 rsbx secret set openai --sandbox dev          # hidden prompt; value stays in host keychain
 rsbx secret set openai --oauth                # OpenAI account OAuth on the host
@@ -323,33 +319,23 @@ checks. `--json`/`--format json|yaml` emit sbx's flat `version`, `checks[]`
 embedded. Warnings and skipped checks exit 0; a signed-out daemon is a warning
 because the installation is unconfigured rather than broken. Only failed
 checks, such as an unreachable daemon or an unwritable state directory, exit 1.
-`rsbx stop`/`start`, `rm` and `prune` accept `--format table|json|yaml` and
+`rsbx stop`, `rm` and `prune` accept `--format table|json|yaml` and
 `--json`. `rm`, `stop` and actual `prune` removals emit the sbx action records
 `{action, resource, name}`; `prune --dry-run` emits the sbx envelope
 `{"would_remove":[{name,agent,stopped_at,workspaces}],"skipped_unknown_stop":[]}`.
-`rsbx start` keeps operation records and verifies that the daemon can back the
-running state with a runtime. If the daemon is state-only, start fails with an
-actionable error and restores the sandbox to stopped instead of reporting a
-running sandbox that `exec`, `cp` or `attach` cannot use.
-
 `rsbx ls` retrieves all pages; `--limit N` caps the number of returned
 sandboxes (1-1000), and every sandbox is listed without it. `--format`
 accepts `table`, `json` or `yaml`; `--json` is the JSON shorthand, and `-q`
 prints names only. JSON/YAML use the sbx schema: `name`, `id`, `agent`,
 `status`, `last_used_at`, `workspaces` and `created_at`. The table is
 Docker-like: `SANDBOX AGENT STATUS PORTS WORKSPACE CREATED`.
-The local store may not record an agent yet, so `agent` can be empty. `rsbx get`
-resolves a name or ID. Docker `sbx` has no `get` command; it is a Rheic
-extension. Its default
-table output is a detailed key/value block, while `--format json`, `--format
-yaml` and `--json` use the same field set as `rsbx ls`, including `status`.
-`stop`/`start`/`rm` accept multiple names; `rm --all --force` removes every
+The local store may not record an agent yet, so `agent` can be empty.
+`stop`/`rm` accept multiple names; `rm --all --force` removes every
 sandbox after the explicit force flag. `rm` and `prune` require a
 terminal confirmation unless `--force` is passed; `prune` removes stopped
 sandboxes only, with `--dry-run` to preview and `--filter until=TIMESTAMP|DURATION`
 to select sandboxes stopped before that point (RFC 3339, Unix seconds or a
-non-negative Go duration relative to now). `rsbx wait` returns a nonzero exit
-status when the operation finishes in a failed state.
+non-negative Go duration relative to now).
 
 `rsbx secret set --registry` prompts for the password without echo. For automation, pipe a
 token through stdin with `--password-stdin`; never pass it as an argument or

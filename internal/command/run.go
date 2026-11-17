@@ -142,6 +142,7 @@ Examples:
 	startCommand      = "start"
 	stopCommand       = "stop"
 	secretCommand     = "secret"
+	secretsCommand    = "secrets"
 	policyCommand     = "policy"
 	completionCommand = "completion"
 	daemonCommand     = "daemon"

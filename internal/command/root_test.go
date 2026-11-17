@@ -28,14 +28,25 @@ func TestUnknownCommand(t *testing.T) {
 	}
 }
 
-func TestUndocumentedTopLevelAliasesAreRejected(t *testing.T) {
-	for _, name := range []string{"list", "delete", "secrets"} {
+func TestDocumentedTopLevelAliasesDispatch(t *testing.T) {
+	for _, test := range []struct {
+		alias    string
+		helpWord string
+	}{
+		{alias: "list", helpWord: "ls"},
+		{alias: "remove", helpWord: "rm"},
+		{alias: "delete", helpWord: "rm"},
+		{alias: "secrets", helpWord: "secret"},
+	} {
 		var out bytes.Buffer
-		if code := Run(context.Background(), []string{name}, &out, &out); code != 2 {
-			t.Fatalf("%s: exit=%d output=%q", name, code, out.String())
+		if code := Run(context.Background(), []string{test.alias, "--help"}, &out, &out); code != 0 {
+			t.Fatalf("%s --help: exit=%d output=%q", test.alias, code, out.String())
 		}
-		if !strings.Contains(out.String(), "unknown command") {
-			t.Fatalf("%s: output=%q", name, out.String())
+		if strings.Contains(out.String(), "unknown command") {
+			t.Fatalf("%s: reported unknown command: %q", test.alias, out.String())
+		}
+		if !strings.Contains(out.String(), "rsbx "+test.helpWord) {
+			t.Fatalf("%s: help did not describe rsbx %s: %q", test.alias, test.helpWord, out.String())
 		}
 	}
 }

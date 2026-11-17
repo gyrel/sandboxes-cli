@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Changed
+
+- `rsbx login` now matches the Docker Sandboxes credential flow: an existing
+  host account reports `You are signed in` instead of starting a new device
+  authorization, the device handoff prints the subscription agreement, the
+  one-time code and the sign-in URL, opens the browser without waiting for an
+  Enter keypress, and reports `Signed in.` on success. `--username` without
+  `--password-stdin` (and the reverse), unknown flags and extra arguments now
+  produce `error: ...` with a `try: rsbx login --help` hint and exit 1.
+- Account command failures print `error: <message>` like the reference CLI
+  instead of a machine code prefix, and a stopped local daemon is reported as
+  `local daemon is not running; start it with: rsbx daemon start --detach`
+  instead of a raw gRPC dial error.
+- `rsbx logout` reports `Signed out.` or `Not signed in.`.
+
+### Fixed
+
+- `rsbx secret set` duplicate-scope errors no longer print a doubled
+  `error: error:` prefix.
+
 ## v0.0.54 — 2026-11-16
 
 ### Removed

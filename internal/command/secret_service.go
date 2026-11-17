@@ -294,7 +294,7 @@ func (r *Runner) storeServiceSecret(ctx context.Context, service, sandboxName, t
 }
 
 func serviceSecretAlreadyExistsError(service, scope string) error {
-	return fmt.Errorf("error: service secret already exists for %q in scope %q; pass --force to overwrite", service, scope)
+	return fmt.Errorf("service secret already exists for %q in scope %q; pass --force to overwrite", service, scope)
 }
 
 func (r *Runner) serviceSecretOAuthSet(ctx context.Context, service, sandboxName, token, ref, command string) int {

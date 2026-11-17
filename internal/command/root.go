@@ -292,11 +292,33 @@ func extractSocketFlag(args []string, fallback string) (string, []string, error)
 func (r *Runner) flagParseFailure(cmdPath string, err error) int {
 	message := err.Error()
 	if name, ok := strings.CutPrefix(message, "flag provided but not defined: -"); ok {
-		_, _ = fmt.Fprintf(r.Err, "error: unknown flag: --%s\n  try: rsbx %s--help\n", name, commandHintPath(cmdPath))
-		return 1
+		return r.commandError(cmdPath, "unknown flag: --"+name)
 	}
 	_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: rsbx %s--help\n", message, commandHintPath(cmdPath))
 	return 2
+}
+
+// commandError prints a reference-compatible command error with its help hint.
+func (r *Runner) commandError(cmdPath, message string) int {
+	_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: rsbx %s--help\n", message, commandHintPath(cmdPath))
+	return 1
+}
+
+// accountError reports account failures with actionable wording. A local
+// daemon that is not running is the most common cause and is reported as such
+// instead of exposing the raw gRPC dial error.
+func (r *Runner) accountError(err error) int {
+	r.error(daemonStartHint(err))
+	return 1
+}
+
+func daemonStartHint(err error) error {
+	var typed *sdk.Error
+	if errors.As(err, &typed) && typed.Code == stateUnavailable &&
+		(strings.Contains(typed.Message, "dial") || strings.Contains(typed.Message, "connect")) {
+		return errors.New("local daemon is not running; start it with: rsbx daemon start --detach")
+	}
+	return err
 }
 
 func commandHintPath(cmdPath string) string {
@@ -372,36 +394,12 @@ func (r *Runner) fallbackCommand(name string, args []string) (int, bool) {
 }
 
 func (r *Runner) accountLogin(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("login", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.Usage = func() {
-		_, _ = fmt.Fprintln(r.Out, "Description:")
-		_, _ = fmt.Fprintln(r.Out, "  Sign in to Docker")
-		_, _ = fmt.Fprintln(r.Out, "\nUsage:")
-		_, _ = fmt.Fprintln(r.Out, "  rsbx login [flags]")
-		_, _ = fmt.Fprintln(r.Out, "\nExamples:")
-		_, _ = fmt.Fprintln(r.Out, "  rsbx login")
-		_, _ = fmt.Fprintln(r.Out, "\n  # Non-interactive sign-in, for CI")
-		_, _ = fmt.Fprintln(r.Out, "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
-		_, _ = fmt.Fprintln(r.Out, "\nFlags:")
-		_, _ = fmt.Fprintln(r.Out, "  -h, --help              help for login")
-		_, _ = fmt.Fprintln(r.Out, "      --password-stdin    Read password or access token from stdin")
-		_, _ = fmt.Fprintln(r.Out, "      --username string   Docker username for non-interactive login")
-	}
-	username := fs.String("username", "", "Docker Hub username for PAT login")
-	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return r.flagParseFailure("login", err)
-	}
-	if fs.NArg() != 0 || (*username == "") != !*passwordStdin {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx login [--username USER --password-stdin]")
-		return 2
+	username, passwordStdin, code, ok := r.parseLoginFlags(args)
+	if !ok {
+		return code
 	}
 	var password []byte
-	if *passwordStdin {
+	if passwordStdin {
 		var err error
 		password, err = readDockerPassword(r.In)
 		if err != nil {
@@ -416,48 +414,118 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	if *passwordStdin {
-		if err := sdk.DockerPATAccounts(client).LoginWithPAT(ctx, *username, password); err != nil {
-			r.error(err)
-			return 1
+	if passwordStdin {
+		if err := sdk.DockerPATAccounts(client).LoginWithPAT(ctx, username, password); err != nil {
+			return r.accountError(err)
 		}
-		_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
+		_, _ = fmt.Fprintln(r.Out, "Signed in.")
 		return 0
 	}
-	if err := sdk.InteractiveAccounts(client).LoginInteractive(ctx, "docker", func(ctx context.Context, info sdk.DeviceLoginInfo) error {
-		return r.waitForDeviceLoginHandoff(ctx, info)
-	}); err != nil {
-		r.error(err)
-		return 1
+	signedIn, err := r.dockerAccountSignedIn(ctx, client)
+	if err != nil {
+		return r.accountError(err)
 	}
-	_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
+	if signedIn {
+		_, _ = fmt.Fprintln(r.Out, "You are signed in")
+		return 0
+	}
+	if err := sdk.InteractiveAccounts(client).LoginInteractive(ctx, dockerAccountProvider, func(ctx context.Context, info sdk.DeviceLoginInfo) error {
+		return r.deviceLoginHandoff(info)
+	}); err != nil {
+		return r.accountError(err)
+	}
+	_, _ = fmt.Fprintln(r.Out, "Signed in.")
 	return 0
 }
 
-func (r *Runner) waitForDeviceLoginHandoff(ctx context.Context, info sdk.DeviceLoginInfo) error {
-	if r.In == nil {
-		return errors.New("interactive login input is unavailable")
+// parseLoginFlags validates the reference login flag contract and reports the
+// exit code when the invocation is invalid.
+func (r *Runner) parseLoginFlags(args []string) (username string, passwordStdin bool, code int, ok bool) {
+	if hasFlag(args, "--help") || hasFlag(args, "-h") {
+		r.loginUsage()
+		return "", false, 0, false
 	}
-	if _, err := fmt.Fprintf(r.Err, "Docker verification code: %s\nPress Enter to open %s, or Ctrl-C to cancel.\nIf the browser does not open, visit the URL above and enter the code.\n", info.UserCode, info.VerificationURI); err != nil {
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	usernameFlag := fs.String("username", "", "Docker Hub username for PAT login")
+	passwordStdinFlag := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
+	if err := fs.Parse(args); err != nil {
+		return "", false, r.flagParseFailure("login", err), false
+	}
+	if fs.NArg() != 0 {
+		return "", false, r.commandError("login", fmt.Sprintf("unknown command %q for %q", fs.Arg(0), "rsbx login")), false
+	}
+	switch {
+	case *usernameFlag != "" && !*passwordStdinFlag:
+		return "", false, r.commandError("login", "--username requires --password-stdin"), false
+	case *usernameFlag == "" && *passwordStdinFlag:
+		return "", false, r.commandError("login", "--password-stdin requires --username"), false
+	}
+	return *usernameFlag, *passwordStdinFlag, 0, true
+}
+
+const (
+	dockerAccountProvider          = "docker"
+	dockerSubscriptionAgreementURL = "https://www.docker.com/legal/docker-subscription-service-agreement/"
+)
+
+// dockerAccountSignedIn reports whether host credentials for the Docker account
+// already exist, so login matches the reference behavior of stating that the
+// user is signed in instead of starting a new device authorization.
+func (r *Runner) dockerAccountSignedIn(ctx context.Context, client sdk.Client) (bool, error) {
+	present, err := sdk.AccountStatus(client).Status(ctx, dockerAccountProvider)
+	if err == nil {
+		return present, nil
+	}
+	var typed *sdk.Error
+	if errors.As(err, &typed) && typed.Code == "unsupported" {
+		return false, nil
+	}
+	return false, err
+}
+
+// deviceLoginHandoff prints the device authorization details and opens the
+// browser the same way the reference client does: the sign-in continues in the
+// browser and the terminal only waits for the authorization result.
+func (r *Runner) deviceLoginHandoff(info sdk.DeviceLoginInfo) error {
+	var out strings.Builder
+	out.WriteString("By logging in, you agree to our Subscription Service Agreement. For more details, see ")
+	out.WriteString(dockerSubscriptionAgreementURL)
+	out.WriteString("\n\n")
+	fmt.Fprintf(&out, "Your one-time device confirmation code is: %s\n", info.UserCode)
+	out.WriteString("Complete sign-in in your browser, then return to this terminal.\n")
+	fmt.Fprintf(&out, "Open this URL to sign in: %s\n\n", info.VerificationURI)
+	out.WriteString("Waiting for authentication...\n")
+	if _, err := io.WriteString(r.Err, out.String()); err != nil {
 		return errors.New("write Docker device authorization details failed")
 	}
-	readDone := make(chan error, 1)
-	go func() {
-		_, err := bufio.NewReader(r.In).ReadString('\n')
-		readDone <- err
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-readDone:
-		if err != nil {
-			return errors.New("docker device login canceled before authorization handoff")
-		}
-		if _, err := fmt.Fprintln(r.Err, "Waiting for Docker authorization..."); err != nil {
-			return errors.New("write Docker authorization status failed")
-		}
-		return nil
+	r.openLoginBrowser(info.VerificationURI)
+	return nil
+}
+
+// openLoginBrowser best-effort opens the verification URL on an interactive
+// terminal. Failures are ignored because the URL is printed as a fallback.
+func (r *Runner) openLoginBrowser(url string) {
+	if url == "" || !r.stdinIsTerminal() {
+		return
 	}
+	_ = openBrowser(url)
+}
+
+func (r *Runner) loginUsage() {
+	_, _ = fmt.Fprintln(r.Out, "Description:")
+	_, _ = fmt.Fprintln(r.Out, "  Sign in to Docker")
+	_, _ = fmt.Fprintln(r.Out, "\nUsage:")
+	_, _ = fmt.Fprintln(r.Out, "  rsbx login [flags]")
+	_, _ = fmt.Fprintln(r.Out, "\nExamples:")
+	_, _ = fmt.Fprintln(r.Out, "  rsbx login")
+	_, _ = fmt.Fprintln(r.Out, "\n  # Non-interactive sign-in, for CI")
+	_, _ = fmt.Fprintln(r.Out, "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
+	_, _ = fmt.Fprintln(r.Out, "\nFlags:")
+	_, _ = fmt.Fprintln(r.Out, "  -h, --help              help for login")
+	_, _ = fmt.Fprintln(r.Out, "      --password-stdin    Read password or access token from stdin")
+	_, _ = fmt.Fprintln(r.Out, "      --username string   Docker username for non-interactive login")
 }
 
 func readDockerPassword(input io.Reader) ([]byte, error) {
@@ -543,9 +611,9 @@ func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 		return 1
 	}
 	if removed {
-		_, _ = fmt.Fprintln(r.Out, "Removed local Docker account credentials")
+		_, _ = fmt.Fprintln(r.Out, "Signed out.")
 	} else {
-		_, _ = fmt.Fprintln(r.Out, "No local Docker account credentials found")
+		_, _ = fmt.Fprintln(r.Out, "Not signed in.")
 	}
 	if stopped > 0 {
 		_, _ = fmt.Fprintf(r.Out, "Stopped %d running local sandbox(es)\n", stopped)
@@ -554,8 +622,7 @@ func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) confirmLogout() (bool, error) {
-	file, ok := r.In.(*os.File)
-	if !ok || !term.IsTerminal(int(file.Fd())) {
+	if !r.stdinIsTerminal() {
 		return false, fmt.Errorf("logout confirmation requires a terminal; use --force to skip confirmation")
 	}
 	if _, err := fmt.Fprint(r.Err, "Stop running local sandboxes and sign out? [y/N] "); err != nil {
@@ -1344,7 +1411,7 @@ func (r *Runner) checkRegistryCredentialAbsent(ctx context.Context, client sdk.C
 }
 
 func registrySecretAlreadyExistsError(registry, scope string) error {
-	return fmt.Errorf("error: registry secret already exists for %q in scope %q; pass --force to overwrite", registry, scope)
+	return fmt.Errorf("registry secret already exists for %q in scope %q; pass --force to overwrite", registry, scope)
 }
 
 func registrySetScopeLabel(scope sdk.RegistryCredentialScope, sandboxName string) string {
@@ -2280,7 +2347,12 @@ Use "rsbx COMMAND --help" for command details.
 }
 
 func (r *Runner) error(err error) {
-	_, _ = fmt.Fprintln(r.Err, err)
+	var typed *sdk.Error
+	if errors.As(err, &typed) && typed.Message != "" {
+		_, _ = fmt.Fprintf(r.Err, "error: %s\n", typed.Message)
+		return
+	}
+	_, _ = fmt.Fprintf(r.Err, "error: %s\n", err)
 }
 
 func defaultSocket() string {

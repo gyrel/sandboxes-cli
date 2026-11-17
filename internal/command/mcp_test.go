@@ -148,7 +148,7 @@ func TestPreviousRootCommandContractsRemainReachable(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		want int
-	}{{[]string{"version"}, 0}, {[]string{"unknown"}, 2}, {[]string{"create", "--bogus"}, 1}} {
+	}{{[]string{"version"}, 0}, {[]string{"unknown"}, 1}, {[]string{"create", "--bogus"}, 1}} {
 		var out, stderr strings.Builder
 		runner := &Runner{Out: &out, Err: &stderr}
 		if got := runner.Run(context.Background(), tc.args); got != tc.want {

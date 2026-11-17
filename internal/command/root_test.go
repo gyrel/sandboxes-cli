@@ -23,8 +23,12 @@ func TestVersion(t *testing.T) {
 
 func TestUnknownCommand(t *testing.T) {
 	var out bytes.Buffer
-	if code := Run(context.Background(), []string{"unknown"}, &out, &out); code != 2 {
+	if code := Run(context.Background(), []string{"unknown"}, &out, &out); code != 1 {
 		t.Fatalf("exit code %d", code)
+	}
+	want := "error: rsbx: unknown command: rsbx unknown\n  try: rsbx --help\n"
+	if out.String() != want {
+		t.Fatalf("output %q, want %q", out.String(), want)
 	}
 }
 
@@ -54,7 +58,7 @@ func TestDocumentedTopLevelAliasesDispatch(t *testing.T) {
 func TestRemovedExtraCommandsAreUnknown(t *testing.T) {
 	for _, name := range []string{"start", "get", "wait"} {
 		var out bytes.Buffer
-		if code := Run(context.Background(), []string{name}, &out, &out); code != 2 {
+		if code := Run(context.Background(), []string{name}, &out, &out); code != 1 {
 			t.Fatalf("%s: exit=%d output=%q", name, code, out.String())
 		}
 		if !strings.Contains(out.String(), "unknown command") {

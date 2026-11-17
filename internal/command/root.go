@@ -185,9 +185,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	case "rm", commandRemove, commandDelete:
 		return r.remove(ctx, rest[1:])
 	default:
-		_, _ = fmt.Fprintf(r.Err, "unknown command: %s\n", rest[0])
-		r.usage()
-		return 2
+		return r.commandError("", fmt.Sprintf("rsbx: unknown command: rsbx %s", rest[0]))
 	}
 }
 

@@ -209,7 +209,7 @@ func findExecSandbox(ctx context.Context, client sdk.Client, name string) (strin
 			}
 		}
 		if page.NextPageToken == "" {
-			return "", sandboxNotFound{name: name}
+			return "", sandboxNotFoundError{name: name}
 		}
 		if _, ok := seen[page.NextPageToken]; ok {
 			return "", fmt.Errorf("invalid sandbox pagination")

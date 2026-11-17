@@ -1623,7 +1623,7 @@ func lookupSandboxForReport(ctx context.Context, client sdk.Client, id, name str
 		return nil, err
 	}
 	if !found {
-		return nil, sandboxNotFound{name: name}
+		return nil, sandboxNotFoundError{name: name}
 	}
 	return sb, nil
 }
@@ -2354,14 +2354,14 @@ Use "rsbx COMMAND --help" for command details.
 	}
 }
 
-// sandboxNotFound reports an unknown sandbox with the reference wording so
+// sandboxNotFoundError reports an unknown sandbox with the reference wording so
 // every command prints the same message and the `try: rsbx ls` hint.
-type sandboxNotFound struct{ name string }
+type sandboxNotFoundError struct{ name string }
 
-func (e sandboxNotFound) Error() string { return fmt.Sprintf("sandbox '%s' not found", e.name) }
+func (e sandboxNotFoundError) Error() string { return fmt.Sprintf("sandbox '%s' not found", e.name) }
 
 func (r *Runner) error(err error) {
-	var missing sandboxNotFound
+	var missing sandboxNotFoundError
 	if errors.As(err, &missing) {
 		_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: rsbx ls\n", missing.Error())
 		return

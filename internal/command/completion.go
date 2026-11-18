@@ -11,7 +11,7 @@ import (
 var completionTree = map[string][]string{
 	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, removeFlag, newFlag, helpShort, helpFlag},
 	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, helpShort, helpFlag},
-	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
+	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, helpShort, helpFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
 	"ports":           {formatFlag, jsonFlag, publishFlag, "--unpublish"},
@@ -28,7 +28,7 @@ var completionTree = map[string][]string{
 	"version":         {formatFlag, jsonFlag},
 	commandAgents:     {formatFlag, jsonFlag},
 	daemonCommand:     {jsonFlag, helpShort, helpFlag},
-	envCommand:        {nameFlag, envArgFlag, envArgsFileFlag, "-f", forceFlag, detachFlag, helpShort, helpFlag},
+	envCommand:        {nameFlag, envArgFlag, envArgsFileFlag, "-f", forceFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, envShort, envFlag, envFileFlag, "-i", interactiveFlag, "-t", ttyFlag, "-u", userFlag, "-w", workdirFlag, helpShort, helpFlag},
 	kitCommand:        {formatFlag, jsonFlag, helpShort, helpFlag},
 	"reset":           {"-f", forceFlag, formatFlag, jsonFlag, helpShort, helpFlag},
 	settingsCommand:   {formatFlag, jsonFlag, helpShort, helpFlag},
@@ -265,6 +265,7 @@ func flagsTakingValue(flags []string) []string {
 		usernameFlag: true, registryFlag: true, sandboxFlag: true,
 		"--socket": true, envArgFlag: true, envArgsFileFlag: true, refreshFlag: true,
 		serviceFlag: true, refFlag: true, commandFlag: true, tokenFlag: true,
+		detachKeysFlag: true,
 	}
 	out := make([]string, 0, len(flags))
 	for _, flag := range flags {

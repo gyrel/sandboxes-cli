@@ -33,12 +33,15 @@ const (
 	helpNameZsh         = "zsh"
 	helpNameFormat      = "format"
 	helpValueString     = "string"
+	helpNameUser        = "user"
 
 	helpFormatDescription      = "Output format: table, json or yaml"
 	helpJSONDescription        = "Output in JSON format"
 	helpFormatLowerDescription = "output format: table, json or yaml"
 	helpJSONLowerDescription   = "output in JSON format"
 	helpEnvArgDescription      = "set a declared environment argument (repeatable)"
+	helpEnvFileDescription     = "read environment overrides from a file (repeatable)"
+	helpUserDescription        = "uid[:gid] or name[:group]"
 	helpApplyNoPrompt          = "apply without prompting"
 	helpEnvNameDescription     = "override the environment sandbox name"
 	helpAliasList              = "ls, list"
@@ -88,7 +91,7 @@ func runHelp() commandHelp {
 			{Short: "d", Name: helpNameDetach, Description: "create and start without attaching"},
 			{Name: helpNameDocker, Description: "run the dedicated Docker profile"},
 			{Short: "e", Name: helpNameEnv, Value: helpNameStringArray, Description: "environment override for the agent session (repeatable)"},
-			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: "read environment overrides from a file (repeatable)"},
+			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: helpEnvFileDescription},
 			{Short: "h", Name: helpCommand, Description: "help for run"},
 			{Name: helpNameImage, Value: helpValueString, Description: "image reference override for a new sandbox"},
 			{Name: "kit", Value: helpValueString, Description: "apply a local kit definition"},
@@ -208,6 +211,9 @@ func execHelp() commandHelp {
 			"Execute a command in a sandbox. If the sandbox is stopped, it is started first.",
 			"",
 			"Flags may appear before, between or after arguments; use -- to end flag parsing.",
+			"The local daemon/runtime provides no per-exec privilege escalation: --privileged is",
+			"rejected explicitly instead of being ignored. --detach-keys is accepted for parity",
+			"with the reference CLI, which applies it only to an interactive cloud exec.",
 			"Exit status is that of the command. rsbx exits 125 if it could not run the command,",
 			"for example because the sandbox does not exist.",
 		},
@@ -221,12 +227,14 @@ func execHelp() commandHelp {
 		},
 		Flags: []commandFlagHelp{
 			{Short: "d", Name: "detach", Description: "detached mode (not supported)"},
+			{Name: "detach-keys", Value: helpValueString, Description: "override the key sequence for detaching a container (cloud interactive exec only)"},
 			{Short: "e", Name: helpNameEnv, Value: helpNameStringArray, Description: "environment override (repeatable)"},
-			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: "read environment overrides from a file (repeatable)"},
+			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: helpEnvFileDescription},
 			{Short: "h", Name: helpCommand, Description: "help for exec"},
 			{Short: "i", Name: "interactive", Description: "keep stdin open"},
+			{Name: "privileged", Description: "give extended privileges to the command (unsupported by the local runtime; rejected explicitly)"},
 			{Short: "t", Name: "tty", Description: "allocate a terminal"},
-			{Short: "u", Name: "user", Value: helpValueString, Description: "uid[:gid] or name[:group]"},
+			{Short: "u", Name: helpNameUser, Value: helpValueString, Description: helpUserDescription},
 			{Short: "w", Name: "workdir", Value: helpValueString, Description: "guest working directory"},
 		},
 	}
@@ -589,14 +597,26 @@ func envExecHelp() commandHelp {
 			"Runs a command in a matching existing environment sandbox, starting it if stopped.",
 			"Without --, positional arguments are the command and the environment path defaults",
 			"to the current directory.",
+			"Execution flags match rsbx exec, including its explicit rejection of --privileged",
+			"because the local daemon/runtime cannot add per-exec privileges. --detach-keys is",
+			"accepted for parity; the reference CLI applies it only to an interactive cloud exec.",
 		},
 		Usage: []string{"rsbx env exec [flags] [PATH...] [-- COMMAND [ARG...]]"},
 		Flags: []commandFlagHelp{
+			{Short: "d", Name: helpNameDetach, Description: "detached mode (not supported)"},
+			{Name: "detach-keys", Value: helpValueString, Description: "override the key sequence for detaching a container (cloud interactive exec only)"},
+			{Short: "e", Name: helpNameEnv, Value: helpNameStringArray, Description: "environment override (repeatable)"},
 			{Name: helpNameEnvArg, Value: helpNameStringArray, Description: helpEnvArgDescription},
 			{Name: helpNameEnvArgsFile, Value: helpNameStringArray, Description: helpEnvArgsFileDescription},
+			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: helpEnvFileDescription},
 			{Short: "f", Name: helpNameForce, Description: helpApplyNoPrompt},
 			{Short: "h", Name: helpCommand, Description: "help for env exec"},
+			{Short: "i", Name: "interactive", Description: "keep stdin open"},
 			{Name: helpNameName, Value: helpValueString, Description: helpEnvNameDescription},
+			{Name: "privileged", Description: "give extended privileges to the command (unsupported by the local runtime; rejected explicitly)"},
+			{Short: "t", Name: "tty", Description: "allocate a terminal"},
+			{Short: "u", Name: helpNameUser, Value: helpValueString, Description: helpUserDescription},
+			{Short: "w", Name: "workdir", Value: helpValueString, Description: "guest working directory"},
 		},
 	}
 }

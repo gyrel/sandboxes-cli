@@ -258,7 +258,11 @@ variables are read. The last duplicate wins. `-u/--user` accepts
 numeric `uid[:gid]` or a guest user/group name (`root`, `nobody:nogroup`); a
 bare uid keeps the image/process GID. Names are resolved by a short root probe
 inside the guest using `id` and `/etc/group`, and unknown names fail closed.
-Environment values
+`--privileged` is parsed for reference surface parity, but the local
+daemon/runtime API has no per-exec privilege escalation, so it fails closed with
+exit 125 instead of silently ignoring the request. `--detach-keys` is accepted
+for parity; the reference applies it only to an interactive cloud exec, and
+local exec has no detach sequence. Environment values
 can be visible in host process arguments when passed with `-e`; do not put
 secrets in argv (prefer a bounded, permission-restricted env file).
 

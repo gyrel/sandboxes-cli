@@ -76,6 +76,10 @@ type settingOutput struct {
 }
 
 func (r *Runner) settings(args []string) int {
+	args, code, done := r.prepareFamilyArgs(settingsCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, settingsUsage)
 		return 2
@@ -107,7 +111,7 @@ func (r *Runner) settingsPath() string {
 
 func (r *Runner) settingsList(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet("settings ls", flag.ContinueOnError)
+	fs := r.newFlagSet("settings ls")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(settingsListHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
@@ -285,7 +289,7 @@ func uintString(value uint32) string {
 
 func (r *Runner) settingsGet(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet("settings get", flag.ContinueOnError)
+	fs := r.newFlagSet("settings get")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(settingsGetHelp()) }
 	jsonOutput := fs.Bool("json", false, "print the full setting record")

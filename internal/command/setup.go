@@ -92,7 +92,7 @@ type setupDetector struct {
 }
 
 func (r *Runner) setup(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet(setupCommand, flag.ContinueOnError)
+	fs := r.newFlagSet(setupCommand)
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")

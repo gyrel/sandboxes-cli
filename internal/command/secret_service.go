@@ -79,7 +79,7 @@ func machineSecretList(items []serviceSecretOutput) secretListOutput {
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, tokenFlag: true, "-t": true, refFlag: true, commandFlag: true, refreshFlag: true, forceFlag: false, "-f": false, oauthFlag: false, "--no-verify": false, "--show-error": false})
-	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
+	fs := r.newFlagSet("secret set")
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
 	token := fs.String("token", "", "secret value (less secure: visible in shell history)")
@@ -394,7 +394,7 @@ func validMCPSecretCharacter(char rune, allowDot bool) bool {
 
 func (r *Runner) serviceSecretRemove(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, oauthFlag: false, globalFlag: false, forceFlag: false, "-f": false})
-	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
+	fs := r.newFlagSet("secret rm")
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
 	oauth := fs.Bool("oauth", false, "remove host-side OpenAI OAuth credentials")
@@ -659,7 +659,7 @@ func (r *Runner) removeSecretChoice(ctx context.Context, client sdk.Client, choi
 //nolint:gocognit,gocyclo,cyclop,funlen // one command renders two credential types and three formats.
 func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, sandboxFlag: true, serviceFlag: true})
-	fs := flag.NewFlagSet("secret ls", flag.ContinueOnError)
+	fs := r.newFlagSet("secret ls")
 	fs.SetOutput(r.Err)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")

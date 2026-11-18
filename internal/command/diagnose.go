@@ -84,7 +84,7 @@ type diagnoseFlatReport struct {
 }
 
 func (r *Runner) diagnose(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)
+	fs := r.newFlagSet("diagnose")
 	fs.SetOutput(io.Discard)
 	jsonOutput := fs.Bool(listFormatJSON, false, "output in JSON format")
 	format := fs.String("format", listFormatTable, "output format: table, json, yaml or github-issue")

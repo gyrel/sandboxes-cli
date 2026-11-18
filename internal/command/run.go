@@ -199,10 +199,15 @@ type runOptions struct {
 }
 
 // run creates or reuses a sandbox, starts it, and attaches an agent session.
+//
+//nolint:funlen // one command parses the full run flag surface and launches the agent.
 func (r *Runner) run(ctx context.Context, args []string) int {
 	head, agentArgs := splitAgentArgs(args)
-	opts, positionals, err := parseRunArgs(head)
+	opts, positionals, err := parseRunArgs(r, head)
 	if err != nil {
+		if message, ok := r.takeDebugFlagError(); ok {
+			return r.commandError(commandRun, message)
+		}
 		if flagErr, ok := asUnknownRunFlag(err); ok {
 			_, _ = fmt.Fprintf(r.Err, "error: unknown flag: --%s\n  try: rsbx run --help\n", strings.TrimLeft(flagErr.flag, "-"))
 			return 1
@@ -243,6 +248,14 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
 		return 2
 	}
+	r.debug(ctx, debugEventRunPrepare,
+		debugBoolean("has_name", opts.name != ""),
+		debugBoolean("has_agent", agent != ""),
+		debugNumber("workspace_count", len(workspacePaths)),
+		debugBoolean("detached", opts.detach),
+		debugBoolean(cloneName, opts.clone),
+		debugBoolean("new", opts.new),
+		debugBoolean(privilegedName, opts.privileged))
 
 	client, err := r.client()
 	if err != nil {
@@ -261,6 +274,8 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
+	r.debug(ctx, debugEventRunSandbox, debugBoolean("created", created))
+	r.debug(ctx, debugEventRunAttach, debugBoolean("detached", opts.detach))
 	return r.runAttached(ctx, client, opts, sandbox, created, agent, workspaces, workspacesExplicit, agentArgs, resources)
 }
 
@@ -800,11 +815,11 @@ func splitAgentArgs(args []string) ([]string, []string) {
 	return args, nil
 }
 
-func parseRunArgs(args []string) (runOptions, []string, error) {
+func parseRunArgs(r *Runner, args []string) (runOptions, []string, error) {
 	var opts runOptions
 	positionals := make([]string, 0, 2)
 	for i := 0; i < len(args); i++ {
-		consumed, err := parseRunFlag(args, i, &opts)
+		consumed, err := parseRunFlag(r, args, i, &opts)
 		if err != nil {
 			return opts, nil, err
 		}
@@ -817,12 +832,12 @@ func parseRunArgs(args []string) (runOptions, []string, error) {
 	return opts, positionals, nil
 }
 
-func parseRunFlag(args []string, index int, opts *runOptions) (int, error) {
+func parseRunFlag(r *Runner, args []string, index int, opts *runOptions) (int, error) {
 	arg := args[index]
-	if consumed, handled, err := parseRunValueFlag(args, index, arg, opts); handled {
+	if consumed, handled, err := parseRunValueFlag(r, args, index, arg, opts); handled {
 		return consumed, err
 	}
-	if consumed, handled, err := parseRunAssignmentFlag(arg, opts); handled {
+	if consumed, handled, err := parseRunAssignmentFlag(r, arg, opts); handled {
 		return consumed, err
 	}
 	if strings.HasPrefix(arg, "-") && arg != "-" {
@@ -845,7 +860,7 @@ func asUnknownRunFlag(err error) (unknownRunFlagError, bool) {
 	return unknownRunFlagError{}, false
 }
 
-func parseRunValueFlag(args []string, index int, arg string, opts *runOptions) (int, bool, error) {
+func parseRunValueFlag(r *Runner, args []string, index int, arg string, opts *runOptions) (int, bool, error) {
 	switch arg {
 	case helpShort, helpFlag:
 		opts.help = true
@@ -868,12 +883,24 @@ func parseRunValueFlag(args []string, index int, arg string, opts *runOptions) (
 	case dockerFlag:
 		opts.privileged = true
 		return 1, true, nil
+	case debugShortFlag, debugFlag:
+		if err := (&debugFlagValue{runner: r}).Set("true"); err != nil {
+			return 0, true, err
+		}
+		return 1, true, nil
 	}
-	return parseRunValuedFlag(args, index, arg, opts)
+	return parseRunValuedFlag(r, args, index, arg, opts)
 }
 
-func parseRunValuedFlag(args []string, index int, arg string, opts *runOptions) (int, bool, error) {
+//nolint:gocyclo,cyclop // one branch per documented value-taking flag.
+func parseRunValuedFlag(r *Runner, args []string, index int, arg string, opts *runOptions) (int, bool, error) {
 	switch arg {
+	case socketFlag, socketShortFlag:
+		if index+1 >= len(args) {
+			return 0, true, errors.New("flag needs an argument: --socket")
+		}
+		r.Socket = args[index+1]
+		return 2, true, nil
 	case nameFlag:
 		consumed, err := parseRunValue(args, index, nameFlag, &opts.name)
 		return consumed, true, err
@@ -918,7 +945,32 @@ func parseRunValuedFlag(args []string, index int, arg string, opts *runOptions) 
 	}
 }
 
-func parseRunAssignmentFlag(arg string, opts *runOptions) (int, bool, error) {
+//nolint:gocognit,gocyclo,cyclop,funlen // one branch per documented assignment-form flag.
+func parseRunAssignmentFlag(r *Runner, arg string, opts *runOptions) (int, bool, error) {
+	if value, ok := strings.CutPrefix(arg, "--debug="); ok {
+		if err := (&debugFlagValue{runner: r}).Set(value); err != nil {
+			return 0, true, err
+		}
+		return 1, true, nil
+	}
+	if value, ok := strings.CutPrefix(arg, "-D="); ok {
+		if err := (&debugFlagValue{runner: r}).Set(value); err != nil {
+			return 0, true, err
+		}
+		return 1, true, nil
+	}
+	if value, ok := strings.CutPrefix(arg, "--socket="); ok {
+		if r != nil {
+			r.Socket = value
+		}
+		return 1, true, nil
+	}
+	if value, ok := strings.CutPrefix(arg, "-socket="); ok {
+		if r != nil {
+			r.Socket = value
+		}
+		return 1, true, nil
+	}
 	if value, ok := strings.CutPrefix(arg, nameFlag+"="); ok {
 		consumed, err := setRunValue(nameFlag, value, &opts.name)
 		return consumed, true, err

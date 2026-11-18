@@ -26,6 +26,10 @@ func (f *repeatedStringFlag) Set(value string) error {
 }
 
 func (r *Runner) environment(ctx context.Context, args []string) int {
+	args, code, done := r.prepareFamilyArgs(envCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		return r.showCommandHelp(envHelp())
 	}
@@ -47,7 +51,7 @@ func (r *Runner) environment(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) environmentPlan(args []string) int {
-	fs := flag.NewFlagSet("env plan", flag.ContinueOnError)
+	fs := r.newFlagSet("env plan")
 	fs.SetOutput(io.Discard)
 	name := fs.String("name", "", "override the environment sandbox name")
 	var envArguments, envArgumentFiles repeatedStringFlag

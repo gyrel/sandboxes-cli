@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Global `-D`/`--debug` output on stderr for version and command lifecycle
+  events. Debug records use the released `github.com/rheic/slogx` logger, a
+  closed event/attribute allowlist, and controlled value sets. Arguments,
+  environment values, paths, sandbox names, tokens, and raw errors are not
+  logged. `--debug=false` disables the flag; a reused runner does not inherit
+  debug state.
+- `rsbx version` gains the reference table, JSON, YAML, and debug output
+  selection with mutually exclusive format flags and reference-style argument
+  errors.
+
+### Changed
+
+- Require Go 1.27.4 and update OpenTelemetry dependencies to v1.47.0 for the
+  `slogx` module.
+
 ## v0.0.60 — 2026-11-18
 
 ### Added

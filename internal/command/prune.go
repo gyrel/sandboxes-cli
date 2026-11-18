@@ -24,7 +24,7 @@ type pruneOptions struct {
 }
 
 func (r *Runner) prune(ctx context.Context, args []string) int {
-	opts, help, err := parsePruneOptions(args)
+	opts, help, err := r.parsePruneOptions(args)
 	if help {
 		return r.showCommandHelp(pruneHelp())
 	}
@@ -111,8 +111,8 @@ func (r *Runner) pruneRemove(ctx context.Context, client sdk.Client, opts pruneO
 	return 0
 }
 
-func parsePruneOptions(args []string) (pruneOptions, bool, error) {
-	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+func (r *Runner) parsePruneOptions(args []string) (pruneOptions, bool, error) {
+	fs := r.newFlagSet("prune")
 	fs.SetOutput(io.Discard)
 	dryRun := fs.Bool("dry-run", false, "list stopped sandboxes without removing them")
 	force := fs.Bool("force", false, "remove without confirmation")

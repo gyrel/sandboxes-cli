@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -50,8 +51,10 @@ func (f *stringListFlag) Set(value string) error {
 }
 
 // exec runs a command in an existing sandbox.
+//
+//nolint:funlen // one command parses the full exec flag surface and launches the session.
 func (r *Runner) exec(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
+	fs := r.newFlagSet("exec")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 	var opts execOptions
@@ -87,6 +90,14 @@ func (r *Runner) exec(ctx context.Context, args []string) int {
 		return 125
 	}
 	opts.env = env
+	r.debug(ctx, debugEventExecPrepare,
+		debugBoolean(interactiveName, interactive),
+		debugBoolean(ttyName, tty),
+		debugBoolean("detached", detached),
+		debugBoolean(privilegedName, opts.privileged),
+		debugBoolean("has_workdir", opts.workdir != ""),
+		debugBoolean("user_set", opts.user != ""),
+		debugNumber("env_count", len(opts.env)))
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -98,16 +109,27 @@ func (r *Runner) exec(ctx context.Context, args []string) int {
 		r.error(err)
 		return 125
 	}
+	r.debug(ctx, debugEventExecSandbox, debugResultField("ok"))
 	if interactive || tty {
-		return r.execSession(ctx, client, id, fs.Args()[1:], opts, interactive, tty)
+		code := r.execSession(ctx, client, id, fs.Args()[1:], opts, interactive, tty)
+		r.debug(ctx, debugEventExecFinish, debugNumber("exit_code", code), debugResultField("ok"))
+		return code
 	}
+	started := time.Now()
 	code, err := sdk.ExecService(client).Exec(ctx, sdk.ExecRequest{
 		SandboxID: id, Argv: fs.Args()[1:], Workdir: opts.workdir, Env: opts.env, User: opts.user, Stdout: r.Out, Stderr: r.Err,
 	})
 	if err != nil {
+		r.debug(ctx, debugEventExecFinish,
+			debugResultField("error"),
+			debugDuration("duration_ms", time.Since(started)))
 		r.error(err)
 		return 125
 	}
+	r.debug(ctx, debugEventExecFinish,
+		debugNumber("exit_code", code),
+		debugResultField("ok"),
+		debugDuration("duration_ms", time.Since(started)))
 	return code
 }
 
@@ -203,7 +225,7 @@ func reorderExecArgs(args []string) []string {
 
 func isExecBooleanFlag(name string) bool {
 	switch name {
-	case "-i", interactiveFlag, "-t", ttyFlag, "-d", detachFlag, privilegedFlag, helpShort, helpFlag:
+	case "-i", interactiveFlag, "-t", ttyFlag, "-d", detachFlag, privilegedFlag, helpShort, helpFlag, debugShortFlag, debugFlag:
 		return true
 	default:
 		return false
@@ -212,7 +234,7 @@ func isExecBooleanFlag(name string) bool {
 
 func execFlagTakesValue(arg string) bool {
 	switch arg {
-	case "-w", workdirFlag, "-workdir", "-e", envFlag, "--env-file", "-u", userFlag, detachKeysFlag:
+	case "-w", workdirFlag, "-workdir", "-e", envFlag, "--env-file", "-u", userFlag, detachKeysFlag, socketFlag, socketShortFlag:
 		return true
 	default:
 		return false

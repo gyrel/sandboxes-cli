@@ -84,14 +84,14 @@ func TestDrawDashboardHandlesSmallTerminal(t *testing.T) {
 }
 
 func TestParseTUIOptions(t *testing.T) {
-	got, help, err := parseTUIOptions([]string{"--refresh", "10s"})
+	got, help, err := (&Runner{}).parseTUIOptions([]string{"--refresh", "10s"})
 	if err != nil || help || got != 10*time.Second {
-		t.Fatalf("parseTUIOptions() = (%s, %v, %v)", got, help, err)
+		t.Fatalf("(&Runner{}).parseTUIOptions() = (%s, %v, %v)", got, help, err)
 	}
-	if _, _, err := parseTUIOptions([]string{"--refresh", "500ms"}); err == nil {
+	if _, _, err := (&Runner{}).parseTUIOptions([]string{"--refresh", "500ms"}); err == nil {
 		t.Fatal("refresh interval below lower bound was accepted")
 	}
-	if _, help, err := parseTUIOptions([]string{"--help"}); err != nil || !help {
+	if _, help, err := (&Runner{}).parseTUIOptions([]string{"--help"}); err != nil || !help {
 		t.Fatalf("help = (%v, %v)", help, err)
 	}
 }

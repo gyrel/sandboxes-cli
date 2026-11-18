@@ -43,6 +43,10 @@ type templateOutput struct {
 }
 
 func (r *Runner) template(args []string) int {
+	args, code, done := r.prepareFamilyArgs(templateCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, templateUsage)
 		return 2
@@ -65,7 +69,7 @@ func (r *Runner) template(args []string) int {
 
 func (r *Runner) templateList(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet("template ls", flag.ContinueOnError)
+	fs := r.newFlagSet("template ls")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(templateListHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
@@ -123,7 +127,7 @@ func (r *Runner) templateList(args []string) int {
 
 func (r *Runner) templateInspect(args []string) int {
 	args = reorderFlagArgs(args, nil)
-	fs := flag.NewFlagSet("template inspect", flag.ContinueOnError)
+	fs := r.newFlagSet("template inspect")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(templateInspectHelp()) }
 	jsonOutput := fs.Bool("json", false, "output in JSON format")

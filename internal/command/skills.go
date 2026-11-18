@@ -45,6 +45,10 @@ type skillsListRecord struct {
 }
 
 func (r *Runner) skills(ctx context.Context, args []string) int {
+	args, code, done := r.prepareFamilyArgs(skillsCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 || args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag {
 		return r.showCommandHelp(skillsHelp())
 	}
@@ -63,7 +67,7 @@ func (r *Runner) skills(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) listSkills(args []string) int {
-	fs := flag.NewFlagSet("skills ls", flag.ContinueOnError)
+	fs := r.newFlagSet("skills ls")
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")

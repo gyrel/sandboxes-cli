@@ -35,6 +35,10 @@ func (f *mcpArgsFlag) Set(value string) error {
 }
 
 func (r *Runner) mcp(ctx context.Context, args []string) int {
+	args, code, done := r.prepareFamilyArgs(mcpCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 || args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag {
 		return r.showCommandHelp(mcpHelp())
 	}
@@ -64,7 +68,7 @@ Remove an MCP server registration.
 `
 
 func (r *Runner) mcpList(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("mcp ls", flag.ContinueOnError)
+	fs := r.newFlagSet("mcp ls")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(mcpListHelp()) }
 	jsonOutput := fs.Bool("json", false, "write JSON")
@@ -137,7 +141,7 @@ func writeMCPList(out io.Writer, servers []sdk.MCPServer, format string, jsonOut
 
 func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 	var serverArgs, headerArgs, secretHeaderArgs mcpArgsFlag
-	fs := flag.NewFlagSet("mcp add", flag.ContinueOnError)
+	fs := r.newFlagSet("mcp add")
 	fs.SetOutput(io.Discard)
 	command := fs.String("command", "", "absolute or PATH-resolved local stdio executable")
 	directory := fs.String("dir", "", "working directory")
@@ -351,7 +355,7 @@ func mcpRegistrationApprovalMessage(name, command string, args []string, directo
 
 func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 	var raw string
-	fs := flag.NewFlagSet("mcp call", flag.ContinueOnError)
+	fs := r.newFlagSet("mcp call")
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&raw, strings.TrimPrefix(mcpArgsFlagName, "--"), "{}", "JSON object passed to the tool")
 	fs.Usage = func() { r.showCommandHelp(mcpCallHelp()) }
@@ -426,7 +430,7 @@ func mcpCallApprovalMessage(server, tool, sandbox string, arguments map[string]j
 }
 
 func (r *Runner) mcpRemove(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("mcp rm", flag.ContinueOnError)
+	fs := r.newFlagSet("mcp rm")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(mcpRemoveHelp()) }
 	force := fs.Bool("force", false, "skip confirmation")

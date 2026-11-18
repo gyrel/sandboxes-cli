@@ -107,6 +107,10 @@ type daemonSupervisor interface {
 }
 
 func (r *Runner) daemon(args []string) int {
+	args, code, done := r.prepareFamilyArgs(daemonCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, daemonUsage)
 		return 2
@@ -138,7 +142,7 @@ func (r *Runner) supervisor() (daemonSupervisor, error) {
 }
 
 func (r *Runner) daemonStart(args []string) int {
-	opts, help, err := parseDaemonStartOptions("daemon start", args, r.Err)
+	opts, help, err := r.parseDaemonStartOptions("daemon start", args, r.Err)
 	if help {
 		return r.showCommandHelp(daemonStartHelp())
 	}
@@ -149,7 +153,7 @@ func (r *Runner) daemonStart(args []string) int {
 }
 
 func (r *Runner) daemonRestart(args []string) int {
-	opts, help, err := parseDaemonStartOptions("daemon restart", args, r.Err)
+	opts, help, err := r.parseDaemonStartOptions("daemon restart", args, r.Err)
 	if help {
 		return r.showCommandHelp(daemonRestartHelp())
 	}
@@ -187,8 +191,8 @@ func (r *Runner) runDaemonStart(ctx context.Context, operation string, opts daem
 	return 0
 }
 
-func parseDaemonStartOptions(name string, args []string, errOut io.Writer) (daemonctl.StartOptions, bool, error) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+func (r *Runner) parseDaemonStartOptions(name string, args []string, errOut io.Writer) (daemonctl.StartOptions, bool, error) {
+	fs := r.newFlagSet(name)
 	fs.SetOutput(errOut)
 	var opts daemonctl.StartOptions
 	fs.BoolVar(&opts.Detach, "detach", false, "run the daemon in the background")
@@ -212,7 +216,7 @@ func parseDaemonStartOptions(name string, args []string, errOut io.Writer) (daem
 }
 
 func (r *Runner) daemonStop(args []string) int {
-	fs := flag.NewFlagSet("daemon stop", flag.ContinueOnError)
+	fs := r.newFlagSet("daemon stop")
 	fs.SetOutput(r.Err)
 	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -324,7 +328,7 @@ type daemonStatusOutput struct {
 }
 
 func (r *Runner) daemonStatus(args []string) int {
-	fs := flag.NewFlagSet("daemon status", flag.ContinueOnError)
+	fs := r.newFlagSet("daemon status")
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")

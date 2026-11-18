@@ -66,7 +66,7 @@ type environmentCreateOptions struct {
 }
 
 func parseEnvironmentCreateOptions(r *Runner, args []string) (environmentCreateOptions, error) {
-	fs := flag.NewFlagSet("env create", flag.ContinueOnError)
+	fs := r.newFlagSet("env create")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "apply without prompting")
 	fs.BoolVar(force, "f", false, "apply without prompting")

@@ -49,7 +49,7 @@ func (r *Runner) agents(args []string) int {
 
 func (r *Runner) agentList(args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet(commandAgents, flag.ContinueOnError)
+	fs := r.newFlagSet(commandAgents)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { _, _ = fmt.Fprint(r.Out, agentsUsage) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")

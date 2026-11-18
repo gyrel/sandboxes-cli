@@ -46,7 +46,7 @@ type skillManifest struct {
 }
 
 func (r *Runner) importSkills(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("skills import", flag.ContinueOnError)
+	fs := r.newFlagSet("skills import")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "replace skill content previously imported by Rheic")
 	fs.BoolVar(force, "f", false, "replace skill content previously imported by Rheic")

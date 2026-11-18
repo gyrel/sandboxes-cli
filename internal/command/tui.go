@@ -56,7 +56,7 @@ type dashboardModel struct {
 }
 
 func (r *Runner) tui(ctx context.Context, args []string) int {
-	refreshEvery, help, err := parseTUIOptions(args)
+	refreshEvery, help, err := r.parseTUIOptions(args)
 	if help {
 		return r.showCommandHelp(tuiHelp())
 	}
@@ -86,8 +86,8 @@ func (r *Runner) tui(ctx context.Context, args []string) int {
 	return runDashboard(ctx, screen, client, refreshEvery)
 }
 
-func parseTUIOptions(args []string) (time.Duration, bool, error) {
-	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+func (r *Runner) parseTUIOptions(args []string) (time.Duration, bool, error) {
+	fs := r.newFlagSet("tui")
 	fs.SetOutput(io.Discard)
 	refresh := fs.Duration("refresh", 5*time.Second, "dashboard refresh interval")
 	if err := fs.Parse(args); err != nil {

@@ -43,7 +43,7 @@ Show one rule by ID or one sandbox's policy in detail.
 // policyLog prints gateway audit decisions from the host run directory.
 func (r *Runner) policyLog(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true, limitFlag: true, logTypeFlag: true})
-	fs := flag.NewFlagSet("policy log", flag.ContinueOnError)
+	fs := r.newFlagSet("policy log")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyLogHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
@@ -202,7 +202,7 @@ func (r *Runner) renderPolicyLog(format string, decisions []egressDecision, malf
 // policy (by sandbox name), including the exact removal command.
 func (r *Runner) policyInspect(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet("policy inspect", flag.ContinueOnError)
+	fs := r.newFlagSet("policy inspect")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyInspectHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")

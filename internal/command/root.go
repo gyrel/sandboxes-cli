@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+	"github.com/rheic/slogx"
 
 	"github.com/rheic/sandboxes-cli/internal/daemonctl"
 	"github.com/rheic/sandboxes-cli/internal/kit"
@@ -29,6 +30,8 @@ const (
 
 	actionAllow       = "allow"
 	actionDeny        = "deny"
+	cloneName         = "clone"
+	commandName       = "command"
 	commandCreate     = "create"
 	commandExec       = "exec"
 	commandRun        = "run"
@@ -40,26 +43,41 @@ const (
 	stateUnavailable  = "unavailable"
 	commandAgents     = "agents"
 	commandImport     = "import"
+	versionCommand    = "version"
 	commandList       = "list"
 	commandDelete     = "delete"
 	commandRemove     = "remove"
 	commandUnset      = "unset"
 	commandSet        = "set"
 	commandSetCustom  = "set-custom"
+	debugFlag         = "--debug"
+	debugShortFlag    = "-D"
+	interactiveName   = "interactive"
+	privilegedName    = "privileged"
 	schemeHTTPS       = "https"
 	reasonDefaultDeny = "default deny"
 	orgScope          = "org"
 	originLocal       = "local"
+	socketFlag        = "--socket"
+	socketShortFlag   = "-socket"
+	ttyName           = "tty"
 )
 
 var errMissingSandboxTargets = errors.New("requires at least 1 argument")
 
 // Runner executes commands against a local daemon.
 type Runner struct {
-	Out       io.Writer
-	Err       io.Writer
-	In        io.Reader
-	Socket    string
+	Out    io.Writer
+	Err    io.Writer
+	In     io.Reader
+	Socket string
+	// Debug records the -D/--debug flag for the current Run invocation. It
+	// enables structured debug events on Err and selects the version table.
+	// Run resets it so a reused Runner cannot inherit debug mode.
+	Debug bool
+	// Logger is an optional per-Runner debug logger. When nil, Run creates a
+	// slogx logger on Err. The CLI never installs a package-level logger.
+	Logger    *slogx.Logger
 	NewClient func(address string) (sdk.Client, error)
 	// NewDaemonSupervisor controls the local daemon process. Tests inject a
 	// fake to verify start/stop/restart sequencing without signaling a real
@@ -85,6 +103,10 @@ type Runner struct {
 	// setupCollector overrides read-only host detection in tests. A nil
 	// collector uses the real host.
 	setupCollector func(context.Context) setupReport
+
+	debugLogger     *slogx.Logger
+	debugInvalidRaw string
+	debugInvalidErr error
 }
 
 // NewRunner creates a CLI runner.
@@ -108,7 +130,21 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 // Run executes the command tree and returns a process exit code.
-func (r *Runner) Run(ctx context.Context, args []string) int {
+func (r *Runner) Run(ctx context.Context, args []string) (code int) {
+	// Debug is invocation-scoped output selection, not sticky Runner state.
+	// Reset it so a reused Runner cannot carry -D into an unrelated command.
+	r.beginDebug()
+	command := ""
+	started := time.Now()
+	defer func() {
+		if command != "" {
+			r.debug(ctx, debugEventCommandFinish,
+				debugCommandField(command),
+				debugNumber("exit_code", code),
+				debugDuration("duration_ms", time.Since(started)))
+		}
+	}()
+
 	rest, code, done := r.parseGlobalArgs(args)
 	if done {
 		return code
@@ -117,6 +153,8 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		r.usage()
 		return 2
 	}
+	command = rest[0]
+	r.debug(ctx, debugEventCommandStart, debugCommandField(command))
 	if code, handled := r.runAuxiliaryCommand(ctx, rest[0], rest[1:]); handled {
 		return code
 	}
@@ -124,7 +162,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 	switch rest[0] {
 	case helpCommand, helpShort, helpFlag:
 		return r.help(ctx, rest[1:])
-	case "version":
+	case versionCommand:
 		return r.version(ctx, rest[1:])
 	case commandCreate:
 		return r.create(ctx, rest[1:])
@@ -140,15 +178,12 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 }
 
 // parseGlobalArgs extracts the global flags before dispatch. It reports
-// done=true when the caller should return code.
+// done=true when the caller should return code. Command parsers register the
+// same flags so they are also accepted after the subcommand.
 func (r *Runner) parseGlobalArgs(args []string) (rest []string, code int, done bool) {
-	socketValue, args, err := extractSocketFlag(args, r.Socket)
-	if err != nil {
-		return nil, r.flagParseFailure("", err), true
-	}
 	global := flag.NewFlagSet("rsbx", flag.ContinueOnError)
 	global.SetOutput(io.Discard)
-	socket := global.String("socket", socketValue, "local daemon endpoint")
+	r.bindGlobalFlags(global)
 	if err := global.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			r.usage()
@@ -156,8 +191,12 @@ func (r *Runner) parseGlobalArgs(args []string) (rest []string, code int, done b
 		}
 		return nil, r.flagParseFailure("", err), true
 	}
-	r.Socket = *socket
 	return global.Args(), 0, false
+}
+
+// invalidBoolFlagMessage matches the reference CLI's pflag wording.
+func invalidBoolFlagMessage(display, raw string, err error) string {
+	return fmt.Sprintf("invalid argument %q for %q flag: %v", raw, display, err)
 }
 
 // help prints top-level usage or, with a command path, that command's help.
@@ -172,44 +211,13 @@ func (r *Runner) help(ctx context.Context, args []string) int {
 	return r.Run(ctx, dispatched)
 }
 
-// extractSocketFlag removes the global --socket flag from any position so it
-// is accepted both before and after the subcommand. A literal -- ends flag
-// parsing, keeping everything after it positional. The last value wins, as it
-// does in the standard flag package.
-func extractSocketFlag(args []string, fallback string) (string, []string, error) {
-	socket := fallback
-	filtered := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			filtered = append(filtered, args[i:]...)
-			break
-		}
-		if arg == "--socket" || arg == "-socket" {
-			if i+1 >= len(args) {
-				return socket, filtered, errors.New("flag needs an argument: --socket")
-			}
-			i++
-			socket = args[i]
-			continue
-		}
-		if value, ok := strings.CutPrefix(arg, "--socket="); ok {
-			socket = value
-			continue
-		}
-		if value, ok := strings.CutPrefix(arg, "-socket="); ok {
-			socket = value
-			continue
-		}
-		filtered = append(filtered, arg)
-	}
-	return socket, filtered, nil
-}
-
 // flagParseFailure normalizes stdlib flag parse errors to the shared CLI
 // error contract: unknown flags exit 1 with a Cobra-style hint, other parse
 // failures exit 2. Callers handle flag.ErrHelp before invoking it.
 func (r *Runner) flagParseFailure(cmdPath string, err error) int {
+	if message, ok := r.takeDebugFlagError(); ok {
+		return r.commandError(cmdPath, message)
+	}
 	message := err.Error()
 	if name, ok := strings.CutPrefix(message, "flag provided but not defined: -"); ok {
 		return r.commandError(cmdPath, "unknown flag: --"+name)
@@ -365,7 +373,7 @@ func (r *Runner) parseLoginFlags(args []string) (username string, passwordStdin 
 		r.loginUsage()
 		return "", false, 0, false
 	}
-	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs := r.newFlagSet("login")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 	usernameFlag := fs.String("username", "", "Docker Hub username for PAT login")
@@ -465,7 +473,7 @@ func readDockerPassword(input io.Reader) ([]byte, error) {
 }
 
 func (r *Runner) accountLogout(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
+	fs := r.newFlagSet("logout")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { _ = r.showCommandHelp(logoutHelp()) }
 	force := fs.Bool("force", false, "skip confirmation")
@@ -592,6 +600,10 @@ func (r *Runner) stopSandbox(ctx context.Context, client sdk.Client, sandbox *sd
 }
 
 func (r *Runner) secret(ctx context.Context, args []string) int {
+	args, code, done := r.prepareFamilyArgs(secretCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret <import|set|ls|list|rm|remove|delete|unset> [flags]")
 		return 2
@@ -683,7 +695,7 @@ func (r *Runner) secretListHelp() int {
 
 func (r *Runner) serviceSecretRemoveAll(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{allFlag: false, forceFlag: false, "-f": false})
-	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
+	fs := r.newFlagSet("secret rm")
 	fs.SetOutput(r.Err)
 	all := fs.Bool("all", false, "remove inventoried host credentials")
 	force := fs.Bool("force", false, "delete without confirmation prompt")
@@ -846,9 +858,13 @@ func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 		if hasValue {
 			continue
 		}
-		if valueFlags[name] && i+1 < len(args) {
-			i++
-			flags = append(flags, args[i])
+		// --socket is a global value flag in every command; --debug/-D are
+		// boolean, so a following token is never their value.
+		if name == socketFlag || name == socketShortFlag || valueFlags[name] {
+			if i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
 		}
 	}
 	reordered := make([]string, 0, len(flags)+len(positionals)+1)
@@ -910,7 +926,7 @@ func (r *Runner) confirmSecretRemoval(target string, force bool) (bool, int) {
 
 func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, sandboxFlag: true, allSandboxesFlag: false, globalFlag: false, forceFlag: false, "-f": false})
-	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
+	fs := r.newFlagSet("secret rm")
 	fs.SetOutput(r.Err)
 	registry := fs.String("registry", "", "registry host")
 	allSandboxes := fs.Bool("all-sandboxes", false, "remove all-sandboxes credential")
@@ -1062,7 +1078,7 @@ func (r *Runner) removeRegistryScopes(ctx context.Context, client sdk.Client, re
 
 func (r *Runner) registrySet(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, usernameFlag: true, sandboxFlag: true, passwordStdinFlag: false, allSandboxesFlag: false})
-	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
+	fs := r.newFlagSet("secret set")
 	fs.SetOutput(r.Err)
 	registry := fs.String("registry", "", "registry host")
 	username := fs.String("username", "", "registry username")
@@ -1267,7 +1283,7 @@ type createOptions struct {
 }
 
 func (r *Runner) create(ctx context.Context, args []string) int {
-	opts, help, err := parseCreateOptions(ctx, args)
+	opts, help, err := r.parseCreateOptions(ctx, args)
 	if help {
 		return r.showCommandHelp(createHelp())
 	}
@@ -1281,6 +1297,16 @@ func (r *Runner) create(ctx context.Context, args []string) int {
 		}
 		return 2
 	}
+	r.debug(ctx, debugEventCreatePrepare,
+		debugBoolean("has_name", opts.name != ""),
+		debugBoolean("has_agent", opts.agent != ""),
+		debugBoolean("has_image", opts.image != ""),
+		debugNumber("workspace_count", len(opts.workspaces)),
+		debugNumber("port_count", len(opts.ports)),
+		debugNumber("rule_count", len(opts.allow)+len(opts.deny)),
+		debugNumber("env_count", len(opts.env)),
+		debugBoolean(cloneName, opts.clone != nil),
+		debugBoolean(privilegedName, opts.privileged))
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -1443,8 +1469,8 @@ func validateCreateResources(cpus uint, memory string) (uint32, uint32, error) {
 }
 
 //nolint:gocyclo,cyclop,funlen // create accepts the full documented flag matrix.
-func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool, error) {
-	fs := flag.NewFlagSet(commandCreate, flag.ContinueOnError)
+func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createOptions, bool, error) {
+	fs := r.newFlagSet(commandCreate)
 	fs.SetOutput(io.Discard)
 	image := fs.String("image", "", "image reference")
 	template := fs.String("template", "", "container image to use for the sandbox (alias for --image)")
@@ -1590,7 +1616,7 @@ type removeOptions struct {
 }
 
 func (r *Runner) remove(ctx context.Context, args []string) int {
-	opts, help, err := parseRemoveOptions(args)
+	opts, help, err := r.parseRemoveOptions(args)
 	if help {
 		return r.showCommandHelp(removeHelp())
 	}
@@ -1604,6 +1630,10 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 		r.error(err)
 		return 2
 	}
+	r.debug(ctx, debugEventLifecycle,
+		debugOperationField("remove"),
+		debugNumber("target_count", len(opts.targets)),
+		debugFormatField(opts.format))
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -1728,8 +1758,8 @@ func (r *Runner) renderRemoval(format string, removed []string) int {
 	return -1
 }
 
-func parseRemoveOptions(args []string) (removeOptions, bool, error) {
-	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
+func (r *Runner) parseRemoveOptions(args []string) (removeOptions, bool, error) {
+	fs := r.newFlagSet("rm")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "delete without confirmation and allow running sandboxes")
 	fs.BoolVar(force, "f", false, "delete without confirmation and allow running sandboxes")
@@ -1866,7 +1896,7 @@ Flags:
 }
 
 func (r *Runner) lifecycle(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet(stopCommand, flag.ContinueOnError)
+	fs := r.newFlagSet(stopCommand)
 	fs.SetOutput(io.Discard)
 	grace := fs.Duration("grace", 0, "grace period")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
@@ -1886,6 +1916,10 @@ func (r *Runner) lifecycle(ctx context.Context, args []string) int {
 		r.error(err)
 		return 2
 	}
+	r.debug(ctx, debugEventLifecycle,
+		debugOperationField("stop"),
+		debugNumber("target_count", fs.NArg()),
+		debugFormatField(selected))
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -1937,10 +1971,24 @@ func (r *Runner) runLifecycleTarget(ctx context.Context, client sdk.Client, targ
 }
 
 func (r *Runner) client() (sdk.Client, error) {
+	r.debug(context.Background(), debugEventClientConnect, debugTransportField(r.Socket))
+	var (
+		client sdk.Client
+		err    error
+	)
 	if r.NewClient == nil {
-		return sdk.New(sdk.Config{Address: r.Socket})
+		client, err = sdk.New(sdk.Config{Address: r.Socket})
+	} else {
+		client, err = r.NewClient(r.Socket)
 	}
-	return r.NewClient(r.Socket)
+	if err != nil {
+		r.debug(context.Background(), debugEventClientReady,
+			debugTransportField(r.Socket), debugResultField("error"))
+		return nil, err
+	}
+	r.debug(context.Background(), debugEventClientReady,
+		debugTransportField(r.Socket), debugResultField("ok"))
+	return client, nil
 }
 
 func (r *Runner) usage() {
@@ -1970,6 +2018,7 @@ Flags:
   -h, --help   help for rsbx
 
 Global Flags:
+  -D, --debug         Enable debug logging (structured events on stderr)
       --socket PATH   Local daemon endpoint
 
 Use "rsbx COMMAND --help" for more information about a command.

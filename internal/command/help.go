@@ -34,14 +34,16 @@ type commandHelp struct {
 	Footer            string
 }
 
-// globalHelpFlags is the global section shared by every command. The CLI only
-// implements --socket; cloud and debug flags from the reference do not exist.
+// globalHelpFlags is the global section shared by every command.
 func globalHelpFlags() []commandFlagHelp {
-	return []commandFlagHelp{{
-		Name:        "socket",
-		Value:       "PATH",
-		Description: "Local daemon endpoint",
-	}}
+	return []commandFlagHelp{
+		{Short: "D", Name: "debug", Description: "Enable debug logging (structured events on stderr)"},
+		{
+			Name:        "socket",
+			Value:       "PATH",
+			Description: "Local daemon endpoint",
+		},
+	}
 }
 
 // renderCommandHelp writes the reference help layout. Sections are separated by

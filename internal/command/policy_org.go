@@ -49,7 +49,7 @@ type orgPolicyOutput struct {
 // typed daemon failure and is reported as such.
 func (r *Runner) policyOrg(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet("policy org", flag.ContinueOnError)
+	fs := r.newFlagSet("policy org")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyOrgHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")

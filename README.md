@@ -66,6 +66,17 @@ declarations remain unsupported and fail closed.
 `env apply` and `env ls` are not Docker `sbx` commands; Rheic keeps the upstream
 `create` name for provisioning.
 
+## Debug output
+
+`-D`/`--debug` writes structured diagnostic events to stderr. It is accepted in
+the global prefix and after a subcommand where that command's grammar defines
+the flag; `--debug=false` disables it, and `--` keeps later arguments
+positional. Debug records use the released `github.com/rheic/slogx` logger with a
+closed event and attribute allowlist. Arguments, environment values, workspace
+paths, sandbox names, credentials, and raw error text are not logged. The flag
+does not change daemon log levels. Debug event coverage is not full parity with
+Docker `sbx`; only implemented events are emitted.
+
 ## Daemon lifecycle
 
 `rsbx daemon` mirrors the local `sbx daemon` grammar:

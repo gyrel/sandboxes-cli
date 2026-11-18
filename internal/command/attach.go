@@ -19,7 +19,7 @@ command is used unless --shell is set.
 
 // attach starts a stopped sandbox and opens an interactive agent session.
 func (r *Runner) attach(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
+	fs := r.newFlagSet("attach")
 	fs.SetOutput(io.Discard)
 	shell := fs.Bool("shell", false, "open /bin/sh instead of the agent command")
 	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {

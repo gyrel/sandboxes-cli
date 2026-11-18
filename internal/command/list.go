@@ -45,7 +45,7 @@ type sandboxOutput struct {
 }
 
 func (r *Runner) list(ctx context.Context, args []string) int {
-	opts, help, err := parseListOptions(args)
+	opts, help, err := r.parseListOptions(args)
 	if help {
 		return r.showCommandHelp(listHelp())
 	}
@@ -67,6 +67,12 @@ func (r *Runner) list(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
+	r.debug(ctx, debugEventListFetch,
+		debugNumber("count", len(items)),
+		debugOperationField("list"))
+	r.debug(ctx, debugEventListRender,
+		debugFormatField(opts.format),
+		debugBoolean("quiet", opts.quiet))
 	if opts.quiet {
 		for i := range items {
 			_, _ = fmt.Fprintln(r.Out, items[i].Name)
@@ -80,8 +86,8 @@ func (r *Runner) list(ctx context.Context, args []string) int {
 	return 0
 }
 
-func parseListOptions(args []string) (listOptions, bool, error) {
-	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
+func (r *Runner) parseListOptions(args []string) (listOptions, bool, error) {
+	fs := r.newFlagSet("ls")
 	fs.SetOutput(io.Discard)
 	limit := fs.Int("limit", 0, "maximum number of sandboxes to return (1-1000; default all)")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")

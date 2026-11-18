@@ -42,6 +42,10 @@ List local .yaml kit files in DIR (default: current directory).
 `
 
 func (r *Runner) kit(args []string) int {
+	args, code, done := r.prepareFamilyArgs(kitCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, kitUsage)
 		return 2
@@ -64,7 +68,7 @@ func (r *Runner) kitInspect(args []string) int {
 		return r.showCommandHelp(kitInspectHelp())
 	}
 	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
-	fs := flag.NewFlagSet("kit inspect", flag.ContinueOnError)
+	fs := r.newFlagSet("kit inspect")
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")

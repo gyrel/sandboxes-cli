@@ -38,7 +38,7 @@ func parseCopySpec(value string) (copySpec, bool) {
 }
 
 func (r *Runner) cp(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("cp", flag.ContinueOnError)
+	fs := r.newFlagSet("cp")
 	fs.SetOutput(io.Discard)
 	follow := fs.Bool("L", false, "follow a top-level source symbolic link")
 	fs.BoolVar(follow, "follow-link", false, "follow a top-level source symbolic link")

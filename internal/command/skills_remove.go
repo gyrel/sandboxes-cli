@@ -17,7 +17,7 @@ interactive terminal confirmation is required.
 `
 
 func (r *Runner) removeSkills(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("skills rm", flag.ContinueOnError)
+	fs := r.newFlagSet("skills rm")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "skip confirmation")
 	fs.BoolVar(force, "f", false, "skip confirmation")

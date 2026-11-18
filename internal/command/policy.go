@@ -128,6 +128,10 @@ Flags may appear before, between or after arguments; use -- to end flag parsing.
 
 //nolint:cyclop,gocyclo // one command dispatch switch with one case per subcommand.
 func (r *Runner) policy(ctx context.Context, args []string) int {
+	args, code, done := r.prepareFamilyArgs(policyCommand, args)
+	if done {
+		return code
+	}
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, policyUsage)
 		return 2
@@ -263,7 +267,7 @@ func (r *Runner) policyUnsupported(name, reason string) int {
 // global scope, which the local runtime does not implement.
 func (r *Runner) policyNetworkScope(cmdPath string, args []string) (sandboxName string, rest []string, code int) {
 	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true})
-	fs := flag.NewFlagSet(cmdPath, flag.ContinueOnError)
+	fs := r.newFlagSet(cmdPath)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&sandboxName, "sandbox", "", "scope the rule to one sandbox (global scope is not implemented locally)")
 	if err := fs.Parse(args); err != nil {
@@ -353,7 +357,7 @@ func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOption
 		"--sandbox": true, "--resource": true, "--id": true,
 		"--method": true, "--path": true, "--query": true,
 	})
-	fs := flag.NewFlagSet("policy rm network", flag.ContinueOnError)
+	fs := r.newFlagSet("policy rm network")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyMutateNetworkHelp("rm")) }
 	var opts policyRemoveOptions
@@ -637,7 +641,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 		return r.showCommandHelp(policyCheckNetworkHelp())
 	}
 	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, protocolFlag: true})
-	fs := flag.NewFlagSet("policy check network", flag.ContinueOnError)
+	fs := r.newFlagSet("policy check network")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyCheckNetworkHelp()) }
 	sandboxName := fs.String("sandbox", "", "scope the check to one sandbox")
@@ -994,7 +998,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		"--format": true, "--type": true, "--source": true, "--decision": true,
 		"--profile": true, "--created-via": true, "--protocol": true,
 	})
-	fs := flag.NewFlagSet("policy ls", flag.ContinueOnError)
+	fs := r.newFlagSet("policy ls")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyListHelp()) }
 	var opts policyListOptions
@@ -1369,7 +1373,7 @@ func filesystemRuleID(targetPath, access string) string {
 //nolint:gocyclo,cyclop,funlen // one command parses flags, selects the most specific workspace and reports.
 func (r *Runner) policyCheckFilesystem(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true})
-	fs := flag.NewFlagSet("policy check filesystem", flag.ContinueOnError)
+	fs := r.newFlagSet("policy check filesystem")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyCheckFilesystemHelp()) }
 	sandboxName := fs.String("sandbox", "", "scope the check to one sandbox")

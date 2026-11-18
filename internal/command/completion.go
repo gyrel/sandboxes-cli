@@ -25,7 +25,7 @@ var completionTree = map[string][]string{
 	"logout":          {"-f", forceFlag},
 	secretCommand:     {registryFlag, usernameFlag, passwordStdinFlag, allSandboxesFlag, allFlag, "--dry-run", sandboxFlag, oauthFlag, tokenFlag, "-t", forceFlag, "-f", refFlag, commandFlag, globalFlag, "-g", serviceFlag, "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	mcpCommand:        {commandFlag, mcpArgsFlagName, "--dir", formatFlag, jsonFlag, quietLongFlag, forceFlag, helpFlag, helpShort},
-	"version":         {formatFlag, jsonFlag},
+	versionCommand:    {formatFlag, jsonFlag, debugShortFlag, debugFlag},
 	commandAgents:     {formatFlag, jsonFlag},
 	daemonCommand:     {jsonFlag, helpShort, helpFlag},
 	envCommand:        {nameFlag, envArgFlag, envArgsFileFlag, "-f", forceFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, envShort, envFlag, envFileFlag, "-i", interactiveFlag, "-t", ttyFlag, "-u", userFlag, "-w", workdirFlag, helpShort, helpFlag},
@@ -67,6 +67,15 @@ func completionCommands() []string {
 }
 
 func (r *Runner) completion(args []string) int {
+	filtered, err := r.extractGlobalFlags(args, nil)
+	if err != nil {
+		if message, ok := r.takeDebugFlagError(); ok {
+			return r.commandError(completionCommand, message)
+		}
+		r.error(err)
+		return 2
+	}
+	args = filtered
 	if len(args) == 1 && (args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag) {
 		return r.showCommandHelp(completionHelp())
 	}
@@ -101,7 +110,7 @@ func completionScript(shell string) (string, error) {
 // completionTopLevelWords adds the global flags accepted before a command.
 func completionTopLevelWords() []string {
 	words := completionCommands()
-	return append(words, "--socket", helpFlag, helpShort)
+	return append(words, debugShortFlag, debugFlag, socketFlag, helpFlag, helpShort)
 }
 
 func bashCompletionScript() string {
@@ -181,6 +190,7 @@ compdef _rsbx rsbx
 func fishCompletionScript() string {
 	var b strings.Builder
 	b.WriteString("complete -c rsbx -f\n")
+	b.WriteString("complete -c rsbx -l debug -s D\n")
 	b.WriteString("complete -c rsbx -l socket -r\n")
 	b.WriteString("complete -c rsbx -l help -s h\n")
 	for _, name := range completionCommands() {
@@ -263,7 +273,7 @@ func flagsTakingValue(flags []string) []string {
 		"-w": true, workdirFlag: true, "-u": true, userFlag: true,
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
 		usernameFlag: true, registryFlag: true, sandboxFlag: true,
-		"--socket": true, envArgFlag: true, envArgsFileFlag: true, refreshFlag: true,
+		socketFlag: true, envArgFlag: true, envArgsFileFlag: true, refreshFlag: true,
 		serviceFlag: true, refFlag: true, commandFlag: true, tokenFlag: true,
 		detachKeysFlag: true,
 	}

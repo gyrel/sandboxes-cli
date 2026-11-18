@@ -20,7 +20,7 @@ an empty answer cancels; --force skips confirmation.
 //
 //nolint:gocognit,gocyclo,cyclop,funlen // reset combines confirmation and the same delete path as rm.
 func (r *Runner) reset(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
+	fs := r.newFlagSet("reset")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "remove all sandboxes without confirmation")
 	fs.BoolVar(force, "f", false, "remove all sandboxes without confirmation")

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -37,7 +36,7 @@ func (r *Runner) secretImportHelp() int {
 //nolint:gocognit,gocyclo,cyclop,funlen // interactive import intentionally handles each branch explicitly.
 func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, nil)
-	fs := flag.NewFlagSet("secret import", flag.ContinueOnError)
+	fs := r.newFlagSet("secret import")
 	fs.SetOutput(io.Discard)
 	all := fs.Bool("all", false, "import every detected variable without prompting")
 	force := fs.Bool("force", false, "overwrite existing secrets")

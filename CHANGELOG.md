@@ -12,6 +12,13 @@
 - `rsbx env exec` accepts the complete exec flag surface (`-d`, `--detach-keys`,
   `-e`, `--env-file`, `-i`, `-t`, `-u`, `-w`) in addition to `--name`,
   `--env-arg` and `--env-args-file`.
+- `policy ls` accepts the reference filters `--type`, `--source`, `--decision`,
+  `--created-via` and `--protocol`, plus `--wide` and `-q/--quiet`.
+  Table summaries are recomputed after filtering, quiet prints one rule ID per
+  line, and wide prints the rule-level table.
+- `policy rm network` accepts the reference selectors `--id` and `--resource`
+  (comma-separated), with `--force` for non-interactive removal. Selectors are
+  resolved before any mutation.
 
 ### Known limitation
 
@@ -20,6 +27,14 @@
   grants extended capabilities through containerd `oci.WithPrivileged`;
   supporting that requires an API/SDK/daemon/runtime dependency, so this CLI
   change fails closed rather than silently dropping the request.
+
+### Changed
+
+- Unsupported policy surfaces fail explicitly instead of being ignored:
+  `policy ls --type http`, `--profile`, `--include-inactive` and
+  `--created-via approval` report an error, as do `policy rm network
+  --method/--path/--query`. These features are not implemented by the local
+  policy model.
 
 ## v0.0.59 — 2026-11-18
 

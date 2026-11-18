@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,10 +73,15 @@ type policyListOutput struct {
 	Rules []policyRuleJSON `json:"rules" yaml:"rules"`
 }
 
-const policyListUsage = `usage: rsbx policy ls [SANDBOX] [--format table|json|yaml] [--json]
-
-List global and sandbox allow/deny rules.
-`
+const (
+	policyCreatedViaDefault     = "default"
+	policyCreatedViaAdded       = "added"
+	policyCreatedViaProvisioned = "provisioned"
+	policyCreatedViaApproval    = "approval"
+	policyApprovalCommand       = "approval"
+	policyProvenanceUser        = "user"
+	schemeHTTP                  = "http"
+)
 
 const policyCheckUsage = `usage: rsbx policy check SANDBOX IP PORT [PROTOCOL]
 
@@ -145,7 +152,7 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		return r.policyMutate(ctx, args[0], args[1:])
 	case "init":
 		return r.policyInit(ctx, args[1:])
-	case "profile":
+	case helpNameProfile:
 		return r.policyProfile(ctx, args[1:])
 	case orgScope:
 		return r.policyOrg(ctx, args[1:])
@@ -155,11 +162,11 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		return r.policyRefresh(ctx, args[1:])
 	case commandReset:
 		return r.policyReset(ctx, args[1:])
-	case "approval":
+	case policyApprovalCommand:
 		if hasFlag(args[1:], helpFlag) || hasFlag(args[1:], helpShort) {
 			return r.showCommandHelp(policyApprovalHelp())
 		}
-		return r.policyUnsupported("approval", "approval-gated operations are not implemented, so no approvals can be pending")
+		return r.policyUnsupported(policyApprovalCommand, "approval-gated operations are not implemented, so no approvals can be pending")
 	case helpCommand, helpShort, helpFlag:
 		return r.showCommandHelp(policyHelp())
 	default:
@@ -272,6 +279,9 @@ func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		return r.showCommandHelp(policyMutateNetworkHelp(action))
 	}
+	if action == "rm" {
+		return r.policyRemoveNetwork(ctx, args)
+	}
 	sandboxName, rest, code := r.policyNetworkScope("policy "+action+" network", args)
 	if code >= 0 {
 		return code
@@ -284,6 +294,311 @@ func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []
 		return r.policyMutateGlobal(ctx, action, rest[0])
 	}
 	return r.policyMutate(ctx, action, []string{sandboxName, rest[0]})
+}
+
+// policyRemoveNetwork implements the reference `policy rm network` selectors
+// that the local policy model can resolve: rule ID and resource. HTTP selectors
+// are rejected explicitly because this build has no HTTP policy rules.
+func (r *Runner) policyRemoveNetwork(ctx context.Context, args []string) int {
+	opts, positional, code := r.parsePolicyRemoveNetworkArgs(args)
+	if code != 0 {
+		return code
+	}
+	resources, err := splitPolicyResources(opts.resource)
+	if err != nil {
+		return r.policyRemoveError(err.Error())
+	}
+	if positional != "" {
+		rule, err := parseNetworkRule(positional)
+		if err != nil {
+			return r.policyRemoveError(err.Error())
+		}
+		resources = []sdk.NetworkRule{rule}
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	target, code := r.resolvePolicyRemovalTarget(ctx, client, opts.sandboxName)
+	if code != 0 {
+		return code
+	}
+	removals, err := resolvePolicyRemovals(target.scope, target.allow, target.deny, opts.id, resources)
+	if err != nil {
+		return r.policyRemoveError(err.Error())
+	}
+	confirmed, code := r.confirmPolicyRemovals(len(removals), opts.force)
+	if code != 0 {
+		return code
+	}
+	if !confirmed {
+		_, _ = fmt.Fprintln(r.Out, "Removal canceled")
+		return 0
+	}
+	return r.applyPolicyRemovals(ctx, client, target, removals)
+}
+
+type policyRemoveOptions struct {
+	sandboxName string
+	resource    string
+	id          string
+	force       bool
+}
+
+//nolint:gocyclo,cyclop // one parser mirrors the reference selector flags.
+func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOptions, string, int) {
+	args = reorderFlagArgs(args, map[string]bool{
+		"--sandbox": true, "--resource": true, "--id": true,
+		"--method": true, "--path": true, "--query": true,
+	})
+	fs := flag.NewFlagSet("policy rm network", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { r.showCommandHelp(policyMutateNetworkHelp("rm")) }
+	var opts policyRemoveOptions
+	var pathValue string
+	var methods, queries stringListFlag
+	var forceShort bool
+	fs.StringVar(&opts.sandboxName, "sandbox", "", "scope the removal to a specific sandbox")
+	fs.StringVar(&opts.resource, "resource", "", "remove by resource value(s), comma-separated")
+	fs.StringVar(&opts.id, "id", "", "remove by rule ID")
+	fs.StringVar(&pathValue, "path", "", "restrict the rule to this HTTP path glob (unsupported)")
+	fs.Var(&methods, "method", "restrict the rule to these HTTP methods (unsupported)")
+	fs.Var(&queries, "query", "require an HTTP query parameter (unsupported)")
+	fs.BoolVar(&opts.force, "force", false, "skip confirmation prompts")
+	fs.BoolVar(&forceShort, "f", false, "skip confirmation prompts")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return policyRemoveOptions{}, "", 0
+		}
+		return policyRemoveOptions{}, "", r.policyRemoveFlagError(err)
+	}
+	opts.force = opts.force || forceShort
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["method"] || set["path"] || set["query"] {
+		return policyRemoveOptions{}, "", r.policyRemoveError("HTTP method/path/query selectors are not supported: HTTP policy rules are not implemented")
+	}
+	if fs.NArg() > 1 {
+		return policyRemoveOptions{}, "", r.policyRemoveError(fmt.Sprintf("accepts at most 1 positional argument, received %d", fs.NArg()))
+	}
+	positional := ""
+	if fs.NArg() == 1 {
+		positional = fs.Arg(0)
+	}
+	if positional != "" && (opts.id != "" || opts.resource != "") {
+		return policyRemoveOptions{}, "", r.policyRemoveError("positional target cannot be combined with --id or --resource")
+	}
+	if opts.id != "" && opts.resource != "" {
+		return policyRemoveOptions{}, "", r.policyRemoveError("--id and --resource cannot be combined; pass one selector")
+	}
+	if positional == "" && opts.id == "" && opts.resource == "" {
+		return policyRemoveOptions{}, "", r.policyRemoveError("at least one selector is required: use --id or --resource")
+	}
+	return opts, positional, 0
+}
+
+type policyRemovalTarget struct {
+	scope     string
+	sandboxID string
+	allow     []sdk.NetworkRule
+	deny      []sdk.NetworkRule
+}
+
+func (r *Runner) resolvePolicyRemovalTarget(ctx context.Context, client sdk.Client, sandboxName string) (policyRemovalTarget, int) {
+	if sandboxName == "" {
+		allow, deny, err := globalPolicyForList(ctx, client)
+		if err != nil {
+			r.error(err)
+			return policyRemovalTarget{}, 1
+		}
+		return policyRemovalTarget{scope: policyGlobalScope, allow: allow, deny: deny}, 0
+	}
+	sandboxID, err := findExecSandbox(ctx, client, sandboxName)
+	if err != nil {
+		r.error(err)
+		return policyRemovalTarget{}, 1
+	}
+	sb, err := client.Sandboxes().Get(ctx, sandboxID)
+	if err != nil {
+		r.error(err)
+		return policyRemovalTarget{}, 1
+	}
+	return policyRemovalTarget{
+		scope: sandboxPrefix + ":" + sandboxName, sandboxID: sandboxID,
+		allow: sb.Allow, deny: sb.Deny,
+	}, 0
+}
+
+func (r *Runner) confirmPolicyRemovals(count int, force bool) (bool, int) {
+	if force {
+		return true, 0
+	}
+	if !r.stdinIsTerminal() {
+		return false, r.policyRemoveError("stdin is not a terminal; pass --force to skip the confirmation")
+	}
+	_, _ = fmt.Fprintf(r.Err, "Remove %d network rule(s) from policy local? [y/N] ", count)
+	answer, err := bufio.NewReader(r.In).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.error(err)
+		return false, 1
+	}
+	return affirmativeAnswer(answer), 0
+}
+
+func (r *Runner) applyPolicyRemovals(ctx context.Context, client sdk.Client, target policyRemovalTarget, removals []policyRemoval) int {
+	for i := range removals {
+		removal := removals[i]
+		var err error
+		if target.sandboxID == "" {
+			_, _, err = sdk.Policies(client).MutateGlobalPolicy(ctx, "rm", removal.Rule)
+		} else {
+			_, err = sdk.Policies(client).MutatePolicy(ctx, target.sandboxID, "rm", removal.Rule)
+		}
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if target.sandboxID == "" {
+			_, _ = fmt.Fprintf(r.Out, "Removed rule from policy local: id=%s\n", removal.ID)
+			continue
+		}
+		_, _ = fmt.Fprintf(r.Out, "Removed rule from policy local: id=%s (scope: %s)\n", removal.ID, target.scope)
+	}
+	return 0
+}
+
+func (r *Runner) policyRemoveError(message string) int {
+	_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: rsbx policy rm network --help\n", message)
+	return 1
+}
+
+func (r *Runner) policyRemoveFlagError(err error) int {
+	message := err.Error()
+	if name, ok := strings.CutPrefix(message, "flag provided but not defined: -"); ok {
+		message = "unknown flag: --" + name
+	}
+	return r.policyRemoveError(message)
+}
+
+type policyRemoval struct {
+	ID   string
+	Rule sdk.NetworkRule
+}
+
+func splitPolicyResources(value string) ([]sdk.NetworkRule, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]sdk.NetworkRule, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, errors.New("--resource contains an empty value")
+		}
+		rule, err := parseNetworkRule(part)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rule)
+	}
+	return out, nil
+}
+
+// resolvePolicyRemovals resolves selectors before any mutation so a partial
+// selector set never removes only some of the requested rules.
+func resolvePolicyRemovals(scope string, allow, deny []sdk.NetworkRule, ruleID string, resources []sdk.NetworkRule) ([]policyRemoval, error) {
+	candidates := make([]policyRemoval, 0, len(allow)+len(deny))
+	appendRules := func(action string, rules []sdk.NetworkRule) {
+		for i := range rules {
+			rule := rules[i]
+			candidates = append(candidates, policyRemoval{ID: policyRuleIDForRemoval(scope, action, rule), Rule: rule})
+		}
+	}
+	appendRules(actionAllow, allow)
+	appendRules(actionDeny, deny)
+	selected := make([]policyRemoval, 0, len(resources)+1)
+	seen := map[string]bool{}
+	add := func(removal policyRemoval) {
+		if seen[removal.ID] {
+			return
+		}
+		seen[removal.ID] = true
+		selected = append(selected, removal)
+	}
+	if ruleID != "" {
+		matched, err := policyRemovalByID(candidates, ruleID)
+		if err != nil {
+			return nil, err
+		}
+		add(matched)
+	}
+	for i := range resources {
+		matched, err := policyRemovalByResource(candidates, resources[i])
+		if err != nil {
+			return nil, err
+		}
+		for _, removal := range matched {
+			add(removal)
+		}
+	}
+	return selected, nil
+}
+
+func policyRemovalByID(candidates []policyRemoval, ruleID string) (policyRemoval, error) {
+	for i := range candidates {
+		if candidates[i].ID == ruleID || candidates[i].Rule.RuleID == ruleID {
+			return candidates[i], nil
+		}
+	}
+	return policyRemoval{}, fmt.Errorf("remove network rule: rule %q not found; use \"rsbx policy ls --wide\" to find rule IDs", ruleID)
+}
+
+func policyRemovalByResource(candidates []policyRemoval, resource sdk.NetworkRule) ([]policyRemoval, error) {
+	matched := make([]policyRemoval, 0, 1)
+	for i := range candidates {
+		if networkRuleMatches(candidates[i].Rule, resource) {
+			matched = append(matched, candidates[i])
+		}
+	}
+	if len(matched) == 0 {
+		return nil, fmt.Errorf("remove network rule: no rule matches resource %q; use \"rsbx policy ls --wide\" to find rule IDs", policyRemovalResource(resource))
+	}
+	return matched, nil
+}
+
+func policyRuleIDForRemoval(scope, action string, rule sdk.NetworkRule) string {
+	return policyRuleJSONFrom(policyRuleOutput{
+		RuleID: rule.RuleID, Scope: scope, ResourceType: policyNetworkType, Action: action,
+		Provenance: policyProvenanceUser, Origin: originLocal, Protocol: rule.Protocol,
+		CIDR: rule.CIDR, Domain: rule.Domain, Port: rule.Port,
+	}).ID
+}
+
+func networkRuleMatches(stored, target sdk.NetworkRule) bool {
+	storedProtocol := stored.Protocol
+	if storedProtocol == "" {
+		storedProtocol = tcpProtocol
+	}
+	targetProtocol := target.Protocol
+	if targetProtocol == "" {
+		targetProtocol = tcpProtocol
+	}
+	return storedProtocol == targetProtocol && stored.CIDR == target.CIDR &&
+		stored.Domain == target.Domain && stored.Port == target.Port
+}
+
+func policyRemovalResource(rule sdk.NetworkRule) string {
+	target := rule.Domain
+	if target == "" {
+		target = rule.CIDR
+	}
+	if rule.Port != 0 {
+		return target + ":" + strconv.FormatUint(uint64(rule.Port), 10)
+	}
+	return target
 }
 
 func globalPolicyForList(ctx context.Context, client sdk.Client) ([]sdk.NetworkRule, []sdk.NetworkRule, error) {
@@ -511,7 +826,7 @@ func parsePolicyNameTarget(target string) (string, uint16, error) {
 			port = uint16(value)
 		case parsed.Scheme == schemeHTTPS:
 			port = 443
-		case parsed.Scheme == "http":
+		case parsed.Scheme == schemeHTTP:
 			port = 80
 		default:
 			return "", 0, fmt.Errorf("URL scheme %q requires an explicit port", parsed.Scheme)
@@ -567,33 +882,153 @@ func parseURLPolicyTarget(target string) (net.IP, uint16, error) {
 	if parsed.Scheme == "https" {
 		return net.ParseIP(host), 443, nil
 	}
-	if parsed.Scheme == "http" {
+	if parsed.Scheme == schemeHTTP {
 		return net.ParseIP(host), 80, nil
 	}
 	return nil, 0, fmt.Errorf("URL scheme %q requires an explicit port", parsed.Scheme)
 }
 
+// policyListOptions is the local subset of the Docker sbx `policy ls` filter
+// surface. Governance-only fields are rejected explicitly instead of being
+// silently ignored.
+type policyListOptions struct {
+	resourceType    string
+	source          string
+	decision        string
+	createdVia      string
+	protocol        string
+	profile         string
+	format          string
+	wide            bool
+	quiet           bool
+	includeInactive bool
+	json            bool
+}
+
+func (o policyListOptions) hasFilters() bool {
+	return o.resourceType != policyTypeAll || o.source != "" || o.decision != "" ||
+		o.createdVia != "" || o.protocol != ""
+}
+
+func (o policyListOptions) filterRules(rules []policyRuleJSON) []policyRuleJSON {
+	out := make([]policyRuleJSON, 0, len(rules))
+	for i := range rules {
+		if o.matches(&rules[i]) {
+			out = append(out, rules[i])
+		}
+	}
+	return out
+}
+
+func (o policyListOptions) matches(rule *policyRuleJSON) bool {
+	switch o.resourceType {
+	case "", policyTypeAll:
+	case policyNetworkType:
+		if rule.ResourceType != policyNetworkType {
+			return false
+		}
+	case filesystemKeyword:
+		if !strings.HasPrefix(rule.ResourceType, filesystemKeyword+":") {
+			return false
+		}
+	}
+	if o.source != "" && policyRuleSource(rule) != o.source {
+		return false
+	}
+	if o.decision != "" && rule.Decision != o.decision {
+		return false
+	}
+	if o.createdVia != "" && rule.Provenance.CreatedVia != o.createdVia {
+		return false
+	}
+	if o.protocol != "" && !slices.Contains(policyRuleProtocols(rule), o.protocol) {
+		return false
+	}
+	return true
+}
+
+const (
+	policyTypeAll = "all"
+)
+
+// policyRuleSource classifies a rule the way `sbx policy ls` prints SOURCE.
+// A scoped local rule is still a local rule; organization rules are read-only
+// and kit-provisioned network rules are the only local rules with a kit source.
+func policyRuleSource(rule *policyRuleJSON) string {
+	if rule.Origin == orgScope {
+		return orgScope
+	}
+	if rule.ResourceType == policyNetworkType && rule.Provenance.CreatedVia == policyCreatedViaProvisioned &&
+		rule.Provenance.Source == "sandboxes" {
+		return kitCommand
+	}
+	return originLocal
+}
+
+func policyRuleProtocols(rule *policyRuleJSON) []string {
+	protocols := make([]string, 0, len(rule.Actions))
+	for _, action := range rule.Actions {
+		if protocol, ok := strings.CutPrefix(action, policyNetworkActionPrefix); ok {
+			protocols = append(protocols, protocol)
+		}
+	}
+	return protocols
+}
+
+func (r *Runner) policyListError(message string) int {
+	_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: rsbx policy ls --help\n", message)
+	return 1
+}
+
+func (r *Runner) policyListFlagError(err error) int {
+	message := err.Error()
+	if name, ok := strings.CutPrefix(message, "flag provided but not defined: -"); ok {
+		message = "unknown flag: --" + name
+	}
+	return r.policyListError(message)
+}
+
+//nolint:funlen // flag parsing and validation mirror the reference contract.
 func (r *Runner) policyList(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
+	args = reorderFlagArgs(args, map[string]bool{
+		"--format": true, "--type": true, "--source": true, "--decision": true,
+		"--profile": true, "--created-via": true, "--protocol": true,
+	})
 	fs := flag.NewFlagSet("policy ls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyListHelp()) }
-	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
-	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	var opts policyListOptions
+	var quietShort bool
+	fs.StringVar(&opts.format, "format", listFormatTable, "output format: table, json or yaml")
+	fs.BoolVar(&opts.json, "json", false, "output in JSON format")
+	fs.StringVar(&opts.resourceType, "type", policyTypeAll, "filter policies by type: all, network or filesystem")
+	fs.StringVar(&opts.source, "source", "", "filter policies by source: local, org or kit")
+	fs.StringVar(&opts.decision, "decision", "", "filter policies by decision: allow or deny")
+	fs.StringVar(&opts.createdVia, "created-via", "", "filter policies by creation method: default, added or provisioned")
+	fs.StringVar(&opts.protocol, "protocol", "", "filter network rules by protocol: tcp or udp")
+	fs.StringVar(&opts.profile, "profile", "", "filter policies by governance profile (unsupported)")
+	fs.BoolVar(&opts.wide, "wide", false, "show detailed rule-level output with rule IDs and resources")
+	fs.BoolVar(&opts.quiet, "quiet", false, "only display rule IDs")
+	fs.BoolVar(&quietShort, "q", false, "only display rule IDs")
+	fs.BoolVar(&opts.includeInactive, "include-inactive", false, "show inactive policy rules hidden by remote governance (unsupported)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		return r.flagParseFailure("policy ls", err)
+		return r.policyListFlagError(err)
 	}
+	opts.quiet = opts.quiet || quietShort
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if fs.NArg() > 1 {
-		_, _ = fmt.Fprint(r.Err, policyListUsage)
-		return 2
+		return r.policyListError(fmt.Sprintf("accepts at most 1 arg(s), received %d", fs.NArg()))
 	}
-	selected, err := resolveOperationFormat(*format, *jsonOutput)
+	if err := validatePolicyListOptions(opts, set); err != nil {
+		return r.policyListError(err.Error())
+	}
+	selected, err := resolveOperationFormat(opts.format, opts.json)
 	if err != nil {
-		r.error(err)
-		return 2
+		return r.policyListError(err.Error())
 	}
 	client, err := r.client()
 	if err != nil {
@@ -627,11 +1062,140 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 			list.Rules = append(defaultGlobalPolicyRules(), list.Rules...)
 		}
 	}
-	if err := renderPolicyRules(r.Out, selected, list); err != nil {
+	list.Rules = opts.filterRules(list.Rules)
+	return r.renderPolicyListOutput(selected, opts, list)
+}
+
+func (r *Runner) renderPolicyListOutput(selected string, opts policyListOptions, list policyListOutput) int {
+	if opts.quiet {
+		renderPolicyQuiet(r.Out, list)
+		return 0
+	}
+	emptyMessage := policyEmptyMessage(opts)
+	if selected == listFormatTable && opts.wide {
+		if err := renderPolicyWideTable(r.Out, list, emptyMessage); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
+	}
+	if err := renderPolicyRules(r.Out, selected, list, emptyMessage); err != nil {
 		r.error(err)
 		return 1
 	}
 	return 0
+}
+
+func validatePolicyListOptions(opts policyListOptions, set map[string]bool) error {
+	if err := validatePolicyListOutputOptions(opts, set); err != nil {
+		return err
+	}
+	return validatePolicyListFilters(opts)
+}
+
+func validatePolicyListOutputOptions(opts policyListOptions, set map[string]bool) error {
+	if opts.profile != "" || set["profile"] {
+		return errors.New("--profile requires remote governance, which is not implemented")
+	}
+	if opts.includeInactive {
+		return errors.New("--include-inactive requires remote governance, which is not implemented")
+	}
+	if opts.quiet && (opts.wide || opts.json || set["format"]) {
+		return errors.New("--quiet cannot be combined with --wide, --json or --format")
+	}
+	if opts.json && set["format"] {
+		return errors.New("--json cannot be combined with --format")
+	}
+	return nil
+}
+
+func validatePolicyListFilters(opts policyListOptions) error {
+	switch opts.resourceType {
+	case policyTypeAll, policyNetworkType, filesystemKeyword:
+	case schemeHTTP:
+		return errors.New("--type http is not supported: HTTP policy rules are not implemented")
+	default:
+		return fmt.Errorf("invalid type %q: must be one of: all, network, filesystem", opts.resourceType)
+	}
+	switch opts.source {
+	case "", originLocal, orgScope, kitCommand:
+	default:
+		return fmt.Errorf("invalid source %q: must be one of: local, org, kit", opts.source)
+	}
+	switch opts.decision {
+	case "", actionAllow, actionDeny:
+	default:
+		return fmt.Errorf("invalid decision %q: must be one of: allow, deny", opts.decision)
+	}
+	switch opts.createdVia {
+	case "", policyCreatedViaDefault, policyCreatedViaAdded, policyCreatedViaProvisioned:
+	case policyCreatedViaApproval:
+		return errors.New("--created-via approval is not supported: approval-gated policies are not implemented")
+	default:
+		return fmt.Errorf("invalid creation method %q: must be one of: default, added, provisioned, approval", opts.createdVia)
+	}
+	switch opts.protocol {
+	case "":
+	case tcpProtocol, udpProtocol:
+		if opts.resourceType == filesystemKeyword {
+			return errors.New("--protocol is only compatible with --type all or --type network")
+		}
+	default:
+		return fmt.Errorf("invalid protocol %q: must be tcp or udp", opts.protocol)
+	}
+	return nil
+}
+
+func policyEmptyMessage(opts policyListOptions) string {
+	if !opts.hasFilters() {
+		return "No policy rules (default deny)"
+	}
+	if opts.protocol != "" {
+		return "No network policy rules match the selected filters; network access is denied unless allowed by an applicable policy"
+	}
+	return "No policies match the selected filters"
+}
+
+func renderPolicyQuiet(out io.Writer, list policyListOutput) {
+	for i := range list.Rules {
+		_, _ = fmt.Fprintln(out, list.Rules[i].ID)
+	}
+}
+
+// renderPolicyWideTable mirrors the reference wide rule table. METHOD and PATH
+// stay "-" because HTTP policy rules are rejected by this build.
+func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage string) error {
+	if len(list.Rules) == 0 {
+		_, err := fmt.Fprintln(out, emptyMessage)
+		return err
+	}
+	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "SOURCE\tCREATED VIA\tAPPLIES TO\tPOLICY\tPOLICY_ID\tRULE\tRULE_ID\tTYPE\tMETHOD\tPATH\tDECISION\tPROTOCOLS\tRESOURCES")
+	for i := range list.Rules {
+		rule := list.Rules[i]
+		name := rule.Name
+		if name == "" || name == rule.ID {
+			name = "-"
+		}
+		protocols := "-"
+		if values := policyRuleProtocols(&rule); len(values) > 0 {
+			protocols = strings.Join(values, ",")
+		}
+		resources := rule.Resources
+		if len(resources) == 0 {
+			resources = []string{"-"}
+		}
+		for j, resource := range resources {
+			if j == 0 {
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t-\t-\t%s\t%s\t%s\n",
+					policyRuleSource(&rule), rule.Provenance.CreatedVia, rule.AppliesTo, rule.PolicyID,
+					name, rule.ID, rule.ResourceType, rule.Decision, protocols, resource)
+				continue
+			}
+			_, _ = fmt.Fprintf(tw, "\t\t\t\t\t\t\t\t\t\t\t\t%s\n", resource)
+		}
+	}
+	return tw.Flush()
 }
 
 func (r *Runner) policyInit(ctx context.Context, args []string) int {
@@ -882,7 +1446,7 @@ func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOu
 				protocol = tcpProtocol
 			}
 			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, SandboxID: sandboxID, Scope: scope, ResourceType: networkKeyword,
-				Action: action, Provenance: "user", Origin: originLocal, Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
+				Action: action, Provenance: policyProvenanceUser, Origin: originLocal, Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
 		}
 	}
 	appendRules("allow", allow)
@@ -910,7 +1474,7 @@ func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
 		origin = originLocal
 	}
 	editable := false
-	provenance := policyProvenanceOutput{CreatedVia: "added"}
+	provenance := policyProvenanceOutput{CreatedVia: policyCreatedViaAdded}
 	switch rule.ResourceType {
 	case filesystemKeyword:
 		resourceType = "filesystem:" + rule.Access
@@ -924,7 +1488,7 @@ func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
 			}
 			actions = append(actions, "fs:mount:write")
 		}
-		provenance = policyProvenanceOutput{CreatedVia: "provisioned", Source: "sandboxes"}
+		provenance = policyProvenanceOutput{CreatedVia: policyCreatedViaProvisioned, Source: "sandboxes"}
 	default:
 		protocol := rule.Protocol
 		if protocol == "" {
@@ -934,7 +1498,7 @@ func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
 		resources = append(resources, rule.NetworkResource())
 		editable = rule.Origin != orgScope
 		if rule.Origin == orgScope {
-			provenance = policyProvenanceOutput{CreatedVia: "added", Source: orgScope}
+			provenance = policyProvenanceOutput{CreatedVia: policyCreatedViaAdded, Source: orgScope}
 		}
 	}
 	if strings.HasPrefix(scope, sandboxPrefix+":") {
@@ -1019,7 +1583,7 @@ func defaultGlobalPolicyRules() []policyRuleJSON {
 			Scope: policyGlobalScope, AppliesTo: "all", ResourceType: resourceType,
 			Decision: actionAllow, Resources: []string{"**"}, Origin: originLocal,
 			Layer: originLocal, Status: "active", Editable: editable,
-			Provenance: policyProvenanceOutput{CreatedVia: "default"}, Actions: actions,
+			Provenance: policyProvenanceOutput{CreatedVia: policyCreatedViaDefault}, Actions: actions,
 		}
 	}
 	return []policyRuleJSON{
@@ -1038,9 +1602,9 @@ func policyRulesOutput(rules []policyRuleOutput) policyListOutput {
 }
 
 // renderPolicyRules renders the reference table or machine output for a list.
-func renderPolicyRules(out io.Writer, format string, list policyListOutput) error {
+func renderPolicyRules(out io.Writer, format string, list policyListOutput, emptyMessage string) error {
 	if format == listFormatTable {
-		return renderPolicyTable(out, list)
+		return renderPolicyTable(out, list, emptyMessage)
 	}
 	if len(list.Rules) == 0 {
 		list.Rules = []policyRuleJSON{}
@@ -1062,9 +1626,9 @@ func renderPolicyRules(out io.Writer, format string, list policyListOutput) erro
 
 // renderPolicyTable groups rules the way the reference client does: one row per
 // policy with a summary of its allow/deny counts per resource type.
-func renderPolicyTable(out io.Writer, list policyListOutput) error {
+func renderPolicyTable(out io.Writer, list policyListOutput, emptyMessage string) error {
 	if len(list.Rules) == 0 {
-		_, err := fmt.Fprintln(out, "No policy rules (default deny)")
+		_, err := fmt.Fprintln(out, emptyMessage)
 		return err
 	}
 	type policyRow struct {
@@ -1080,7 +1644,7 @@ func renderPolicyTable(out io.Writer, list policyListOutput) error {
 		key := rule.PolicyID + "\x00" + rule.Origin + "\x00" + rule.AppliesTo
 		row, ok := index[key]
 		if !ok {
-			row = &policyRow{source: rule.Origin, appliesTo: rule.AppliesTo, counts: map[string]map[string]int{}}
+			row = &policyRow{source: policyRuleSource(rule), appliesTo: rule.AppliesTo, counts: map[string]map[string]int{}}
 			index[key] = row
 			rows = append(rows, row)
 			keys = append(keys, key)
@@ -1220,7 +1784,10 @@ const filesystemKeyword = "filesystem"
 const policyUsage = `Usage: rsbx policy COMMAND
 
 Commands:
-  ls [SANDBOX] [--format table|json|yaml] list global and sandbox allow/deny rules
+  ls [SANDBOX] [--type all|network|filesystem] [--source local|org|kit]
+     [--decision allow|deny] [--created-via default|added|provisioned]
+     [--protocol tcp|udp] [--wide|-q] [--format table|json|yaml] [--json]
+                                          list global and sandbox allow/deny rules
                                           JSON/YAML emit sbx's {"rules":[...]} with
                                           id, name, policy_id, scope, applies_to,
                                           resource_type, decision, resources,
@@ -1234,9 +1801,13 @@ Commands:
   allow SANDBOX CIDR[:PORT]               add an allow rule (legacy local grammar)
   deny SANDBOX CIDR[:PORT]                add a deny rule (legacy local grammar)
   rm SANDBOX CIDR[:PORT]                  remove an allow or deny rule
-  allow|deny|rm network [--sandbox NAME] RESOURCES
+  allow|deny network [--sandbox NAME] RESOURCES
                                           Docker sbx grammar; omit --sandbox for
                                           global rules
+  rm network [--sandbox NAME] (--id ID | --resource RESOURCES | TARGET) [--force]
+                                          remove local network rules by stable
+                                          rule ID or resource; L7 selectors are
+                                          rejected
   check SANDBOX IP PORT [PROTOCOL]        evaluate a request against stored rules
   check network [--sandbox NAME] [--protocol tcp|udp] [--format table|json|yaml] [--json] TARGET
                                           evaluate IPv4[:PORT], IPv6[:PORT], domain or URL

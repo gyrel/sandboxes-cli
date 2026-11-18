@@ -213,19 +213,31 @@ prefix) add create-time IPv4 egress rules.
 preset (balanced: 80/443 + DNS; allow-all and its sbx-compat alias: all IPv4
 network); the global default is `allow-all`, matching the Docker sbx baseline,
 and settings can change it. `rsbx policy ls [SANDBOX]` lists global
-and sandbox rules. `--format json|yaml` emits Docker `sbx`'s
+and sandbox rules. It filters by `--type network|filesystem`,
+`--source local|org|kit`, `--decision allow|deny`,
+`--created-via default|added|provisioned` and `--protocol tcp|udp`; `--wide`
+shows rule-level rows with `RULE_ID` and resources, and `-q/--quiet` prints
+only rule IDs. `--json` and `--format json|yaml` emit Docker `sbx`'s
 `{"rules":[...]}` schema with rule id, name, policy id, scope, applies-to,
 resource type, decision, resources, origin, status, provenance and actions;
 when the daemon has an organization bundle loaded, its rules are appended with
-origin `org`. `rsbx policy org [--format table|json|yaml]` shows the
-effective organization policy: organization, bundle schema version and
+origin `org`. Filtering by HTTP policy (`--type http`), governance
+`--profile`/`--include-inactive`, or `--created-via approval` is rejected
+explicitly instead of being silently ignored.
+`rsbx policy org [--format table|json|yaml]` shows the effective organization
+policy: organization, bundle schema version and
 revision, payload fingerprint, enforcement state, load/expiry times, and every
 network rule marked `enforced` or `advisory`. A missing bundle prints an empty
 state. The command never returns signatures, tokens or other secret material.
-`policy allow|deny|rm network [--sandbox NAME] TARGET` accepts an IPv4 CIDR or
+`policy allow|deny network [--sandbox NAME] TARGET` accepts an IPv4 CIDR or
 a domain (`example.com`, `*.example.com`, `**.example.com`, single-label
 `?`/`[]` globs), with an optional `:PORT`; deny wins across scopes and global
-changes are applied live to running sandboxes. Domain rules require a DNS
+changes are applied live to running sandboxes. `policy rm network` accepts the
+same positional target for compatibility and also supports the reference
+selectors `--id RULE_ID` and `--resource RESOURCE[,RESOURCE...]`, with
+`--force` for non-interactive removal; all selectors are resolved before any
+rule is removed. HTTP `--method`/`--path`/`--query` selectors are rejected
+explicitly until HTTP policy rules are implemented. Domain rules require a DNS
 upstream and resolve only allowlisted names; a domain rule is enforced after a
 DNS answer is bound to its IPs. `policy check network` evaluates CIDR or domain
 targets (exit 0 allow, 1 deny). `check network --json|--format yaml` emits

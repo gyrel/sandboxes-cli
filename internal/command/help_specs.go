@@ -805,12 +805,39 @@ func policyHelp() commandHelp {
 
 func policyListHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"List global and sandbox allow/deny rules."},
-		Usage:       []string{"rsbx policy ls [SANDBOX] [flags]"},
+		Description: []string{
+			"List global and sandbox allow/deny rules.",
+			"",
+			"Without SANDBOX, the command shows one overview row per policy. With",
+			"SANDBOX, it summarizes active rules that apply to that sandbox.",
+			"",
+			"Use --wide to show detailed rule-level rows with RULE_ID and resources.",
+			"Use --quiet to print only rule IDs. --quiet cannot be combined with",
+			"--wide, --json or --format.",
+		},
+		Usage: []string{"rsbx policy ls [SANDBOX] [flags]"},
+		Examples: []string{
+			"rsbx policy ls",
+			"rsbx policy ls my-sandbox",
+			"rsbx policy ls --wide",
+			"rsbx policy ls --json",
+			"rsbx policy ls -q",
+			"rsbx policy ls --type network",
+			"rsbx policy ls --source local --decision deny",
+		},
 		Flags: []commandFlagHelp{
+			{Name: "created-via", Value: helpValueString, Description: "filter policies by creation method: default, added or provisioned"},
+			{Name: "decision", Value: helpValueString, Description: "filter policies by decision: allow or deny"},
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
 			{Short: "h", Name: helpCommand, Description: "help for policy ls"},
+			{Name: "include-inactive", Description: "show inactive rules hidden by remote governance (unsupported)"},
 			{Name: listFormatJSON, Description: helpJSONLowerDescription},
+			{Name: helpNameProfile, Value: helpValueString, Description: "filter policies by governance profile (unsupported)"},
+			{Name: "protocol", Value: helpValueString, Description: "filter network rules by protocol: tcp or udp"},
+			{Short: "q", Name: "quiet", Description: "only display rule IDs"},
+			{Name: "source", Value: helpValueString, Description: "filter policies by source: local, org or kit"},
+			{Name: "type", Value: helpValueString, Description: "filter policies by type: all, network or filesystem"},
+			{Name: "wide", Description: "show detailed rule-level output with rule IDs and resources"},
 		},
 	}
 }
@@ -895,6 +922,9 @@ func policyMutateHelp(action string) commandHelp {
 }
 
 func policyMutateNetworkHelp(action string) commandHelp {
+	if action == "rm" {
+		return policyRemoveNetworkHelp()
+	}
 	return commandHelp{
 		Description: []string{
 			"Add or remove a network policy rule.",
@@ -904,6 +934,39 @@ func policyMutateNetworkHelp(action string) commandHelp {
 		Flags: []commandFlagHelp{
 			{Short: "h", Name: helpCommand, Description: "help for policy " + action + " network"},
 			{Name: helpNameSandbox, Value: helpValueString, Description: "scope the rule to one sandbox (global scope when omitted)"},
+		},
+	}
+}
+
+func policyRemoveNetworkHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			"Remove a network rule by rule ID, resource, or a positional target.",
+			"",
+			"--id takes the RULE_ID value shown by \"rsbx policy ls --wide\".",
+			"--resource accepts one or more comma-separated resource values. The",
+			"command resolves every selector before removing anything.",
+			"Pass only one of --id, --resource, or a positional target.",
+			"",
+			"HTTP method/path/query selectors are rejected explicitly because HTTP",
+			"policy rules are not implemented in this build.",
+		},
+		Usage: []string{"rsbx policy rm network [--sandbox SANDBOX] [flags]"},
+		Examples: []string{
+			"rsbx policy ls --wide",
+			"rsbx policy rm network --resource api.example.com:443",
+			"rsbx policy rm network --id rul_1234abcd",
+			"rsbx policy rm network --sandbox my-sandbox --resource api.example.com",
+		},
+		Flags: []commandFlagHelp{
+			{Short: "f", Name: helpNameForce, Description: "skip confirmation prompts"},
+			{Short: "h", Name: helpCommand, Description: "help for policy rm network"},
+			{Name: "id", Value: helpValueString, Description: "remove by rule ID"},
+			{Name: "method", Value: "strings", Description: "HTTP methods (unsupported; rejected)"},
+			{Name: "path", Value: helpValueString, Description: "HTTP path glob (unsupported; rejected)"},
+			{Name: "query", Value: "stringArray", Description: "HTTP query parameter (unsupported; rejected)"},
+			{Name: "resource", Value: helpValueString, Description: "remove by resource value(s), comma-separated"},
+			{Name: helpNameSandbox, Value: helpValueString, Description: "scope the removal to a specific sandbox"},
 		},
 	}
 }

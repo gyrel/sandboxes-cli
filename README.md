@@ -218,6 +218,25 @@ may be repeated when creating, with loopback `HOST_IP` limited to `127.0.0.1` an
 lists the stored bindings; `ports --publish ...` / `--unpublish ...` change them
 live; omitting `HOST_PORT` allocates an ephemeral host port on the selected
 loopback IP.
+Custom agents are loaded from `~/.config/rheic/agents.yaml` (honoring
+`XDG_CONFIG_HOME`, or `RHEIC_AGENTS_FILE`). A custom entry cannot shadow a
+built-in name; `preview` entries may use a mutable tag, while `available`
+entries must pin `@sha256:`. The file must be a regular, non-group/world-writable
+file. Example:
+
+```yaml
+agents:
+  - name: hermes
+    image: rheic/hermes-sandbox:local
+    command: ["hermes"]
+    status: preview
+    notes: local custom image
+```
+
+`rsbx agents ls` lists custom agents alongside built-ins, and `rsbx run hermes`
+resolves the configured image and command. Custom images are host-owned input;
+Rheic does not build or authenticate them.
+
 `--allow-network CIDR[:PORT]` and `--deny-network CIDR[:PORT]` (optional `udp:`
 prefix) add create-time IPv4 egress rules.
 `--policy-profile allow-all|balanced|deny-all|sbx-compat` selects an egress

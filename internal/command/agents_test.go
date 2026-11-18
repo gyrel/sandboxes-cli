@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -206,5 +208,32 @@ func TestPrivilegedPlumbing(t *testing.T) {
 	}
 	if !sandbox.request.Privileged {
 		t.Fatal("create did not pass privileged")
+	}
+}
+
+func TestCustomAgentResolvesInCommands(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents.yaml")
+	if err := os.WriteFile(path, []byte(`agents:
+  - name: hermes
+    image: rheic/hermes-sandbox:local
+    command: ["hermes", "chat"]
+    status: preview
+    default_ports: ["8080/tcp4"]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RHEIC_AGENTS_FILE", path)
+
+	if got := agentImage("hermes"); got != "rheic/hermes-sandbox:local" {
+		t.Fatalf("agentImage = %q", got)
+	}
+	if got := agentCommandArgs("hermes"); len(got) != 2 || got[0] != "hermes" || got[1] != "chat" {
+		t.Fatalf("agentCommandArgs = %v", got)
+	}
+	if err := validateRunAgent("hermes"); err != nil {
+		t.Fatalf("custom agent rejected: %v", err)
+	}
+	if got := agentDefaultPorts("hermes"); len(got) != 1 || got[0] != "8080/tcp4" {
+		t.Fatalf("agentDefaultPorts = %v", got)
 	}
 }

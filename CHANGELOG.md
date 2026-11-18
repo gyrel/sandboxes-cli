@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Host-configured custom agents in `~/.config/rheic/agents.yaml` (or
+  `RHEIC_AGENTS_FILE`). Custom entries merge with the built-in registry, cannot
+  shadow built-in names, and are validated as regular, non-group/world-writable
+  files. `preview` entries may use a mutable tag; `available` entries require a
+  `@sha256:` digest. `rsbx agents ls`, `create` and `run` resolve them.
+
 ## v0.0.61 — 2026-11-18
 
 ### Added

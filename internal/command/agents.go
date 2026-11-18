@@ -2,15 +2,12 @@ package command
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/rheic/sandboxes-cli/internal/agent"
 )
 
-var loadAgentRegistry = sync.OnceValues(agent.Load)
-
 func agentRegistry() (*agent.Registry, error) {
-	return loadAgentRegistry()
+	return agent.LoadWithCustom()
 }
 
 func agentImage(name string) string {

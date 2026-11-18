@@ -14,7 +14,7 @@ import (
 
 const agentsUsage = `usage: rsbx agents [ls|list] [--format table|json|yaml]
 
-List built-in agents and their image, launch command, status, and authentication notes.
+List built-in and host-configured custom agents with image, launch command, status, and authentication notes.
 Preview agents can be launched, but have not passed full live-VM and authentication validation.
 `
 

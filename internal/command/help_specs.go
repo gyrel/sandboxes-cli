@@ -112,7 +112,7 @@ func createHelp() commandHelp {
 		Description: []string{
 			"Create a sandbox with access to a host workspace for an agent.",
 			"",
-			"The first positional argument is a built-in agent name. Omit the path to create a",
+			"The first positional argument is a registered agent name (built-in or custom). Omit the path to create a",
 			"sandbox without a workspace bind mount: the agent then works in the container's",
 			"own filesystem instead of on your files. Use \"rsbx run --name SANDBOX\" to attach",
 			"to the agent after creation.",

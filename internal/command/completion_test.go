@@ -89,6 +89,19 @@ func TestCompletionCoversTopLevelCommandSurface(t *testing.T) {
 	}
 }
 
+func TestExecFlagsAreInCompletionTree(t *testing.T) {
+	for _, expected := range []string{"--interactive", "-i", "--tty", "-t", "--workdir", "-w", "--env", "-e", "--env-file", "--user", "-u", "--detach", "-d", "--detach-keys", "--privileged"} {
+		if !slices.Contains(completionTree[commandExec], expected) {
+			t.Errorf("exec %s flag is missing from completion tree", expected)
+		}
+	}
+	for _, expected := range []string{"--detach-keys", "--privileged"} {
+		if !slices.Contains(completionTree[envCommand], expected) {
+			t.Errorf("env %s flag is missing from completion tree", expected)
+		}
+	}
+}
+
 func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
 	for _, expected := range []string{"--oauth", "--token", "-t", "--force", "-f", "--all", "--all-sandboxes", "--dry-run", "--sandbox", "--registry", "--global", "--quiet", "--service"} {
 		if !slices.Contains(completionTree[secretCommand], expected) {

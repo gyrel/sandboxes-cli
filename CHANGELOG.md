@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `rsbx exec` accepts the reference `--detach-keys` flag. The reference applies
+  it only to an interactive cloud exec; local exec has no detach sequence, so
+  the value is accepted for parity and has no local effect.
+- `rsbx exec` advertises the reference `--privileged` flag and rejects it
+  explicitly instead of ignoring it (see Known limitation).
+- `rsbx env exec` accepts the complete exec flag surface (`-d`, `--detach-keys`,
+  `-e`, `--env-file`, `-i`, `-t`, `-u`, `-w`) in addition to `--name`,
+  `--env-arg` and `--env-args-file`.
+
+### Known limitation
+
+- `--privileged` exits 125 with a clear diagnostic because the local
+  daemon/runtime API has no per-exec privilege-escalation field. Docker `sbx`
+  grants extended capabilities through containerd `oci.WithPrivileged`;
+  supporting that requires an API/SDK/daemon/runtime dependency, so this CLI
+  change fails closed rather than silently dropping the request.
+
 ## v0.0.59 — 2026-11-18
 
 - Match Docker sbx rejection of detached exec with exit status 125.

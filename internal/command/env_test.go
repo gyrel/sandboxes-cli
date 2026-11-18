@@ -293,6 +293,122 @@ func TestEnvironmentExecUsesCurrentDirectoryWithoutSeparator(t *testing.T) {
 	}
 }
 
+func TestEnvironmentExecAppliesNameAndArgumentOverrides(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "sbxenv.yaml")
+	body := "schemaVersion: \"1\"\nname: ${{ env.args.name }}\nagent: shell\nworkspace: .\nargs:\n  name:\n    required: true\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(t.TempDir(), "args.env")
+	if err := os.WriteFile(argsFile, []byte("name=from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		args     []string
+		sandbox  string
+		wantArgv []string
+	}{
+		{
+			name:     "args file",
+			args:     []string{"env", "exec", "--env-args-file", argsFile, path, "--", "printf", "file"},
+			sandbox:  "from-file",
+			wantArgv: []string{"printf", "file"},
+		},
+		{
+			name:     "cli argument overrides file",
+			args:     []string{"env", "exec", "--env-args-file", argsFile, "--env-arg", "name=from-cli", path, "--", "printf", "cli"},
+			sandbox:  "from-cli",
+			wantArgv: []string{"printf", "cli"},
+		},
+		{
+			name:     "name flag overrides environment name",
+			args:     []string{"env", "exec", "--name", "explicit-name", "--env-arg", "name=from-arg", path, "--", "printf", "named"},
+			sandbox:  "explicit-name",
+			wantArgv: []string{"printf", "named"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &environmentExecSandbox{item: sdk.Sandbox{
+				ID: "sb-" + tt.sandbox, Name: tt.sandbox, Agent: "shell", State: sdk.StateRunning,
+				Workspace: workspace, Workspaces: []sdk.Workspace{{Path: workspace}},
+			}}
+			executor := &recordingExecutor{}
+			var stdout, stderr bytes.Buffer
+			runner := NewRunner(&stdout, &stderr)
+			runner.NewClient = func(string) (sdk.Client, error) {
+				return recordingExecClient{fakeClient: fakeClient{sandbox: server}, executor: executor}, nil
+			}
+			if code := runner.Run(context.Background(), tt.args); code != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if executor.request.SandboxID != "sb-"+tt.sandbox || !reflect.DeepEqual(executor.request.Argv, tt.wantArgv) {
+				t.Fatalf("exec request=%+v", executor.request)
+			}
+		})
+	}
+}
+
+func TestEnvironmentExecMatchesExecFlagRejections(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "sbxenv.yaml")
+	if err := os.WriteFile(path, []byte("schemaVersion: \"1\"\nname: env-exec-flags\nagent: shell\nworkspace: .\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "detach",
+			args: []string{"env", "exec", "--detach", path, "--", "true"},
+			want: "--detach is not supported for exec",
+		},
+		{
+			name: "privileged",
+			args: []string{"env", "exec", "--privileged", path, "--", "true"},
+			want: "--privileged is not supported by the local daemon/runtime",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &environmentExecSandbox{item: sdk.Sandbox{
+				ID: "sb-env-flags", Name: "env-exec-flags", Agent: "shell", State: sdk.StateRunning,
+				Workspace: workspace, Workspaces: []sdk.Workspace{{Path: workspace}},
+			}}
+			var stdout, stderr bytes.Buffer
+			runner := NewRunner(&stdout, &stderr)
+			runner.NewClient = func(string) (sdk.Client, error) {
+				return recordingExecClient{fakeClient: fakeClient{sandbox: server}, executor: &recordingExecutor{}}, nil
+			}
+			if code := runner.Run(context.Background(), tt.args); code != 125 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Fatalf("stderr=%q", stderr.String())
+			}
+		})
+	}
+	server := &environmentExecSandbox{item: sdk.Sandbox{
+		ID: "sb-env-flags", Name: "env-exec-flags", Agent: "shell", State: sdk.StateRunning,
+		Workspace: workspace, Workspaces: []sdk.Workspace{{Path: workspace}},
+	}}
+	executor := &recordingExecutor{}
+	var stdout, stderr bytes.Buffer
+	runner := NewRunner(&stdout, &stderr)
+	runner.NewClient = func(string) (sdk.Client, error) {
+		return recordingExecClient{fakeClient: fakeClient{sandbox: server}, executor: executor}, nil
+	}
+	if code := runner.Run(context.Background(), []string{"env", "exec", "--detach-keys", "ctrl-a", path, "--", "true"}); code != 0 {
+		t.Fatalf("detach-keys exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !reflect.DeepEqual(executor.request.Argv, []string{"true"}) {
+		t.Fatalf("exec request=%+v", executor.request)
+	}
+}
+
 func TestEnvironmentExecHelpDoesNotConsumeCommandHelp(t *testing.T) {
 	if environmentExecHelpRequested([]string{"grep", "--help"}) {
 		t.Fatal("command help flag was mistaken for CLI help")

@@ -127,3 +127,35 @@ func TestExecDetachRejectedBeforeConnecting(t *testing.T) {
 		}
 	}
 }
+
+func TestExecPrivilegedRejectedBeforeConnecting(t *testing.T) {
+	for _, args := range [][]string{
+		{"exec", "--privileged", "example", "true"},
+		{"exec", "example", "true", "--privileged"},
+		{"exec", "--privileged=true", "example", "true"},
+	} {
+		called := false
+		var output bytes.Buffer
+		r := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { called = true; return nil, errors.New("unexpected") }}
+		if code := r.Run(context.Background(), args); code != 125 || called || !strings.Contains(output.String(), "--privileged is not supported by the local daemon/runtime") {
+			t.Fatalf("args=%q code=%d called=%t output=%q", args, code, called, output.String())
+		}
+	}
+}
+
+func TestExecDetachKeysAcceptedLocally(t *testing.T) {
+	for _, args := range [][]string{
+		{"exec", "--detach-keys", "ctrl-a", "dev", "true"},
+		{"exec", "--detach-keys=ctrl-a", "dev", "true"},
+		{"exec", "dev", "true", "--detach-keys", "ctrl-a"},
+	} {
+		executor := &recordingExecutor{}
+		runner, out, stderr := runTestRunner(t, recordingExecClient{executor: executor}, "")
+		if code := runner.Run(context.Background(), args); code != 0 {
+			t.Fatalf("args=%q exit=%d stdout=%q stderr=%q", args, code, out.String(), stderr.String())
+		}
+		if !reflect.DeepEqual(executor.request.Argv, []string{"true"}) {
+			t.Fatalf("args=%q argv=%q", args, executor.request.Argv)
+		}
+	}
+}

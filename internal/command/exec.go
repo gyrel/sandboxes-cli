@@ -26,13 +26,18 @@ Flags:
   -e, --env KEY=VALUE      environment override (repeatable)
       --env-file FILE      read environment overrides from a file (repeatable)
   -u, --user USER          uid[:gid] or name[:group]
+      --privileged         per-exec privilege escalation (unsupported by the local runtime)
+      --detach-keys KEYS   detach key sequence (cloud interactive exec only)
   -h, --help               show this help
 `
 
+const privilegedUnsupportedMessage = "error: --privileged is not supported by the local daemon/runtime; per-exec privilege escalation is unavailable and was not applied\n  try: rsbx exec --help"
+
 type execOptions struct {
-	workdir string
-	env     []string
-	user    string
+	workdir    string
+	env        []string
+	user       string
+	privileged bool
 }
 
 type stringListFlag []string
@@ -66,6 +71,10 @@ func (r *Runner) exec(ctx context.Context, args []string) int {
 	}
 	if fs.NArg() < 2 {
 		_, _ = fmt.Fprint(r.Err, execUsage)
+		return 125
+	}
+	if opts.privileged {
+		_, _ = fmt.Fprintln(r.Err, privilegedUnsupportedMessage)
 		return 125
 	}
 	env, err := buildExecEnv(envFlags, envFiles)
@@ -116,6 +125,11 @@ func registerExecFlags(fs *flag.FlagSet, opts *execOptions, envFlags, envFiles *
 	fs.Var(envFiles, "env-file", "read KEY=VALUE overrides from a file")
 	fs.StringVar(&opts.user, "u", "", "uid[:gid] or name[:group]")
 	fs.StringVar(&opts.user, "user", "", "uid[:gid] or name[:group]")
+	fs.BoolVar(&opts.privileged, "privileged", false, "request per-exec privilege escalation")
+	// The reference CLI advertises --detach-keys locally but applies it only to
+	// interactive cloud exec. Local exec has no detach sequence, so accepting
+	// the value keeps the flag surface compatible without pretending to act on it.
+	fs.String("detach-keys", "", "detach key sequence for interactive cloud exec")
 }
 
 func expandExecFlags(args []string) []string {
@@ -189,7 +203,7 @@ func reorderExecArgs(args []string) []string {
 
 func isExecBooleanFlag(name string) bool {
 	switch name {
-	case "-i", interactiveFlag, "-t", ttyFlag, "-d", detachFlag, helpShort, helpFlag:
+	case "-i", interactiveFlag, "-t", ttyFlag, "-d", detachFlag, privilegedFlag, helpShort, helpFlag:
 		return true
 	default:
 		return false
@@ -198,7 +212,7 @@ func isExecBooleanFlag(name string) bool {
 
 func execFlagTakesValue(arg string) bool {
 	switch arg {
-	case "-w", workdirFlag, "-workdir", "-e", envFlag, "--env-file", "-u", userFlag:
+	case "-w", workdirFlag, "-workdir", "-e", envFlag, "--env-file", "-u", userFlag, detachKeysFlag:
 		return true
 	default:
 		return false

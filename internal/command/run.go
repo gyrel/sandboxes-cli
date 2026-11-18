@@ -131,6 +131,8 @@ Examples:
 	usernameFlag      = "--username"
 	interactiveFlag   = "--interactive"
 	ttyFlag           = "--tty"
+	privilegedFlag    = "--privileged"
+	detachKeysFlag    = "--detach-keys"
 	allFlag           = "--all"
 	passwordStdinFlag = "--password-stdin"
 	allSandboxesFlag  = "--all-sandboxes"

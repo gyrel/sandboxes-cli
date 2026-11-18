@@ -331,7 +331,7 @@ func consumeEnvironmentExecFlag(args []string, index int) ([]string, []string, i
 		}
 		return nil, []string{arg, args[index+1]}, 1, true, nil
 	}
-	if isEnvironmentExecBooleanFlag(arg) {
+	if isEnvironmentExecBooleanFlag(name) {
 		return nil, []string{arg}, 0, true, nil
 	}
 	return nil, nil, 0, false, nil
@@ -339,7 +339,8 @@ func consumeEnvironmentExecFlag(args []string, index int) ([]string, []string, i
 
 func isEnvironmentExecBooleanFlag(arg string) bool {
 	switch arg {
-	case "-i", interactiveFlag, "-t", ttyFlag, combinedTTYFlag, combinedTTYRev:
+	case "-i", interactiveFlag, "-t", ttyFlag, combinedTTYFlag, combinedTTYRev,
+		detachShort, detachFlag, privilegedFlag:
 		return true
 	default:
 		return false

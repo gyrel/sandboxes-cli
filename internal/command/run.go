@@ -1520,7 +1520,7 @@ func ensureSandboxRunning(ctx context.Context, client sdk.Client, sandbox *sdk.S
 	switch sandbox.State {
 	case sdk.StateRunning:
 		return nil
-	case sdk.StateStopped:
+	case sdk.StateStopped, sdk.StateUnknown:
 		op, err := client.Sandboxes().Start(ctx, sandbox.ID)
 		if err != nil {
 			return err

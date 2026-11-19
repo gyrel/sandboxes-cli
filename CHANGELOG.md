@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.0.64 — 2026-11-19
+
+### Fixed
+
+- `rsbx run` now starts a sandbox in the `unknown` state instead of refusing
+  to attach. The daemon reconciles a running sandbox to `unknown` after a
+  restart; this lets the existing `Start` path recover it without a manual
+  `stop`.
+
+
 ## v0.0.63 — 2026-11-19
 
 ### Added

@@ -1168,3 +1168,24 @@ func TestExplicitCodexKeyDoesNotStartOAuth(t *testing.T) {
 		t.Fatalf("credentials=%q err=%v", got, err)
 	}
 }
+
+type startRecordingSandbox struct {
+	fakeSandbox
+	started int
+}
+
+func (s *startRecordingSandbox) Start(context.Context, string) (*sdk.Operation, error) {
+	s.started++
+	return &sdk.Operation{ID: "op-start", Kind: "start", State: sdk.StateDone}, nil
+}
+
+func TestEnsureSandboxRunningStartsUnknownState(t *testing.T) {
+	service := &startRecordingSandbox{}
+	client := fakeClient{sandbox: service}
+	if err := ensureSandboxRunning(context.Background(), client, &sdk.Sandbox{ID: "sb-1", Name: "dev", State: sdk.StateUnknown}); err != nil {
+		t.Fatal(err)
+	}
+	if service.started != 1 {
+		t.Fatalf("start calls=%d", service.started)
+	}
+}

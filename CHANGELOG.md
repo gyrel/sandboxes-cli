@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.0.63 — 2026-11-19
+
+### Added
+
+- Add `--skills=off|readonly` to `run` and `create`, resolve the host store and
+  send typed options through the SDK. Readwrite remains rejected.
+- Allow additional read-only workspaces in `--clone` mode and compare their
+  read-only bit when reusing a sandbox.
+
+### Changed
+
+- Pathless `rsbx skills import` scans the six supported host directories;
+  `--dry-run` previews candidates and `--allow-link` approves one exact link.
+
+
 ## v0.0.62 — 2026-11-19
 
 ### Added

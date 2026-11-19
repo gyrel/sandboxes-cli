@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,6 +17,7 @@ type skillTreeEntry struct {
 	Dir  bool
 	Mode fs.FileMode
 	Size int64
+	Info fs.FileInfo
 }
 
 type skillWalkState struct {
@@ -26,26 +28,29 @@ type skillWalkState struct {
 func collectSkillEntries(root *os.Root) ([]skillTreeEntry, error) {
 	entries := make([]skillTreeEntry, 0)
 	state := skillWalkState{}
-	if err := walkSkillDirectory(root, ".", 0, &state, &entries); err != nil {
+	if err := walkSkillDirectory(root, ".", nil, 0, &state, &entries); err != nil {
 		return nil, err
 	}
 	return entries, nil
 }
 
-func walkSkillDirectory(root *os.Root, rel string, depth int, state *skillWalkState, entries *[]skillTreeEntry) error {
-	directory, err := root.Open(rel)
+func walkSkillDirectory(root *os.Root, rel string, expected fs.FileInfo, depth int, state *skillWalkState, entries *[]skillTreeEntry) error {
+	directory, err := openCopySource(root, rel)
 	if err != nil {
 		return errors.New("skills: cannot open source directory")
 	}
 	info, err := directory.Stat()
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil || !info.IsDir() || (expected != nil && !os.SameFile(expected, info)) {
 		_ = directory.Close()
 		return errors.New("skills: source path must be a real directory")
 	}
-	children, readErr := directory.ReadDir(-1)
+	children, readErr := directory.ReadDir(maxSkillTreeEntries - state.entries + 1)
 	closeErr := directory.Close()
-	if readErr != nil || closeErr != nil {
+	if (readErr != nil && !errors.Is(readErr, io.EOF)) || closeErr != nil {
 		return errors.New("skills: cannot read source directory")
+	}
+	if len(children) > maxSkillTreeEntries-state.entries {
+		return errors.New("skills: source tree has too many entries")
 	}
 	for _, child := range children {
 		childRel := child.Name()
@@ -76,10 +81,13 @@ func walkSkillEntry(root *os.Root, rel string, depth int, state *skillWalkState,
 			return errors.New("skills: source tree is nested too deeply")
 		}
 		*entries = append(*entries, skillTreeEntry{Rel: rel, Dir: true, Mode: info.Mode().Perm()})
-		return walkSkillDirectory(root, rel, depth+1, state, entries)
+		return walkSkillDirectory(root, rel, info, depth+1, state, entries)
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("skills: source entry %q is not a regular file", filepath.Base(rel))
+	}
+	if err := rejectCopyHardlink(info); err != nil {
+		return fmt.Errorf("skills: source file %q: %w", filepath.Base(rel), err)
 	}
 	if info.Size() > maxSkillFileBytes {
 		return fmt.Errorf("skills: source file %q exceeds the per-file limit", filepath.Base(rel))
@@ -88,7 +96,7 @@ func walkSkillEntry(root *os.Root, rel string, depth int, state *skillWalkState,
 	if state.bytes > maxSkillTreeBytes {
 		return errors.New("skills: source tree exceeds the total size limit")
 	}
-	*entries = append(*entries, skillTreeEntry{Rel: rel, Mode: info.Mode().Perm(), Size: info.Size()})
+	*entries = append(*entries, skillTreeEntry{Rel: rel, Mode: info.Mode().Perm(), Size: info.Size(), Info: info})
 	return nil
 }
 
@@ -108,14 +116,18 @@ func copySkillTree(source *os.Root, entries []skillTreeEntry, stage *os.Root) er
 }
 
 func copySkillFile(source *os.Root, stage *os.Root, entry skillTreeEntry) error {
-	input, err := source.Open(entry.Rel)
+	input, err := openCopySource(source, entry.Rel)
 	if err != nil {
 		return errors.New("skills: cannot open source file")
 	}
 	info, err := input.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != entry.Size {
+	if err != nil || !skillFileMatches(entry, info, true) {
 		_ = input.Close()
 		return fmt.Errorf("skills: source file %q changed during import", filepath.Base(entry.Rel))
+	}
+	if err := rejectCopyHardlink(info); err != nil {
+		_ = input.Close()
+		return fmt.Errorf("skills: source file %q: %w", filepath.Base(entry.Rel), err)
 	}
 	mode := fs.FileMode(0o644)
 	if entry.Mode&0o111 != 0 {
@@ -126,13 +138,38 @@ func copySkillFile(source *os.Root, stage *os.Root, entry skillTreeEntry) error 
 		_ = input.Close()
 		return fmt.Errorf("skills: stage source file %q: %w", filepath.Base(entry.Rel), err)
 	}
-	written, copyErr := io.Copy(output, io.LimitReader(input, maxSkillFileBytes+1))
+	digest := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(output, digest), io.LimitReader(input, maxSkillFileBytes+1))
 	closeErr := output.Close()
+	checkErr := verifySkillSourceCopy(input, info, digest.Sum(nil), entry.Size)
 	inputErr := input.Close()
-	if copyErr != nil || inputErr != nil || closeErr != nil || written != entry.Size {
+	if copyErr != nil || inputErr != nil || closeErr != nil || checkErr != nil || written != entry.Size {
 		return fmt.Errorf("skills: copy source file %q failed", filepath.Base(entry.Rel))
 	}
 	return nil
+}
+
+func skillFileMatches(entry skillTreeEntry, info fs.FileInfo, checkTime bool) bool {
+	if info == nil || !info.Mode().IsRegular() || info.Size() != entry.Size || entry.Info == nil || !os.SameFile(entry.Info, info) {
+		return false
+	}
+	return !checkTime || info.ModTime().Equal(entry.Info.ModTime())
+}
+
+func verifySkillSourceCopy(input *os.File, before fs.FileInfo, expected []byte, size int64) error {
+	if _, err := input.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	digest := sha256.New()
+	written, err := io.Copy(digest, io.LimitReader(input, maxSkillFileBytes+1))
+	if err != nil || written != size || !bytes.Equal(expected, digest.Sum(nil)) {
+		return errors.New("skills: source changed during copy")
+	}
+	after, err := input.Stat()
+	if err != nil || !os.SameFile(before, after) || after.Size() != size || !after.ModTime().Equal(before.ModTime()) {
+		return errors.New("skills: source changed during copy")
+	}
+	return rejectCopyHardlink(after)
 }
 
 func hashSkillEntries(root *os.Root, entries []skillTreeEntry) (string, error) {
@@ -153,14 +190,17 @@ func hashSkillEntries(root *os.Root, entries []skillTreeEntry) (string, error) {
 }
 
 func hashSkillFile(root *os.Root, entry skillTreeEntry, digest io.Writer) error {
-	file, err := root.Open(entry.Rel)
+	file, err := openCopySource(root, entry.Rel)
 	if err != nil {
 		return errors.New("skills: cannot open stored skill file")
 	}
 	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != entry.Size {
+	if err != nil || !skillFileMatches(entry, info, false) {
 		return fmt.Errorf("skills: stored skill file %q changed", filepath.Base(entry.Rel))
+	}
+	if err := rejectCopyHardlink(info); err != nil {
+		return fmt.Errorf("skills: stored skill file %q: %w", filepath.Base(entry.Rel), err)
 	}
 	if _, err := io.CopyN(digest, file, entry.Size); err != nil {
 		return fmt.Errorf("skills: hash stored skill file %q: %w", filepath.Base(entry.Rel), err)

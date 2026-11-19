@@ -59,6 +59,12 @@ func (r *Runner) removeManagedSkill(ctx context.Context, name string, force bool
 		return 1
 	}
 	defer func() { _ = root.Close() }()
+	lock, err := acquireSkillsLock(ctx, root)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = lock.Close() }()
 	registry, err := readSkillsRegistry(root)
 	if err != nil {
 		r.error(err)

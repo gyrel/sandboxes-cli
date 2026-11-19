@@ -360,7 +360,7 @@ func pruneHelp() commandHelp {
 			"rsbx prune --filter until=2026-01-01T00:00:00Z",
 		},
 		Flags: []commandFlagHelp{
-			{Name: "dry-run", Description: "List the sandboxes that would be removed without removing them"},
+			{Name: dryRunName, Description: "List the sandboxes that would be removed without removing them"},
 			{Name: "filter", Value: helpValueString, Description: "Filter candidates (supported: until=TIMESTAMP or until=DURATION)"},
 			{Short: "f", Name: helpNameForce, Description: "Skip confirmation prompts and remove even if in use"},
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatDescription},
@@ -1231,7 +1231,7 @@ func secretImportHelp() commandHelp {
 		},
 		Flags: []commandFlagHelp{
 			{Name: helpNameAll, Description: "Import every detected env var without prompting"},
-			{Name: "dry-run", Description: "Show what would be imported without writing"},
+			{Name: dryRunName, Description: "Show what would be imported without writing"},
 			{Short: "f", Name: helpNameForce, Description: "Overwrite an existing stored entry without confirmation"},
 			{Short: "h", Name: helpCommand, Description: "help for secret import"},
 		},
@@ -1484,15 +1484,21 @@ func skillsImportHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
 			"Import a local skill directory into Rheic's host-side skills store.",
+			"Without PATH, import from supported host directories in priority order.",
+			"Use --dry-run without PATH to preview candidates in supported host directories.",
+			"A skill-directory link requires --allow-link NAME=ABSOLUTE_TARGET. --force",
+			"does not approve links; the target must be a canonical real directory.",
 			"PATH must be a real directory with a SKILL.md file. SKILL.md requires YAML",
 			"frontmatter with \"name\" and \"description\" fields.",
 			"",
-			"Symlinks, special files, oversized files and oversized trees are rejected.",
+			"Other symlinks, special files, oversized files and oversized trees are rejected.",
 			"Identical re-imports are no-ops. Use --force only to replace skill content that",
 			"Rheic already imported; unmanaged directories are never overwritten.",
 		},
-		Usage: []string{"rsbx skills import [flags] PATH"},
+		Usage: []string{"rsbx skills import [flags] [PATH]", "rsbx skills import --dry-run"},
 		Flags: []commandFlagHelp{
+			{Name: dryRunName, Description: "preview host skills without importing them"},
+			{Name: "allow-link", Value: "NAME=ABSOLUTE_TARGET", Description: "approve one exact link target (repeatable)"},
 			{Short: "f", Name: helpNameForce, Description: "replace skill content previously imported by Rheic"},
 			{Short: "h", Name: helpCommand, Description: "help for skills import"},
 		},

@@ -329,7 +329,14 @@ the host and adds it only to requests sent to a fixed provider host.
 
 `rsbx skills` is experimental. It manages a host-side store under
 `~/.config/rheic/skills` (or `$XDG_CONFIG_HOME/rheic/skills`) and never writes
-inside a sandbox workspace or Docker state. `rsbx skills import` scans the
+inside a sandbox workspace or Docker state. `rsbx run --skills=readonly` and
+`rsbx create --skills=readonly` expose that store to a new sandbox; the default
+is `off` until the Linux runtime path is qualified. Read-only mode links each
+store entry into the agent's own skills directory at start, so existing agent
+files stay untouched, edits to existing skills are visible immediately, new
+store entries appear after the next start, and removing an entry stops the
+link from resolving. `readwrite` is rejected until a per-agent mount target can
+be established safely. `rsbx skills import` scans the
 supported local agent skill directories in priority order; `--dry-run` previews
 their entries without copying them. `rsbx skills import PATH` imports one skill.
 Each skill requires a `SKILL.md` with YAML frontmatter containing `name` and

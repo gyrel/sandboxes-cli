@@ -9,8 +9,8 @@ import (
 // completionTree maps each command to its flags. Subcommand-bearing commands
 // list their subcommands in completionSubcommands.
 var completionTree = map[string][]string{
-	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, removeFlag, newFlag, helpShort, helpFlag},
-	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, helpShort, helpFlag},
+	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, skillsFlag, removeFlag, newFlag, helpShort, helpFlag},
+	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, skillsFlag, helpShort, helpFlag},
 	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, helpShort, helpFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},

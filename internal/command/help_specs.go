@@ -102,6 +102,7 @@ func runHelp() commandHelp {
 			{Short: "p", Name: helpNamePublish, Value: helpNameStringArray, Description: "publish a guest port (repeatable): [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]"},
 			{Name: "replace", Description: "delete and recreate an existing --name sandbox before running"},
 			{Name: "rm", Description: "remove the sandbox after the agent session exits"},
+			{Name: "skills", Value: "MODE", Description: "shared skills mode for a new sandbox: off (default), readonly, or readwrite (unsupported)"},
 			{Short: "t", Name: "template", Value: helpValueString, Description: "container image for a new sandbox (alias for --image)"},
 		},
 	}
@@ -142,6 +143,7 @@ func createHelp() commandHelp {
 			{Name: "cpus", Value: "uint", Description: "CPUs (0 selects the daemon default)"},
 			{Name: "deny-network", Value: helpNameStringArray, Description: "deny egress CIDR[:PORT] (repeatable; optional udp: prefix)"},
 			{Name: "deny-write", Value: helpNameStringArray, Description: "mount PATH read-only (repeatable)"},
+			{Name: "skills", Value: "MODE", Description: "shared skills mode for the new sandbox: off (default), readonly, or readwrite (unsupported)"},
 			{Name: helpNameDocker, Description: "run the dedicated Docker profile"},
 			{Short: "e", Name: helpNameEnv, Value: helpNameStringArray, Description: "environment KEY=VALUE for every process (repeatable)"},
 			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: "read environment from a file (repeatable)"},

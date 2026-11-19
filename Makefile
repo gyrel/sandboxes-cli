@@ -10,6 +10,7 @@ build:
 dev-bundle:
 	go build -ldflags "-X github.com/rheic/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o dist/rsbx ./cmd/rsbx
 	cd ../sandboxes-daemon && go build -o ../sandboxes-cli/dist/sandboxesd ./cmd/sandboxesd
+	cd ../sandboxes-guest && CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go build -trimpath -o ../sandboxes-cli/dist/sandboxes-guest-linux-$$(go env GOARCH) ./cmd/sandboxes-guest
 
 test:
 	go test -race -count=1 ./...

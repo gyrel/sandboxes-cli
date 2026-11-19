@@ -1280,6 +1280,7 @@ type createOptions struct {
 	profile          string
 	privileged       bool
 	clone            *sdk.CloneOptions
+	skills           *sdk.SkillsOptions
 }
 
 func (r *Runner) create(ctx context.Context, args []string) int {
@@ -1342,6 +1343,7 @@ func (r *Runner) create(ctx context.Context, args []string) int {
 		Env:              envMap(opts.env),
 		OAuthCredentials: opts.oauthCredentials,
 		Clone:            opts.clone,
+		Skills:           opts.skills,
 	})
 	if err != nil {
 		r.error(err)
@@ -1495,6 +1497,7 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 	cloneMode := fs.Bool("clone", false, "run the agent on a private in-guest clone of PATH")
 	fs.Bool("no-progress", false, "suppress progress output")
 	kitPath := fs.String("kit", "", "apply a local kit definition")
+	skillsMode := fs.String("skills", "", "shared skills mode: off, readonly or readwrite")
 	var denyWriteFlags stringListFlag
 	fs.Var(&denyWriteFlags, "deny-write", "mount PATH read-only (repeatable)")
 	if err := fs.Parse(reorderCreateArgs(fs, args)); err != nil {
@@ -1549,6 +1552,10 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 	if err != nil {
 		return createOptions{}, false, err
 	}
+	skills, err := prepareSkills(*skillsMode)
+	if err != nil {
+		return createOptions{}, false, err
+	}
 	workspace := ""
 	if len(workspaces) > 0 {
 		workspace = workspaces[0].Path
@@ -1557,6 +1564,7 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 		name: name, agent: agent, image: imageRef, workspace: workspace, idempotencyKey: *idempotency,
 		workspaces: workspaces, ports: ports, allow: allow, deny: deny,
 		cpus: cpuCount, memoryMiB: memoryMiB, env: env, oauthCredentials: oauthCredentials, profile: *profile, privileged: *privileged, clone: cloneOptions,
+		skills: skills,
 	}, false, nil
 }
 
@@ -1593,8 +1601,11 @@ func applyCreateCloneMode(ctx context.Context, clone bool, workspaces []sdk.Work
 	if !clone {
 		return workspaces, nil, nil
 	}
-	if len(workspaces) != 1 {
-		return nil, nil, errors.New("--clone requires exactly one Git workspace path")
+	if len(workspaces) == 0 {
+		return nil, nil, errors.New("--clone requires a primary Git workspace path")
+	}
+	if err := validateCloneExtraWorkspaces(workspaces); err != nil {
+		return nil, nil, err
 	}
 	workspace, err := cloneWorkspaceForMount(ctx, workspaces[0])
 	if err != nil {
@@ -1602,6 +1613,15 @@ func applyCreateCloneMode(ctx context.Context, clone bool, workspaces []sdk.Work
 	}
 	workspaces[0] = workspace
 	return workspaces, &sdk.CloneOptions{SourceWorkspacePath: workspace.Path}, nil
+}
+
+func validateCloneExtraWorkspaces(workspaces []sdk.Workspace) error {
+	for _, workspace := range workspaces[1:] {
+		if !workspace.ReadOnly {
+			return errors.New("--clone additional workspaces must be read-only")
+		}
+	}
+	return nil
 }
 
 func (r *Runner) stop(ctx context.Context, args []string) int {

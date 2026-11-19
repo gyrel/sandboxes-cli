@@ -729,3 +729,39 @@ func (e *testCommandError) ExitCode() int {
 	}
 	return -1
 }
+
+func TestCloneAdditionalWorkspaceRequiresReadOnly(t *testing.T) {
+	source := initCloneTestRepo(t)
+	other := t.TempDir()
+	workspaces, options, err := prepareCreateWorkspaces(context.Background(), []string{source, other + ":ro"}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workspaces) != 2 || !workspaces[0].ReadOnly || !workspaces[1].ReadOnly || options == nil {
+		t.Fatalf("invalid clone workspace mapping: %+v, %+v", workspaces, options)
+	}
+	if _, _, err := prepareCreateWorkspaces(context.Background(), []string{source, other}, nil, true); err == nil {
+		t.Fatal("writable additional clone workspace accepted")
+	}
+	if _, err := resolveRunCloneSource(context.Background(), true, []string{source, other + ":ro"}); err != nil {
+		t.Fatalf("read-only extra workspace rejected by run: %v", err)
+	}
+	if _, err := resolveRunCloneSource(context.Background(), true, []string{source, other}); err == nil {
+		t.Fatal("writable extra workspace accepted by run")
+	}
+}
+
+func TestCloneReuseComparesReadOnlyExtras(t *testing.T) {
+	existing := &sdk.Sandbox{Workspaces: []sdk.Workspace{
+		{Path: "/host/source", ReadOnly: true, GuestPath: cloneSourceGuestPath},
+		{Path: "/host/reference", ReadOnly: true},
+	}}
+	requested := []sdk.Workspace{{Path: "/host/source"}, {Path: "/host/reference", ReadOnly: true}}
+	if !runWorkspacesMatch(existing, requested, true) {
+		t.Fatal("matching read-only extra workspace was not reused")
+	}
+	requested[1].ReadOnly = false
+	if runWorkspacesMatch(existing, requested, true) {
+		t.Fatal("writable extra workspace matched a read-only sandbox")
+	}
+}

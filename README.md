@@ -335,8 +335,11 @@ is `off` until the Linux runtime path is qualified. Read-only mode links each
 store entry into the agent's own skills directory at start, so existing agent
 files stay untouched, edits to existing skills are visible immediately, new
 store entries appear after the next start, and removing an entry stops the
-link from resolving. `readwrite` is rejected until a per-agent mount target can
-be established safely. `rsbx skills import` scans the
+link from resolving. These live semantics are Linux-only; the macOS fallback
+uses a private snapshot taken at creation, so host changes appear only after the
+sandbox is recreated. The mode applies only when a sandbox is created; reuse
+keeps the stored mode. `readwrite` is rejected until a per-agent mount target
+can be established safely. `rsbx skills import` scans the
 supported local agent skill directories in priority order; `--dry-run` previews
 their entries without copying them. `rsbx skills import PATH` imports one skill.
 Each skill requires a `SKILL.md` with YAML frontmatter containing `name` and

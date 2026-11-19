@@ -22,7 +22,7 @@ own config directory, never inside a sandbox workspace or Docker state.
 
 Commands:
   ls, list       list skills imported by Rheic
-  import PATH    validate and import a local skill directory
+  import [PATH]  import from supported host directories or one local directory
   rm, remove     remove a skill imported by Rheic
 
 Import requires PATH to be a real directory containing SKILL.md with YAML

@@ -9,8 +9,8 @@ import (
 // completionTree maps each command to its flags. Subcommand-bearing commands
 // list their subcommands in completionSubcommands.
 var completionTree = map[string][]string{
-	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, removeFlag, newFlag, helpShort, helpFlag},
-	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, helpShort, helpFlag},
+	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, skillsFlag, removeFlag, newFlag, helpShort, helpFlag},
+	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, skillsFlag, helpShort, helpFlag},
 	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, helpShort, helpFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
@@ -18,12 +18,12 @@ var completionTree = map[string][]string{
 	policyCommand:     {formatFlag, jsonFlag, sandboxFlag, protocolFlag, logTypeFlag, limitFlag, "--write", forceFlag, helpShort, helpFlag},
 	stopCommand:       {graceFlag, formatFlag, jsonFlag},
 	"rm":              {"-f", forceFlag, allFlag, formatFlag, jsonFlag},
-	"prune":           {"--dry-run", "-f", forceFlag, "--filter", formatFlag, jsonFlag},
+	"prune":           {dryRunFlag, "-f", forceFlag, "--filter", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
 	"attach":          {"--shell", helpShort, helpFlag},
 	"login":           {usernameFlag, passwordStdinFlag},
 	"logout":          {"-f", forceFlag},
-	secretCommand:     {registryFlag, usernameFlag, passwordStdinFlag, allSandboxesFlag, allFlag, "--dry-run", sandboxFlag, oauthFlag, tokenFlag, "-t", forceFlag, "-f", refFlag, commandFlag, globalFlag, "-g", serviceFlag, "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
+	secretCommand:     {registryFlag, usernameFlag, passwordStdinFlag, allSandboxesFlag, allFlag, dryRunFlag, sandboxFlag, oauthFlag, tokenFlag, "-t", forceFlag, "-f", refFlag, commandFlag, globalFlag, "-g", serviceFlag, "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	mcpCommand:        {commandFlag, mcpArgsFlagName, "--dir", formatFlag, jsonFlag, quietLongFlag, forceFlag, helpFlag, helpShort},
 	versionCommand:    {formatFlag, jsonFlag, debugShortFlag, debugFlag},
 	commandAgents:     {formatFlag, jsonFlag},

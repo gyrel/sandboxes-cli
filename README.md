@@ -169,6 +169,8 @@ rsbx attach dev
 rsbx kit inspect examples/kits/codex-go.yaml
 rsbx run --kit examples/kits/codex-go.yaml
 rsbx skills list
+rsbx skills import --dry-run
+rsbx skills import
 rsbx skills import ./my-skill
 rsbx skills remove my-skill
 ```
@@ -327,15 +329,31 @@ the host and adds it only to requests sent to a fixed provider host.
 
 `rsbx skills` is experimental. It manages a host-side store under
 `~/.config/rheic/skills` (or `$XDG_CONFIG_HOME/rheic/skills`) and never writes
-inside a sandbox workspace or Docker state. `rsbx skills import PATH` requires a
-real skill directory whose `SKILL.md` starts with YAML frontmatter containing
-`name` and `description`; the name must match the directory name. Symlinks,
-special files and oversized trees are rejected. Identical re-imports are
+inside a sandbox workspace or Docker state. `rsbx run --skills=readonly` and
+`rsbx create --skills=readonly` expose that store to a new sandbox; the default
+is `off` until the Linux runtime path is qualified. Read-only mode links each
+store entry into the agent's own skills directory at start, so existing agent
+files stay untouched, edits to existing skills are visible immediately, new
+store entries appear after the next start, and removing an entry stops the
+link from resolving. These live semantics are Linux-only; the macOS fallback
+uses a private snapshot taken at creation, so host changes appear only after the
+sandbox is recreated. The mode applies only when a sandbox is created; reuse
+keeps the stored mode. `readwrite` is rejected until a per-agent mount target
+can be established safely. `rsbx skills import` scans the
+supported local agent skill directories in priority order; `--dry-run` previews
+their entries without copying them. `rsbx skills import PATH` imports one skill.
+Each skill requires a `SKILL.md` with YAML frontmatter containing `name` and
+`description`; the name must match the skill directory. A top-level skill link
+requires a separate `--allow-link NAME=ABSOLUTE_TARGET` for its exact canonical
+target; `--force` does not grant that approval. Source-directory links, nested
+links, hard links, special files and oversized trees are rejected. Import may
+stop after importing earlier skills if a later skill fails. Identical re-imports are
 no-ops, `--force` replaces only content Rheic previously imported, and
 unmanaged directories are never overwritten. `rsbx skills list` supports table,
 JSON, YAML and quiet output. `rsbx skills remove NAME` prompts unless `--force`
 and removes only skills recorded in Rheic's registry. Guest VM delivery and
-Docker's Git-backed `skills add/update` are not implemented.
+Docker's Git-backed `skills add/update` are not implemented. Import currently
+fails closed on platforms without safe source and hard-link checks.
 
 Remote MCP servers can be registered with `rsbx mcp add NAME --url
 https://HOST/mcp`. All remote headers must use host-vault references. Use

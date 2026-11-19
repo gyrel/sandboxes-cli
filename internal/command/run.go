@@ -160,6 +160,7 @@ Examples:
 	refreshFlag       = "--refresh"
 	refFlag           = "--ref"
 	tokenFlag         = "--token"
+	skillsFlag        = "--skills"
 )
 
 var errRunAgentRequired = errors.New("agent is required when --name is not set")
@@ -191,6 +192,8 @@ type runOptions struct {
 	env              []string
 	oauthCredentials []sdk.OAuthCredential
 	envFiles         []string
+	skills           string
+	skillsOptions    *sdk.SkillsOptions
 	detach           bool
 	remove           bool
 	clone            bool
@@ -243,7 +246,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	if len(opts.publish) == 0 {
 		opts.publish = agentDefaultPorts(agent)
 	}
-	resources, err := prepareRunResources(opts)
+	resources, err := prepareRunResources(&opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
 		return 2
@@ -300,8 +303,11 @@ func resolveRunCloneSource(ctx context.Context, clone bool, paths []string) (str
 	if err != nil {
 		return "", err
 	}
-	if len(workspaces) != 1 {
-		return "", errors.New("--clone requires exactly one Git workspace path")
+	if len(workspaces) == 0 {
+		return "", errors.New("--clone requires a primary Git workspace path")
+	}
+	if err := validateCloneExtraWorkspaces(workspaces); err != nil {
+		return "", err
 	}
 	workspace, err := cloneWorkspaceForMount(ctx, workspaces[0])
 	if err != nil {
@@ -758,8 +764,12 @@ func (r *Runner) removeRunSandbox(ctx context.Context, client sdk.Client, sandbo
 	return removeCloneRemoteForSandbox(ctx, current, r.gitConfigCommand())
 }
 
-//nolint:gocritic // runOptions is an immutable value object.
-func prepareRunResources(opts runOptions) (runResources, error) {
+func prepareRunResources(opts *runOptions) (runResources, error) {
+	skills, err := prepareSkills(opts.skills)
+	if err != nil {
+		return runResources{}, err
+	}
+	opts.skillsOptions = skills
 	if opts.remove && opts.detach {
 		return runResources{}, errors.New("--rm cannot be combined with --detach")
 	}
@@ -940,6 +950,9 @@ func parseRunValuedFlag(r *Runner, args []string, index int, arg string, opts *r
 	case envFileFlag:
 		consumed, err := parseRunListValue(args, index, envFileFlag, &opts.envFiles)
 		return consumed, true, err
+	case skillsFlag:
+		consumed, err := parseRunValue(args, index, skillsFlag, &opts.skills)
+		return consumed, true, err
 	default:
 		return 0, false, nil
 	}
@@ -1017,6 +1030,10 @@ func parseRunAssignmentFlag(r *Runner, arg string, opts *runOptions) (int, bool,
 	}
 	if value, ok := strings.CutPrefix(arg, envFileFlag+"="); ok {
 		consumed, err := appendRunListValue(envFileFlag, value, &opts.envFiles)
+		return consumed, true, err
+	}
+	if value, ok := strings.CutPrefix(arg, skillsFlag+"="); ok {
+		consumed, err := setRunValue(skillsFlag, value, &opts.skills)
 		return consumed, true, err
 	}
 	return 0, false, nil
@@ -1161,7 +1178,10 @@ func checkReusedWorkspaceMode(sandbox *sdk.Sandbox, requested []sdk.Workspace, c
 		return fmt.Errorf("sandbox %s already uses workspaces %v; refusing to ignore %v", sandbox.Name, workspacePaths(existing), workspacePaths(requested))
 	}
 	for i := range existing {
-		if !clone && existing[i].ReadOnly != requested[i].ReadOnly {
+		if clone && i == 0 {
+			continue
+		}
+		if existing[i].ReadOnly != requested[i].ReadOnly {
 			return fmt.Errorf("sandbox %s already uses workspace modes %v; refusing to ignore %v", sandbox.Name, existing, requested)
 		}
 	}
@@ -1326,7 +1346,10 @@ func runWorkspacesMatch(sandbox *sdk.Sandbox, requested []sdk.Workspace, clone b
 		if canonicalWorkspacePath(existing[i].Path) != canonicalWorkspacePath(requested[i].Path) {
 			return false
 		}
-		if !clone && existing[i].ReadOnly != requested[i].ReadOnly {
+		if clone && i == 0 {
+			continue
+		}
+		if existing[i].ReadOnly != requested[i].ReadOnly {
 			return false
 		}
 	}
@@ -1429,8 +1452,11 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 	}
 	var cloneOptions *sdk.CloneOptions
 	if opts.clone {
-		if len(workspaces) != 1 {
-			return nil, false, errors.New("--clone requires exactly one Git workspace path")
+		if len(workspaces) == 0 {
+			return nil, false, errors.New("--clone requires a primary Git workspace path")
+		}
+		if err := validateCloneExtraWorkspaces(workspaces); err != nil {
+			return nil, false, err
 		}
 		workspaces[0], err = cloneWorkspaceForMount(ctx, workspaces[0])
 		if err != nil {
@@ -1456,6 +1482,7 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 		Env:              envMap(resources.env),
 		OAuthCredentials: opts.oauthCredentials,
 		Clone:            cloneOptions,
+		Skills:           opts.skillsOptions,
 	})
 	if err != nil {
 		return r.recoverRunCreate(ctx, client, opts, err)

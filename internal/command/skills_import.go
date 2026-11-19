@@ -17,8 +17,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const skillsImportUsage = `usage: rsbx skills import [--force] PATH
+const skillsImportUsage = `usage: rsbx skills import [--force] [PATH]
+       rsbx skills import --dry-run
 
+Without PATH, import skills from supported host directories in priority order.
 Import a local skill directory into Rheic's host-side skills store. PATH must
 be a real directory with a SKILL.md file. SKILL.md requires YAML frontmatter:
 
@@ -27,7 +29,9 @@ be a real directory with a SKILL.md file. SKILL.md requires YAML frontmatter:
   description: One line describing the skill.
   ---
 
-Symlinks, special files, oversized files and oversized trees are rejected.
+An explicitly approved top-level link may be imported with --allow-link
+NAME=ABSOLUTE_TARGET. Other symlinks, special files, oversized files and
+oversized trees are rejected.
 Identical re-imports are no-ops. Use --force only to replace skill content that
 Rheic already imported; unmanaged directories are never overwritten.
 `
@@ -49,14 +53,23 @@ func (r *Runner) importSkills(ctx context.Context, args []string) int {
 	fs := r.newFlagSet("skills import")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "replace skill content previously imported by Rheic")
+	dryRun := fs.Bool(dryRunName, false, "preview skills from supported host directories")
+	var allowedLinks repeatedStringFlag
+	fs.Var(&allowedLinks, "allow-link", "approve one exact skill link as NAME=ABSOLUTE_TARGET")
 	fs.BoolVar(force, "f", false, "replace skill content previously imported by Rheic")
-	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{forceFlag: false, "-f": false})); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{forceFlag: false, "-f": false, dryRunFlag: false, "--allow-link": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return r.showCommandHelp(skillsImportHelp())
 		}
 		return r.flagParseFailure("skills import", err)
 	}
-	if fs.NArg() != 1 {
+	if *dryRun && fs.NArg() == 0 && len(allowedLinks) == 0 {
+		return r.previewHostSkills(ctx)
+	}
+	if !*dryRun && fs.NArg() == 0 {
+		return r.importHostSkills(ctx, *force, allowedLinks)
+	}
+	if *dryRun || fs.NArg() != 1 || len(allowedLinks) != 0 {
 		_, _ = fmt.Fprint(r.Err, skillsImportUsage)
 		return 2
 	}
@@ -98,14 +111,18 @@ func loadSourceSkill(path string) (*sourceSkill, error) {
 		_ = root.Close()
 		return nil, errors.New("skills import: source directory changed while opening")
 	}
+	return finishSourceSkill(root, absolute, filepath.Base(absolute))
+}
+
+func finishSourceSkill(root *os.Root, absolute, name string) (*sourceSkill, error) {
 	manifest, err := readSkillManifest(root)
 	if err != nil {
 		_ = root.Close()
 		return nil, err
 	}
-	if filepath.Base(absolute) != manifest.Name {
+	if name != manifest.Name {
 		_ = root.Close()
-		return nil, fmt.Errorf("skills import: manifest name %q must match source directory %q", sanitizeSkillErrorText(manifest.Name), sanitizeSkillErrorText(filepath.Base(absolute)))
+		return nil, fmt.Errorf("skills import: manifest name %q must match source directory %q", sanitizeSkillErrorText(manifest.Name), sanitizeSkillErrorText(name))
 	}
 	entries, err := collectSkillEntries(root)
 	if err != nil {
@@ -126,12 +143,20 @@ func readSkillManifest(root *os.Root) (skillManifest, error) {
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return skillManifest{}, errors.New("skills import: SKILL.md must be a regular file")
 	}
+	if err := rejectCopyHardlink(info); err != nil {
+		return skillManifest{}, fmt.Errorf("skills import: SKILL.md: %w", err)
+	}
 	if info.Size() > maxSkillManifestBytes {
 		return skillManifest{}, errors.New("skills import: SKILL.md exceeds the size limit")
 	}
-	file, err := root.Open("SKILL.md")
+	file, err := openCopySource(root, "SKILL.md")
 	if err != nil {
 		return skillManifest{}, errors.New("skills import: cannot open SKILL.md")
+	}
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) || rejectCopyHardlink(opened) != nil {
+		_ = file.Close()
+		return skillManifest{}, errors.New("skills import: SKILL.md changed while opening")
 	}
 	data, readErr := io.ReadAll(io.LimitReader(file, maxSkillManifestBytes+1))
 	closeErr := file.Close()
@@ -194,7 +219,7 @@ func skillFrontmatter(data []byte) ([]byte, error) {
 }
 
 func (r *Runner) installSourceSkill(ctx context.Context, source *sourceSkill, force bool) int {
-	state, err := openSkillImportState()
+	state, err := openSkillImportState(ctx)
 	if err != nil {
 		r.error(err)
 		return 1
@@ -246,10 +271,11 @@ func (r *Runner) installSourceSkill(ctx context.Context, source *sourceSkill, fo
 type skillImportState struct {
 	root     *os.Root
 	store    *os.Root
+	lock     *os.File
 	registry skillsRegistry
 }
 
-func openSkillImportState() (*skillImportState, error) {
+func openSkillImportState(ctx context.Context) (*skillImportState, error) {
 	paths, err := resolveSkillsPaths()
 	if err != nil {
 		return nil, err
@@ -258,26 +284,35 @@ func openSkillImportState() (*skillImportState, error) {
 	if err != nil {
 		return nil, err
 	}
+	lock, err := acquireSkillsLock(ctx, root)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
 	if err := ensureSkillsStore(root); err != nil {
+		_ = lock.Close()
 		_ = root.Close()
 		return nil, err
 	}
 	store, err := openSkillsStore(root)
 	if err != nil {
+		_ = lock.Close()
 		_ = root.Close()
 		return nil, err
 	}
 	registry, err := readSkillsRegistry(root)
 	if err != nil {
 		_ = store.Close()
+		_ = lock.Close()
 		_ = root.Close()
 		return nil, err
 	}
-	return &skillImportState{root: root, store: store, registry: registry}, nil
+	return &skillImportState{root: root, store: store, lock: lock, registry: registry}, nil
 }
 
 func (s *skillImportState) Close() {
 	_ = s.store.Close()
+	_ = s.lock.Close()
 	_ = s.root.Close()
 }
 

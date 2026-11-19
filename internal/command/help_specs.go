@@ -102,6 +102,7 @@ func runHelp() commandHelp {
 			{Short: "p", Name: helpNamePublish, Value: helpNameStringArray, Description: "publish a guest port (repeatable): [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]"},
 			{Name: "replace", Description: "delete and recreate an existing --name sandbox before running"},
 			{Name: "rm", Description: "remove the sandbox after the agent session exits"},
+			{Name: "skills", Value: "MODE", Description: "shared skills mode for a new sandbox only: off (default), readonly, or readwrite (unsupported); reuse keeps the existing mode"},
 			{Short: "t", Name: "template", Value: helpValueString, Description: "container image for a new sandbox (alias for --image)"},
 		},
 	}
@@ -142,6 +143,7 @@ func createHelp() commandHelp {
 			{Name: "cpus", Value: "uint", Description: "CPUs (0 selects the daemon default)"},
 			{Name: "deny-network", Value: helpNameStringArray, Description: "deny egress CIDR[:PORT] (repeatable; optional udp: prefix)"},
 			{Name: "deny-write", Value: helpNameStringArray, Description: "mount PATH read-only (repeatable)"},
+			{Name: "skills", Value: "MODE", Description: "shared skills mode for a new sandbox only: off (default), readonly, or readwrite (unsupported); reuse keeps the existing mode"},
 			{Name: helpNameDocker, Description: "run the dedicated Docker profile"},
 			{Short: "e", Name: helpNameEnv, Value: helpNameStringArray, Description: "environment KEY=VALUE for every process (repeatable)"},
 			{Name: helpNameEnvFile, Value: helpNameStringArray, Description: "read environment from a file (repeatable)"},
@@ -360,7 +362,7 @@ func pruneHelp() commandHelp {
 			"rsbx prune --filter until=2026-01-01T00:00:00Z",
 		},
 		Flags: []commandFlagHelp{
-			{Name: "dry-run", Description: "List the sandboxes that would be removed without removing them"},
+			{Name: dryRunName, Description: "List the sandboxes that would be removed without removing them"},
 			{Name: "filter", Value: helpValueString, Description: "Filter candidates (supported: until=TIMESTAMP or until=DURATION)"},
 			{Short: "f", Name: helpNameForce, Description: "Skip confirmation prompts and remove even if in use"},
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatDescription},
@@ -1231,7 +1233,7 @@ func secretImportHelp() commandHelp {
 		},
 		Flags: []commandFlagHelp{
 			{Name: helpNameAll, Description: "Import every detected env var without prompting"},
-			{Name: "dry-run", Description: "Show what would be imported without writing"},
+			{Name: dryRunName, Description: "Show what would be imported without writing"},
 			{Short: "f", Name: helpNameForce, Description: "Overwrite an existing stored entry without confirmation"},
 			{Short: "h", Name: helpCommand, Description: "help for secret import"},
 		},
@@ -1484,15 +1486,21 @@ func skillsImportHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
 			"Import a local skill directory into Rheic's host-side skills store.",
+			"Without PATH, import from supported host directories in priority order.",
+			"Use --dry-run without PATH to preview candidates in supported host directories.",
+			"A skill-directory link requires --allow-link NAME=ABSOLUTE_TARGET. --force",
+			"does not approve links; the target must be a canonical real directory.",
 			"PATH must be a real directory with a SKILL.md file. SKILL.md requires YAML",
 			"frontmatter with \"name\" and \"description\" fields.",
 			"",
-			"Symlinks, special files, oversized files and oversized trees are rejected.",
+			"Other symlinks, special files, oversized files and oversized trees are rejected.",
 			"Identical re-imports are no-ops. Use --force only to replace skill content that",
 			"Rheic already imported; unmanaged directories are never overwritten.",
 		},
-		Usage: []string{"rsbx skills import [flags] PATH"},
+		Usage: []string{"rsbx skills import [flags] [PATH]", "rsbx skills import --dry-run"},
 		Flags: []commandFlagHelp{
+			{Name: dryRunName, Description: "preview host skills without importing them"},
+			{Name: "allow-link", Value: "NAME=ABSOLUTE_TARGET", Description: "approve one exact link target (repeatable)"},
 			{Short: "f", Name: helpNameForce, Description: "replace skill content previously imported by Rheic"},
 			{Short: "h", Name: helpCommand, Description: "help for skills import"},
 		},

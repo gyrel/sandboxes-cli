@@ -98,6 +98,7 @@ func runHelp() commandHelp {
 			{Short: "m", Name: "memory", Value: helpValueString, Description: "memory limit for a new sandbox, such as 512m or 2g"},
 			{Name: helpNameName, Value: helpValueString, Description: "sandbox name; reuse and restart it when it already exists"},
 			{Name: "new", Description: "always create a new sandbox instead of reusing the named one"},
+			{Name: "no-progress", Description: "suppress progress output"},
 			{Name: "policy-profile", Value: helpValueString, Description: "allow-all (default), deny-all, balanced, or sbx-compat"},
 			{Short: "p", Name: helpNamePublish, Value: helpNameStringArray, Description: "publish a guest port (repeatable): [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]"},
 			{Name: "replace", Description: "delete and recreate an existing --name sandbox before running"},

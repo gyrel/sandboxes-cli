@@ -406,7 +406,12 @@ func (r *Runner) environmentRun(ctx context.Context, args []string) int {
 		opts.memory = plan.Memory
 	}
 	resources := runResources{cpus: request.CPUs, memory: request.MemoryMiB, env: entries, ports: request.Ports}
-	return r.runAttached(ctx, client, opts, sandbox, created, plan.Agent, request.Workspaces, true, agentArgs, resources)
+	// The env-run path shares the run attach stages, so it needs the same
+	// terminal guarantee: halt always runs to erase the spinner row and
+	// restore the cursor even when attach returns early.
+	progress := r.deployProgressForRunner(r.Debug)
+	defer progress.halt()
+	return r.runAttached(ctx, client, opts, sandbox, created, plan.Agent, request.Workspaces, true, agentArgs, resources, progress)
 }
 
 func (r *Runner) preflightEnvironmentRun(ctx context.Context, client sdk.Client, plan envfile.Plan, workspacePath string, memory uint32, force bool) (*sdk.Sandbox, bool, bool, error) {

@@ -40,6 +40,8 @@ is refused; a different image keeps the existing image with a warning.
 it, including when the requested agent differs.
 With --detach, rsbx creates or starts the sandbox, prints its ID, and exits.
 --rm removes the sandbox after the attached agent session exits.
+When stderr is a terminal, rsbx shows a live deployment progress indicator on
+stderr; stdout and exit codes are unchanged. --no-progress suppresses it.
 --clone uses a read-only host Git source and a private in-guest clone. The
 source must be the root of a Git repository with a .git directory.
 
@@ -69,6 +71,7 @@ Flags:
   -m, --memory SIZE               memory limit for a new sandbox, such as 512m or 2g
   -e, --env KEY=VALUE             environment override for the agent session (repeatable)
       --env-file FILE             read environment overrides from a file (repeatable)
+      --no-progress               suppress the deployment progress indicator
       --rm                        remove the sandbox after the agent session exits
   -h, --help                      help for run
 
@@ -161,6 +164,7 @@ Examples:
 	refFlag           = "--ref"
 	tokenFlag         = "--token"
 	skillsFlag        = "--skills"
+	noProgressFlag    = "--no-progress"
 )
 
 var errRunAgentRequired = errors.New("agent is required when --name is not set")
@@ -198,6 +202,7 @@ type runOptions struct {
 	remove           bool
 	clone            bool
 	cloneSourcePath  string
+	noProgress       bool
 	help             bool
 }
 
@@ -260,6 +265,9 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		debugBoolean("new", opts.new),
 		debugBoolean(privilegedName, opts.privileged))
 
+	progress := r.runProgress(opts.noProgress)
+	defer progress.halt()
+
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -272,14 +280,22 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		return 1
 	}
 
-	sandbox, created, workspaces, err := r.reuseOrCreateSandbox(ctx, client, opts, agent, workspacePaths, workspacesExplicit, resources)
+	sandbox, created, workspaces, err := r.reuseOrCreateSandbox(ctx, client, opts, agent, workspacePaths, workspacesExplicit, resources, progress)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
 	r.debug(ctx, debugEventRunSandbox, debugBoolean("created", created))
 	r.debug(ctx, debugEventRunAttach, debugBoolean("detached", opts.detach))
-	return r.runAttached(ctx, client, opts, sandbox, created, agent, workspaces, workspacesExplicit, agentArgs, resources)
+	return r.runAttached(ctx, client, opts, sandbox, created, agent, workspaces, workspacesExplicit, agentArgs, resources, progress)
+}
+
+// runProgress builds the deployment indicator for a run invocation.
+// -D/--debug writes structured events to the same stderr stream; the in-place
+// spinner row would erase them, so the diagnostic mode wins and the indicator
+// stays silent.
+func (r *Runner) runProgress(noProgress bool) *deployProgress {
+	return r.deployProgressForRunner(noProgress || r.Debug)
 }
 
 func (r *Runner) runWorkspaceError(err error) int {
@@ -628,7 +644,7 @@ func hasEnvironmentKey(env []string, target string) bool {
 }
 
 //nolint:gocognit,gocyclo,cyclop,nestif,gocritic,funlen // attach/terminal/detach semantics form one transaction.
-func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOptions, sandbox *sdk.Sandbox, created bool, agent string, workspaces []sdk.Workspace, workspacesExplicit bool, agentArgs []string, resources runResources) int {
+func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOptions, sandbox *sdk.Sandbox, created bool, agent string, workspaces []sdk.Workspace, workspacesExplicit bool, agentArgs []string, resources runResources, progress *deployProgress) int {
 	if sandbox == nil || sandbox.ID == "" {
 		r.error(errors.New("sandbox creation returned no sandbox"))
 		return 1
@@ -650,9 +666,19 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 		}
 		r.warnReusedResources(sandbox, opts, resources)
 	}
+	starting := sandbox.State == sdk.StateStopped || sandbox.State == sdk.StateUnknown
+	if starting {
+		progress.begin("runtime — starting…")
+	}
 	if err := ensureSandboxRunning(ctx, client, sandbox); err != nil {
+		if starting {
+			progress.fail()
+		}
 		r.error(err)
 		return 1
+	}
+	if starting {
+		progress.next("sandbox — running")
 	}
 	cloneWorkdir := ""
 	if opts.clone && sandbox.Clone == nil {
@@ -666,13 +692,16 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 		return 1
 	}
 	if sandbox.Clone != nil {
+		progress.begin("workspace — preparing clone…")
 		fresh, err := client.Sandboxes().Get(ctx, sandbox.ID)
 		if err != nil {
+			progress.fail()
 			r.error(err)
 			return 1
 		}
 		cloneWorkdir, err = r.activateCloneSandbox(ctx, fresh, "")
 		if err != nil {
+			progress.fail()
 			r.error(err)
 			if created {
 				if cleanupErr := r.removeRunSandbox(ctx, client, sandbox); cleanupErr != nil {
@@ -681,21 +710,31 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 			}
 			return 1
 		}
+		progress.next("workspace — ready")
 		sandbox = fresh
 	}
 	if opts.detach {
+		// The detached-agent exec streams guest output straight onto r.Out/r.Err.
+		// No spinner here: an in-place row would erase the startup diagnostics,
+		// and the sbx baseline shows no agent stage for this flow either.
 		if argv := agentDetachCommand(agent); len(argv) > 0 {
 			code, err := sdk.ExecService(client).Exec(ctx, sdk.ExecRequest{
 				SandboxID: sandbox.ID, Argv: argv, Workdir: cloneWorkdir, Env: resources.env, Stdout: r.Out, Stderr: r.Err,
 			})
 			if err != nil {
+				progress.halt()
 				r.error(fmt.Errorf("start detached agent: %w", err))
 				return 1
 			}
 			if code != 0 {
+				progress.halt()
 				r.error(fmt.Errorf("start detached agent: exit status %d", code))
 				return 1
 			}
+		}
+		progress.notice("sandbox " + sandbox.Name + " — running detached")
+		if sandbox.Workspace != "" {
+			progress.sub("workspace " + sandbox.Workspace)
 		}
 		_, _ = fmt.Fprintln(r.Out, sandbox.ID)
 		return 0
@@ -703,6 +742,7 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 	if agent == "" {
 		agent = shellAgent
 	}
+	progress.halt()
 	interactive, tty := runTerminal(r.In)
 	closeOnEOF := true
 	if !interactive && !tty {
@@ -719,10 +759,13 @@ func (r *Runner) runAttached(ctx context.Context, client sdk.Client, opts runOpt
 	code := r.execSessionMode(ctx, client, sandbox.ID, argv, execOptions{workdir: cloneWorkdir, env: sessionEnv}, interactive, tty, closeOnEOF)
 	if opts.remove {
 		r.warnCloneRemoval(sandbox)
+		progress.begin("sandbox — removing…")
 		if err := r.removeRunSandbox(ctx, client, sandbox); err != nil {
+			progress.fail()
 			r.error(err)
 			return 1
 		}
+		progress.next("sandbox — removed")
 	}
 	return code
 }
@@ -884,6 +927,9 @@ func parseRunValueFlag(r *Runner, args []string, index int, arg string, opts *ru
 	case "--clone":
 		opts.clone = true
 		return 1, true, nil
+	case noProgressFlag:
+		opts.noProgress = true
+		return 1, true, nil
 	case newFlag:
 		opts.new = true
 		return 1, true, nil
@@ -1035,6 +1081,14 @@ func parseRunAssignmentFlag(r *Runner, arg string, opts *runOptions) (int, bool,
 	if value, ok := strings.CutPrefix(arg, skillsFlag+"="); ok {
 		consumed, err := setRunValue(skillsFlag, value, &opts.skills)
 		return consumed, true, err
+	}
+	if value, ok := strings.CutPrefix(arg, noProgressFlag+"="); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return 0, true, fmt.Errorf("--no-progress requires a boolean value, got %q", value)
+		}
+		opts.noProgress = parsed
+		return 1, true, nil
 	}
 	return 0, false, nil
 }
@@ -1189,14 +1243,14 @@ func checkReusedWorkspaceMode(sandbox *sdk.Sandbox, requested []sdk.Workspace, c
 }
 
 //nolint:gocritic // runOptions is an immutable value object.
-func (r *Runner) reuseOrCreateSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, explicit bool, resources runResources) (*sdk.Sandbox, bool, []sdk.Workspace, error) {
+func (r *Runner) reuseOrCreateSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, explicit bool, resources runResources, progress *deployProgress) (*sdk.Sandbox, bool, []sdk.Workspace, error) {
 	if opts.name != "" {
-		reused, requested, found, err := r.reuseNamedRunSandbox(ctx, client, opts, agent, paths, explicit)
+		reused, requested, found, err := r.reuseNamedRunSandbox(ctx, client, opts, agent, paths, explicit, progress)
 		if err != nil || found {
 			return reused, false, requested, err
 		}
 	} else if !opts.new {
-		reused, found, err := r.findDerivedReuse(ctx, client, agent, opts.image, paths, opts.clone)
+		reused, found, err := r.findDerivedReuse(ctx, client, agent, opts.image, paths, opts.clone, progress)
 		if err != nil || found {
 			return reused, false, nil, err
 		}
@@ -1205,7 +1259,7 @@ func (r *Runner) reuseOrCreateSandbox(ctx context.Context, client sdk.Client, op
 	if err != nil {
 		return nil, false, nil, err
 	}
-	created, owned, err := r.createRunSandbox(ctx, client, opts, agent, paths, workspaces, resources)
+	created, owned, err := r.createRunSandbox(ctx, client, opts, agent, paths, workspaces, resources, progress)
 	return created, owned, workspaces, err
 }
 
@@ -1214,7 +1268,7 @@ func (r *Runner) reuseOrCreateSandbox(ctx context.Context, client sdk.Client, op
 // sandbox first, which is the only way to reuse a name with another agent.
 //
 //nolint:gocritic // runOptions is an immutable value object.
-func (r *Runner) reuseNamedRunSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, explicit bool) (*sdk.Sandbox, []sdk.Workspace, bool, error) {
+func (r *Runner) reuseNamedRunSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, explicit bool, progress *deployProgress) (*sdk.Sandbox, []sdk.Workspace, bool, error) {
 	existing, requested, found, err := r.findRunReuse(ctx, client, opts.name, paths, explicit)
 	if err != nil {
 		return nil, nil, false, err
@@ -1232,15 +1286,32 @@ func (r *Runner) reuseNamedRunSandbox(ctx context.Context, client sdk.Client, op
 	if opts.replace {
 		r.warnRunReplacement(existing, differences)
 		r.warnCloneRemoval(existing)
+		progress.begin("sandbox — replacing…")
 		if err := r.removeRunSandbox(ctx, client, existing); err != nil {
+			progress.fail()
 			return nil, nil, false, fmt.Errorf("replace sandbox %s: %w", existing.Name, err)
 		}
+		progress.next("sandbox — replaced")
 		return nil, nil, false, nil
 	}
 	if len(differences) > 0 {
 		_, _ = fmt.Fprintf(r.Err, "warning: sandbox %s already uses %s; keeping the existing image (use --replace to recreate it)\n", existing.Name, strings.Join(differences, ", "))
 	}
+	progress.summary(existing.Name, existing.Agent, existing.Workspace, firstWorkspaceReadOnly(existing), existing.Image)
+	progress.line("sandbox " + existing.Name + " — reused")
 	return existing, requested, true, nil
+}
+
+// firstWorkspaceReadOnly reports the primary workspace access mode for the
+// progress summary, falling back to the legacy single-workspace field.
+func firstWorkspaceReadOnly(sandbox *sdk.Sandbox) bool {
+	if sandbox == nil {
+		return false
+	}
+	if len(sandbox.Workspaces) > 0 {
+		return sandbox.Workspaces[0].ReadOnly
+	}
+	return false
 }
 
 // describeRunReuseDifferences reports agent and image differences that matter
@@ -1277,7 +1348,7 @@ func (r *Runner) warnRunReplacement(sandbox *sdk.Sandbox, differences []string) 
 // its agent, image, and workspaces match the request. On a terminal the CLI
 // asks before reusing it; without a terminal the matching sandbox is reused so
 // scripts stay deterministic.
-func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent, image string, paths []string, clone bool) (*sdk.Sandbox, bool, error) {
+func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent, image string, paths []string, clone bool, progress *deployProgress) (*sdk.Sandbox, bool, error) {
 	base := workspaceNameBase(paths)
 	if base == "" {
 		return nil, false, nil
@@ -1305,6 +1376,8 @@ func (r *Runner) findDerivedReuse(ctx context.Context, client sdk.Client, agent,
 	if !reuse {
 		return nil, false, nil
 	}
+	progress.summary(existing.Name, existing.Agent, existing.Workspace, firstWorkspaceReadOnly(existing), existing.Image)
+	progress.line("sandbox " + existing.Name + " — reused")
 	return existing, true, nil
 }
 
@@ -1441,7 +1514,7 @@ func (r *Runner) findRunReuse(ctx context.Context, client sdk.Client, name strin
 }
 
 //nolint:gocritic // runOptions is an immutable value object.
-func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, workspaces []sdk.Workspace, resources runResources) (*sdk.Sandbox, bool, error) {
+func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts runOptions, agent string, paths []string, workspaces []sdk.Workspace, resources runResources, progress *deployProgress) (*sdk.Sandbox, bool, error) {
 	name, err := runSandboxName(ctx, client, opts.name, agent, workspaceNameBase(paths))
 	if err != nil {
 		return nil, false, err
@@ -1465,6 +1538,12 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 		workspace = workspaces[0].Path
 		cloneOptions = &sdk.CloneOptions{SourceWorkspacePath: workspaces[0].Path}
 	}
+	ws, wsReadOnly := "", false
+	if len(workspaces) > 0 {
+		ws, wsReadOnly = workspaces[0].Path, workspaces[0].ReadOnly
+	}
+	progress.summary(name, agent, ws, wsReadOnly, opts.image)
+	progress.begin("sandbox — creating…")
 	op, err := client.Sandboxes().Create(ctx, sdk.CreateRequest{
 		Name:             name,
 		Image:            opts.image,
@@ -1485,22 +1564,29 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 		Skills:           opts.skillsOptions,
 	})
 	if err != nil {
+		progress.fail()
 		return r.recoverRunCreate(ctx, client, opts, err)
 	}
 	if op == nil || op.SandboxID == "" {
 		created, found, err := lookupSandboxByName(ctx, client, name)
 		if err != nil {
+			progress.fail()
 			return nil, false, err
 		}
 		if !found {
+			progress.fail()
 			return nil, false, errors.New("sandbox creation returned no sandbox ID")
 		}
+		progress.next("sandbox — reused")
 		return created, false, nil
 	}
 	created, err := client.Sandboxes().Get(ctx, op.SandboxID)
 	if err != nil {
+		progress.fail()
 		return nil, false, err
 	}
+	progress.next("sandbox — ready")
+	progress.notice("Created sandbox " + name)
 	return created, op.Kind == "create", nil
 }
 

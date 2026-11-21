@@ -8,15 +8,15 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-// startCreateProgressWatch opens the best-effort Watch follower for a
-// blocking create and returns its stop function. Calling stop cancels the
+// startCreateProgressWatch opens the best-effort resilient Watch follower
+// (reconnect/resume across transport drops) for a blocking create and returns its stop function. Calling stop cancels the
 // stream and joins the follower; it is safe to call more than once.
 func startCreateProgressWatch(ctx context.Context, client sdk.Client, name string, progress *deployProgress) (stop func()) {
 	watchCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		stream, err := client.Sandboxes().Watch(watchCtx, sdk.WatchOptions{})
+		stream, err := sdk.WatchResilient(watchCtx, client, sdk.WatchOptions{})
 		if err != nil {
 			return
 		}

@@ -251,7 +251,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	if len(opts.publish) == 0 {
 		opts.publish = agentDefaultPorts(agent)
 	}
-	resources, err := prepareRunResources(&opts)
+	resources, err := r.prepareRunResources(&opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
 		return 2
@@ -807,8 +807,8 @@ func (r *Runner) removeRunSandbox(ctx context.Context, client sdk.Client, sandbo
 	return removeCloneRemoteForSandbox(ctx, current, r.gitConfigCommand())
 }
 
-func prepareRunResources(opts *runOptions) (runResources, error) {
-	skills, err := prepareSkills(opts.skills)
+func (r *Runner) prepareRunResources(opts *runOptions) (runResources, error) {
+	skills, err := r.prepareSkillsOption(opts.skills)
 	if err != nil {
 		return runResources{}, err
 	}

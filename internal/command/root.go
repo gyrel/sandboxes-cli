@@ -1497,7 +1497,7 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 	cloneMode := fs.Bool("clone", false, "run the agent on a private in-guest clone of PATH")
 	fs.Bool("no-progress", false, "suppress progress output")
 	kitPath := fs.String("kit", "", "apply a local kit definition")
-	skillsMode := fs.String("skills", "", "shared skills mode: off, readonly or readwrite")
+	skillsMode := fs.String("skills", "", "shared skills mode: off, readonly or readwrite (empty uses skills.defaultMode)")
 	var denyWriteFlags stringListFlag
 	fs.Var(&denyWriteFlags, "deny-write", "mount PATH read-only (repeatable)")
 	if err := fs.Parse(reorderCreateArgs(fs, args)); err != nil {
@@ -1552,7 +1552,7 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 	if err != nil {
 		return createOptions{}, false, err
 	}
-	skills, err := prepareSkills(*skillsMode)
+	skills, err := r.prepareSkillsOption(*skillsMode)
 	if err != nil {
 		return createOptions{}, false, err
 	}

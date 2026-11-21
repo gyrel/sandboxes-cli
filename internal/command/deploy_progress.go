@@ -61,6 +61,7 @@ type deployProgress struct {
 
 	spinnerOpen  bool
 	cursorHidden bool
+	detail       string
 	active       bool
 	gen          uint64
 	step         int
@@ -171,6 +172,7 @@ func (p *deployProgress) next(done string) {
 	}
 	p.settleLocked(p.paint(ansiCheck, "✓"), done)
 	p.label = ""
+	p.detail = ""
 }
 
 // notice prints a blank-line-separated settled row, matching the sbx notices
@@ -186,6 +188,7 @@ func (p *deployProgress) notice(text string) {
 	p.spinnerOpen = false
 	p.active = false
 	p.label = ""
+	p.detail = ""
 	p.showCursorLocked()
 }
 
@@ -214,6 +217,7 @@ func (p *deployProgress) fail() {
 	}
 	p.settleLocked(p.paint(ansiCross, "✗"), p.label)
 	p.label = ""
+	p.detail = ""
 }
 
 // line prints an informational settled line without an active stage, for
@@ -227,6 +231,7 @@ func (p *deployProgress) line(text string) {
 	defer p.mu.Unlock()
 	p.writef("%s%s %s\n", progressIndent, p.paint(ansiGray, "·"), clipCell(text, max(p.width-len(progressIndent)-3, 0)))
 	p.spinnerOpen = false
+	p.detail = ""
 	p.active = false
 	p.label = ""
 	p.showCursorLocked()
@@ -251,7 +256,27 @@ func (p *deployProgress) halt() {
 		p.writef(ansiShowCursor)
 	}
 	p.label = ""
+	p.detail = ""
 	p.active = false
+}
+
+// setDetail updates the advisory suffix of the active spinner row (for
+// example "5/7 layers" from daemon pull progress). It is display data only:
+// it never appears on committed history lines and a nil or disabled
+// indicator ignores it.
+func (p *deployProgress) setDetail(detail string) {
+	if p == nil || !p.enabled {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.active || p.detail == detail {
+		return
+	}
+	p.detail = detail
+	if p.spinnerOpen {
+		p.renderLocked()
+	}
 }
 
 // paint applies ANSI styling when colors are enabled and returns plain text
@@ -282,9 +307,13 @@ func (p *deployProgress) erase() string {
 // until a display-width helper is shared with the dashboard.
 func (p *deployProgress) renderLocked() {
 	frame := progressFrames[p.step%len(progressFrames)]
-	overhead := runeWidth(progressIndent) + runeWidth(frame) + 2
+	trailer := ""
+	if p.detail != "" {
+		trailer = p.paint(ansiGray, " "+p.detail)
+	}
+	overhead := runeWidth(progressIndent) + runeWidth(frame) + runeWidth(" "+p.detail) + 2
 	label := clipCell(p.label, max(p.width-overhead-1, 0))
-	p.writef("%s%s%s %s", p.erase(), progressIndent, p.paint(ansiSpinner, frame), label)
+	p.writef("%s%s%s %s%s", p.erase(), progressIndent, p.paint(ansiSpinner, frame), label, trailer)
 	p.spinnerOpen = true
 }
 

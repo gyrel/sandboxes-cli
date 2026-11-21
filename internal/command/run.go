@@ -1544,6 +1544,10 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 	}
 	progress.summary(name, agent, ws, wsReadOnly, opts.image)
 	progress.begin("sandbox — creating…")
+	// The create RPC blocks through image pull; a best-effort Watch follower
+	// decorates the spinner with layer counts when the daemon reports them.
+	stopWatch := startCreateProgressWatch(ctx, client, name, progress)
+	defer stopWatch()
 	op, err := client.Sandboxes().Create(ctx, sdk.CreateRequest{
 		Name:             name,
 		Image:            opts.image,

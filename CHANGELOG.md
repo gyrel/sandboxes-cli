@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.0.68 — 2026-11-22
+
+### Changed
+
+- Release-mechanics only: the v0.0.67 tag was cut on the previous main
+  commit by a faulty finisher (merge had not completed) and cannot be
+  retagged under repository rules; its content ships unchanged as
+  v0.0.68. No published GitHub Release exists for v0.0.67.
+
 ## v0.0.67 — 2026-11-22
 
 ### Added

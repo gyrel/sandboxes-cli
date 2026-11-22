@@ -288,7 +288,7 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 	case daemonCommand:
 		return r.daemon(args), true
 	case templateCommand:
-		return r.template(args), true
+		return r.template(ctx, args), true
 	case commandAgents:
 		return r.agents(args), true
 	case envCommand:

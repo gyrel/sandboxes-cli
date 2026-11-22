@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.67 — 2026-11-22
+
+### Added
+
+- Template management: `template save SANDBOX TAG [--output PATH]`,
+  `template load FILE [NAME]`, `template rm [-f] NAME` (interactive
+  confirmation unless forced; reference guard is server-side),
+  `template export NAME PATH` (exclusive destination). Recorded templates
+  appear in machine outputs when the daemon supports the service; older
+  daemons return the standard unsupported error.
+
 ## v0.0.66 — 2026-11-22
 
 ### Added

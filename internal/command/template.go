@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -18,8 +19,11 @@ Commands:
   ls [--format table|json|yaml]   list built-in agent template images
   inspect NAME [--json]            show the pinned image and status
 
-save/load/rm are not implemented: this build does not snapshot or import
-sandbox images. Use --image or a local kit for a custom image.
+save SANDBOX TAG [--output PATH]  capture a sandbox into a template image
+  load FILE [NAME]                  import a template archive
+  rm [-f] NAME                      remove a recorded template
+  export NAME PATH                  write a docker-save archive
+  (template management requires daemon template support, API 0.0.33+)
 `
 
 const templateListUsage = `usage: rsbx template ls [--format table|json|yaml] [--json]
@@ -42,7 +46,7 @@ type templateOutput struct {
 	Notes   string `json:"notes,omitempty" yaml:"notes,omitempty"`
 }
 
-func (r *Runner) template(args []string) int {
+func (r *Runner) template(ctx context.Context, args []string) int {
 	args, code, done := r.prepareFamilyArgs(templateCommand, args)
 	if done {
 		return code
@@ -58,9 +62,14 @@ func (r *Runner) template(args []string) int {
 		return r.templateList(args[1:])
 	case commandInspect:
 		return r.templateInspect(args[1:])
-	case "save", "load", "rm":
-		_, _ = fmt.Fprintf(r.Err, "rsbx template %s: unsupported: local template snapshots/import/removal are not implemented\n", args[0])
-		return 1
+	case "save":
+		return r.templateSave(ctx, args[1:])
+	case "load":
+		return r.templateLoad(ctx, args[1:])
+	case "rm", "remove":
+		return r.templateRemove(ctx, args[1:])
+	case "export":
+		return r.templateExport(ctx, args[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx template: unknown subcommand %q\n", args[0])
 		return 2

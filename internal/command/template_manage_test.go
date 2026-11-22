@@ -104,6 +104,25 @@ func TestTemplateCommandsDriveSDK(t *testing.T) {
 	}
 }
 
+func TestTemplateHelpListsManagementCommands(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("")}
+	if code := runner.Run(context.Background(), []string{"template", "--help"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	help := out.String()
+	for _, name := range []string{"export", "inspect", "load", "ls", "rm", "save"} {
+		if !strings.Contains(help, "\n  "+name+" ") {
+			t.Fatalf("template help lacks %q command: %q", name, help)
+		}
+	}
+	for _, stale := range []string{"not implemented", "does not snapshot", "lists and inspects"} {
+		if strings.Contains(help, stale) {
+			t.Fatalf("template help still claims %q: %q", stale, help)
+		}
+	}
+}
+
 func TestTemplateRemoveConfirmation(t *testing.T) {
 	tmpl := &fakeTemplateService{}
 	runner, out := newTemplateCommandRunner(t, tmpl)

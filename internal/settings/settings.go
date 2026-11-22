@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,12 +65,7 @@ func Load(path string) (Values, error) {
 	if err != nil {
 		return values, fmt.Errorf("stat settings: %w", err)
 	}
-	// The group/other-writable bit check is only meaningful where mode bits
-	// model real access (POSIX). Windows synthesizes permissions from ACLs,
-	// so Go reports new files as group/world-writable regardless of actual
-	// access; applying it there would reject every valid settings file. The
-	// regular-file requirement holds everywhere.
-	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o022 != 0) {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
 		return values, errors.New("settings file must be a regular file not writable by group or others")
 	}
 	if err := parse(file, &values); err != nil {

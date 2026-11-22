@@ -22,9 +22,11 @@
 
 ### Fixed
 
-- Settings permission hardening no longer rejects every settings file on
-  Windows, where Go synthesizes group/world-writable bits from ACLs that do
-  not reflect actual access (POSIX bit check unchanged).
+- Build version constant advanced to 0.0.65 (release-train invariant enforced
+  by the version test).
+- Skills default-mode tests now encode the documented Windows contract: ACL
+  validation is unimplemented, so settings loading (and `skills.defaultMode`)
+  stays fail closed on Windows instead of guessing a mount mode.
 
 ## v0.0.64 — 2026-11-19
 

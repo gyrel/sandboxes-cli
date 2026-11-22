@@ -3,6 +3,7 @@ package command
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -58,6 +59,15 @@ func TestResolveSkillsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("RHEIC_SETTINGS_FILE", settingsPath)
+	if runtime.GOOS == "windows" {
+		// Windows ACL validation is not implemented; settings loading stays
+		// fail closed there (see settings_windows_test.go), so the
+		// configured mode cannot be read and must not be guessed.
+		if _, err := (&Runner{}).resolveSkillsMode(""); err == nil {
+			t.Fatal("configured settings read must fail closed on Windows")
+		}
+		return
+	}
 	if got, err := (&Runner{}).resolveSkillsMode(""); err != nil || got != "off" {
 		t.Fatalf("configured mode: %q, %v", got, err)
 	}

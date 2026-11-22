@@ -351,9 +351,10 @@ func TestPolicyRemoveNetworkRejectsPartialOrInvalidSelectors(t *testing.T) {
 		{name: "unknown id", args: []string{"policy", "rm", "network", "--id", "rul_missing", "--force"}, contains: "not found"},
 		{name: "unknown resource", args: []string{"policy", "rm", "network", "--resource", "203.0.113.0/24:443", "--force"}, contains: "no rule matches"},
 		{name: "mixed resources are atomic", args: []string{"policy", "rm", "network", "--resource", "10.0.0.0/8:443,203.0.113.0/24:443", "--force"}, contains: "no rule matches"},
-		{name: "method unsupported", args: []string{"policy", "rm", "network", "--method", "GET", "--resource", "10.0.0.0/8:443", "--force"}, contains: "HTTP method/path/query selectors are not supported"},
-		{name: "path unsupported", args: []string{"policy", "rm", "network", "--path", "/v1/**", "--resource", "10.0.0.0/8:443", "--force"}, contains: "HTTP method/path/query selectors are not supported"},
-		{name: "query unsupported", args: []string{"policy", "rm", "network", "--query", "a=b", "--resource", "10.0.0.0/8:443", "--force"}, contains: "HTTP method/path/query selectors are not supported"},
+		{name: "method narrows", args: []string{"policy", "rm", "network", "--method", "GET", "--resource", "10.0.0.0/8:443", "--force"}, contains: "no rule matches"},
+		{name: "path narrows", args: []string{"policy", "rm", "network", "--path", "/v1/**", "--resource", "10.0.0.0/8:443", "--force"}, contains: "no rule matches"},
+		{name: "query narrows", args: []string{"policy", "rm", "network", "--query", "a=b", "--resource", "10.0.0.0/8:443", "--force"}, contains: "no rule matches"},
+		{name: "id with selectors", args: []string{"policy", "rm", "network", "--id", "rul_allow_tcp", "--method", "GET", "--force"}, contains: "cannot be combined"},
 		{name: "non terminal needs force", args: []string{"policy", "rm", "network", "--resource", "10.0.0.0/8:443"}, contains: "pass --force"},
 		{name: "unknown flag", args: []string{"policy", "rm", "network", "--bogus"}, contains: "unknown flag"},
 	}

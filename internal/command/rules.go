@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -107,4 +108,82 @@ func resolveNetworkRules(values []string) ([]sdk.NetworkRule, error) {
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+// networkHTTPSelectors carries the raw HTTP L7 flag values of
+// `policy allow|deny|rm network`. Values stay as authored: canonicalization
+// (upper-case methods, ANY sentinel, glob validation) is the daemon's job and
+// older daemons refuse them outright through the SDK contract gate, so the
+// CLI never needs to normalize or guess here.
+type networkHTTPSelectors struct {
+	methods stringListFlag
+	path    string
+	queries stringListFlag
+}
+
+func (s networkHTTPSelectors) empty() bool {
+	return len(s.methods) == 0 && s.path == "" && len(s.queries) == 0
+}
+
+// applyNetworkHTTPSelectors attaches authored HTTP selectors to one rule.
+// Method values may be comma lists (the gateway grammar); query values are
+// single name=glob pairs because a comma can legitimately appear inside a
+// glob value.
+func applyNetworkHTTPSelectors(rule *sdk.NetworkRule, sel networkHTTPSelectors) error {
+	if sel.empty() {
+		return nil
+	}
+	for _, item := range sel.methods {
+		for _, method := range strings.Split(item, ",") {
+			trimmed := strings.TrimSpace(method)
+			if trimmed == "" {
+				return errors.New("HTTP method list contains an empty entry")
+			}
+			rule.Methods = append(rule.Methods, trimmed)
+		}
+	}
+	if sel.path != "" {
+		rule.Path = sel.path
+	}
+	for _, item := range sel.queries {
+		name, value, found := strings.Cut(strings.TrimSpace(item), "=")
+		if !found || name == "" {
+			return fmt.Errorf("query condition %q must be name=value", item)
+		}
+		rule.Query = append(rule.Query, sdk.QueryCondition{Name: name, Value: strings.TrimSpace(value)})
+	}
+	return nil
+}
+
+// canonicalMethodsKey renders methods for selector comparison independent of
+// authoring order and case. ANY alone conditions the rule, so it survives as
+// a sentinel entry.
+func canonicalMethodsKey(methods []string) string {
+	if len(methods) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	var parts []string
+	for _, m := range methods {
+		upper := strings.ToUpper(strings.TrimSpace(m))
+		if upper == "" || seen[upper] {
+			continue
+		}
+		seen[upper] = true
+		parts = append(parts, upper)
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, ",")
+}
+
+func canonicalQueryKey(query []sdk.QueryCondition) string {
+	if len(query) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(query))
+	for _, q := range query {
+		parts = append(parts, q.Name+"="+q.Value)
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, ";")
 }

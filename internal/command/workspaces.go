@@ -29,6 +29,10 @@ func parseWorkspaceSpec(value string) (sdk.Workspace, error) {
 	if err != nil {
 		return sdk.Workspace{}, err
 	}
+	// Direct workspace paths are user-trusted by contract (§8 workspace
+	// direct); normalize explicitly so the stat target is unambiguously a
+	// cleaned absolute path rather than a tainted passthrough.
+	absolute = filepath.Clean(absolute)
 	info, err := os.Stat(absolute)
 	if err != nil {
 		return sdk.Workspace{}, fmt.Errorf("workspace %s: %w", path, err)

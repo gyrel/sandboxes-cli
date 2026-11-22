@@ -12,6 +12,7 @@ const (
 	helpNameName        = "name"
 	helpNamePublish     = "publish"
 	helpNameQuiet       = "quiet"
+	helpNameMethod      = "method"
 	helpNameSandbox     = "sandbox"
 	helpNameStringArray = "stringArray"
 	helpNameWrite       = "write"
@@ -936,6 +937,9 @@ func policyMutateNetworkHelp(action string) commandHelp {
 		Usage: []string{"rsbx policy " + action + " network [flags] CIDR[:PORT]|DOMAIN"},
 		Flags: []commandFlagHelp{
 			{Short: "h", Name: helpCommand, Description: "help for policy " + action + " network"},
+			{Name: helpNameMethod, Value: "strings", Description: "restrict the rule to these HTTP methods (comma list or repeats; ANY matches every method)"},
+			{Name: "path", Value: helpValueString, Description: "restrict the rule to this HTTP path glob (** spans segments, * does not)"},
+			{Name: "query", Value: "stringArray", Description: "require an HTTP query parameter name=glob (repeatable)"},
 			{Name: helpNameSandbox, Value: helpValueString, Description: "scope the rule to one sandbox (global scope when omitted)"},
 		},
 	}
@@ -951,8 +955,8 @@ func policyRemoveNetworkHelp() commandHelp {
 			"command resolves every selector before removing anything.",
 			"Pass only one of --id, --resource, or a positional target.",
 			"",
-			"HTTP method/path/query selectors are rejected explicitly because HTTP",
-			"policy rules are not implemented in this build.",
+			"HTTP method/path/query selectors narrow a resource or positional",
+			"match; --id cannot be combined with them.",
 		},
 		Usage: []string{"rsbx policy rm network [--sandbox SANDBOX] [flags]"},
 		Examples: []string{
@@ -965,9 +969,9 @@ func policyRemoveNetworkHelp() commandHelp {
 			{Short: "f", Name: helpNameForce, Description: "skip confirmation prompts"},
 			{Short: "h", Name: helpCommand, Description: "help for policy rm network"},
 			{Name: "id", Value: helpValueString, Description: "remove by rule ID"},
-			{Name: "method", Value: "strings", Description: "HTTP methods (unsupported; rejected)"},
-			{Name: "path", Value: helpValueString, Description: "HTTP path glob (unsupported; rejected)"},
-			{Name: "query", Value: "stringArray", Description: "HTTP query parameter (unsupported; rejected)"},
+			{Name: helpNameMethod, Value: "strings", Description: "HTTP methods the removed rule must be conditioned on"},
+			{Name: "path", Value: helpValueString, Description: "HTTP path glob the removed rule must be conditioned on"},
+			{Name: "query", Value: "stringArray", Description: "HTTP query parameter name=glob condition"},
 			{Name: "resource", Value: helpValueString, Description: "remove by resource value(s), comma-separated"},
 			{Name: helpNameSandbox, Value: helpValueString, Description: "scope the removal to a specific sandbox"},
 		},
@@ -993,6 +997,7 @@ func policyCheckNetworkHelp() commandHelp {
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
 			{Short: "h", Name: helpCommand, Description: "help for policy check network"},
 			{Name: listFormatJSON, Description: helpJSONLowerDescription},
+			{Name: helpNameMethod, Value: helpValueString, Description: "HTTP method to evaluate (http(s) URL targets only)"},
 			{Name: "protocol", Value: helpValueString, Description: "protocol to evaluate: tcp or udp (default tcp)"},
 			{Name: helpNameSandbox, Value: helpValueString, Description: "scope the check to one sandbox"},
 		},

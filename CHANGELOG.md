@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.0.66 — 2026-11-22
+
+### Added
+
+- `policy allow|deny network` accept `--method` (comma list or repeats,
+  `ANY` supported), `--path` (segment-aware glob, `**` spans segments) and
+  `--query name=glob` HTTP selectors; `policy rm network` narrows resource
+  and positional matches with the same selectors (`--id` stays exclusive).
+- `policy check network` forwards http(s) URL targets with optional
+  `--method` for L7 evaluation (daemon API 0.0.32; older daemons refuse
+  via the SDK contract gate instead of evaluating L4-only).
+- `policy ls --wide` shows the METHOD and PATH columns; JSON/YAML rules
+  carry `methods`/`path`/`query` only when conditioned (documented local
+  fields pending the version-matched sbx fixture for the exact schema).
+
+### Compatibility
+
+- Conditioned rules require daemon v0.0.76+ (contract 0.0.31); the SDK
+  refuses with a typed unsupported error otherwise, so a plain
+  domain-allow downgrade cannot happen silently.
+
 ## v0.0.65 — 2026-11-22
 
 ### Added

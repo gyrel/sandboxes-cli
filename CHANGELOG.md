@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.0.65 — 2026-11-22
+
+### Added
+
+- Layered pull progress during create: a best-effort Watch follower shows
+  `… N/M layers` on the active spinner line via the resilient watch stream,
+  degrading silently against older daemons.
+- `daemon status` reports the signed-in Docker account (`Account: signed in
+  as <user>`; JSON `account`), login ensures a detached daemon, and logout
+  stops the daemon the CLI started.
+- sbx-compatible sandbox name precheck and a display-cells width helper for
+  CJK-safe clipping.
+
+### Changed
+
+- Skills default parity: explicit flag > `skills.defaultMode` settings >
+  catalog default (readonly); a broken settings file fails closed. Requires
+  daemon ≥ v0.0.75; against older daemons `run shell` keeps the previous
+  conflict behavior.
+
+### Fixed
+
+- Settings permission hardening no longer rejects every settings file on
+  Windows, where Go synthesizes group/world-writable bits from ACLs that do
+  not reflect actual access (POSIX bit check unchanged).
+
 ## v0.0.64 — 2026-11-19
 
 ### Fixed

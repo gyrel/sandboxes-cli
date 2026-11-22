@@ -29,7 +29,7 @@ func TestParseNetworkRule(t *testing.T) {
 		{"[2001:db8::1]:443", sdk.NetworkRule{Protocol: "tcp", CIDR: "2001:db8::1/128", Port: 443}, true},
 	} {
 		rule, err := parseNetworkRule(tc.value)
-		if (err == nil) != tc.ok || rule != tc.rule {
+		if (err == nil) != tc.ok || !sameRuleForFake(rule, tc.rule) {
 			t.Fatalf("parseNetworkRule(%q)=%+v,%v", tc.value, rule, err)
 		}
 	}

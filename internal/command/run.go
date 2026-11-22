@@ -102,6 +102,7 @@ Examples:
 	publishShort      = "-p"
 	publishFlag       = "--publish"
 	policyProfileFlag = "--policy-profile"
+	methodFlag        = "--method"
 	protocolFlag      = "--protocol"
 	logTypeFlag       = "--type"
 	dockerFlag        = "--docker"

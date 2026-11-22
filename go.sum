@@ -24,10 +24,10 @@ github.com/lkmavi/saferefl v0.4.0 h1:89sJtJbFqRV/xKKgt1Flnd6YVmokM+M7asuuBHWK6GE
 github.com/lkmavi/saferefl v0.4.0/go.mod h1:E1RwpKBEuWaAaV5ZtoUPYbKEb+OcHvskuFWFUy4QpX4=
 github.com/lucasb-eyer/go-colorful v1.4.1 h1:1EO+WB73+EH8EVbzlrG3KLAfEypQWVHIBqlTf+2hNss=
 github.com/lucasb-eyer/go-colorful v1.4.1/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
-github.com/rheic/sandboxes-api v0.0.30 h1:4ZGkV7PO5gRwY125JVVkdNyckCJEAWsCUErVkgMpvhs=
-github.com/rheic/sandboxes-api v0.0.30/go.mod h1:R3Hvfvl1WzUaK2f1GVJv7AdPKw5JgHFPqsiWaQYNl94=
-github.com/rheic/sandboxes-go-sdk v0.0.28 h1:omw2wkbO1m52W2f4HlkabMKetOk3cqRf+jRioytAraQ=
-github.com/rheic/sandboxes-go-sdk v0.0.28/go.mod h1:V57ZU/eYFTyPEJoZZT9oXlt3Sfe6e3azf5DSB+HN+yE=
+github.com/rheic/sandboxes-api v0.0.32 h1:Ali94/MK6M8HbJCTPmYTn/70XOlXniaU83MHvwdThCc=
+github.com/rheic/sandboxes-api v0.0.32/go.mod h1:R3Hvfvl1WzUaK2f1GVJv7AdPKw5JgHFPqsiWaQYNl94=
+github.com/rheic/sandboxes-go-sdk v0.0.30 h1:2KhiJkglpTlfTPxo3blpcMwSn4MGhVrxImQD/YKJT9w=
+github.com/rheic/sandboxes-go-sdk v0.0.30/go.mod h1:oxwAOCzi+Rauj+78fJis9tl7nW9K6w5T1J6ZrC/ara4=
 github.com/rheic/slogx v0.1.0 h1:c4QpKu547M4kN/RelGISVtuAzuGmc1TDYsmaU2O3RKg=
 github.com/rheic/slogx v0.1.0/go.mod h1:K8pWPJtcBkyMvgbzh4BlnhlJJ9UPsMer9U7aoZJSM9g=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=

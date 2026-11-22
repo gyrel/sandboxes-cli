@@ -135,8 +135,8 @@ func (p *policyUpdateClient) UpdatePolicy(_ context.Context, id string, allow, d
 	return &sdk.Sandbox{ID: "sb-1", Name: "dev", Allow: allow, Deny: deny}, nil
 }
 
-func (p *policyUpdateClient) Check(ctx context.Context, id, protocol, address, domain string, port uint16) (sdk.PolicyDecision, error) {
-	return fakePolicyCheck{sandboxes: p.fakeClient.sandbox}.Check(ctx, id, protocol, address, domain, port)
+func (p *policyUpdateClient) Check(ctx context.Context, id, protocol, address, domain string, port uint16, url, method string) (sdk.PolicyDecision, error) {
+	return fakePolicyCheck{sandboxes: p.fakeClient.sandbox}.Check(ctx, id, protocol, address, domain, port, url, method)
 }
 
 func (p *policyUpdateClient) GetGlobalPolicy(context.Context) ([]sdk.NetworkRule, []sdk.NetworkRule, error) {
@@ -162,11 +162,11 @@ func (p *policyUpdateClient) MutatePolicy(ctx context.Context, id, action string
 	case "deny":
 		deny = append(deny, rule)
 	case "rm":
-		if !slices.Contains(allow, rule) && !slices.Contains(deny, rule) {
+		if !containsRuleForFake(allow, rule) && !containsRuleForFake(deny, rule) {
 			return nil, errors.New("policy rule not found")
 		}
-		allow = slices.DeleteFunc(allow, func(r sdk.NetworkRule) bool { return r == rule })
-		deny = slices.DeleteFunc(deny, func(r sdk.NetworkRule) bool { return r == rule })
+		allow = slices.DeleteFunc(allow, func(r sdk.NetworkRule) bool { return sameRuleForFake(r, rule) })
+		deny = slices.DeleteFunc(deny, func(r sdk.NetworkRule) bool { return sameRuleForFake(r, rule) })
 	}
 	return p.UpdatePolicy(ctx, id, allow, deny)
 }
@@ -307,7 +307,7 @@ func (f fakePolicyCheck) ResetGlobal(context.Context) ([]sdk.NetworkRule, []sdk.
 func (f fakePolicyCheck) MutateGlobalPolicy(context.Context, string, sdk.NetworkRule) ([]sdk.NetworkRule, []sdk.NetworkRule, error) {
 	return nil, nil, &sdk.Error{Code: "unsupported", Message: "global policy is not supported by this client"}
 }
-func (f fakePolicyCheck) Check(ctx context.Context, id, protocol, address, domain string, port uint16) (sdk.PolicyDecision, error) {
+func (f fakePolicyCheck) Check(ctx context.Context, id, protocol, address, domain string, port uint16, url, method string) (sdk.PolicyDecision, error) {
 	if id == "" {
 		return sdk.PolicyDecision{Allowed: false, Reason: "default deny"}, nil
 	}
@@ -341,6 +341,9 @@ type policyCheckNetworkCall struct {
 	Address  string
 	Domain   string
 	Port     uint16
+
+	URL    string
+	Method string
 }
 
 // policyCheckNetworkRecorder reuses the fake policy client and records the
@@ -351,8 +354,8 @@ type policyCheckNetworkRecorder struct {
 	calls    []policyCheckNetworkCall
 }
 
-func (p *policyCheckNetworkRecorder) Check(_ context.Context, id, protocol, address, domain string, port uint16) (sdk.PolicyDecision, error) {
-	p.calls = append(p.calls, policyCheckNetworkCall{ID: id, Protocol: protocol, Address: address, Domain: domain, Port: port})
+func (p *policyCheckNetworkRecorder) Check(_ context.Context, id, protocol, address, domain string, port uint16, url, method string) (sdk.PolicyDecision, error) {
+	p.calls = append(p.calls, policyCheckNetworkCall{ID: id, Protocol: protocol, Address: address, Domain: domain, Port: port, URL: url, Method: method})
 	return p.decision, p.err
 }
 
@@ -361,8 +364,8 @@ type policyCheckNetworkService struct {
 	recorder *policyCheckNetworkRecorder
 }
 
-func (s policyCheckNetworkService) Check(ctx context.Context, id, protocol, address, domain string, port uint16) (sdk.PolicyDecision, error) {
-	return s.recorder.Check(ctx, id, protocol, address, domain, port)
+func (s policyCheckNetworkService) Check(ctx context.Context, id, protocol, address, domain string, port uint16, url, method string) (sdk.PolicyDecision, error) {
+	return s.recorder.Check(ctx, id, protocol, address, domain, port, url, method)
 }
 
 type policyCheckNetworkClient struct {
@@ -393,16 +396,19 @@ func TestPolicyCheckNetworkProtocolAndPortDefaults(t *testing.T) {
 		address  string
 		domain   string
 		port     uint16
+		url      string
+		method   string
 	}{
-		{[]string{"192.0.2.1"}, "", "tcp", "192.0.2.1", "", 443},
-		{[]string{"192.0.2.1:8443"}, "", "tcp", "192.0.2.1", "", 8443},
-		{[]string{"http://192.0.2.1/path"}, "", "tcp", "192.0.2.1", "", 80},
-		{[]string{"https://192.0.2.1/path"}, "", "tcp", "192.0.2.1", "", 443},
-		{[]string{"example.com"}, "", "tcp", "", "example.com", 443},
-		{[]string{"example.com:8443"}, "", "tcp", "", "example.com", 8443},
-		{[]string{"--protocol", "udp", "192.0.2.1"}, "", "udp", "192.0.2.1", "", 443},
-		{[]string{"192.0.2.1", "--protocol", "udp"}, "", "udp", "192.0.2.1", "", 443},
-		{[]string{"--sandbox", "dev", "192.0.2.1", "--protocol", "udp"}, "sb-1", "udp", "192.0.2.1", "", 443},
+		{[]string{"192.0.2.1"}, "", "tcp", "192.0.2.1", "", 443, "", ""},
+		{[]string{"192.0.2.1:8443"}, "", "tcp", "192.0.2.1", "", 8443, "", ""},
+		{[]string{"http://192.0.2.1/path"}, "", "tcp", "", "", 0, "http://192.0.2.1/path", ""},
+		{[]string{"https://192.0.2.1/path"}, "", "tcp", "", "", 0, "https://192.0.2.1/path", ""},
+		{[]string{"https://api.example.com/v1", "--method", "get"}, "", "tcp", "", "", 0, "https://api.example.com/v1", "get"},
+		{[]string{"example.com"}, "", "tcp", "", "example.com", 443, "", ""},
+		{[]string{"example.com:8443"}, "", "tcp", "", "example.com", 8443, "", ""},
+		{[]string{"--protocol", "udp", "192.0.2.1"}, "", "udp", "192.0.2.1", "", 443, "", ""},
+		{[]string{"192.0.2.1", "--protocol", "udp"}, "", "udp", "192.0.2.1", "", 443, "", ""},
+		{[]string{"--sandbox", "dev", "192.0.2.1", "--protocol", "udp"}, "sb-1", "udp", "192.0.2.1", "", 443, "", ""},
 	}
 	for _, tc := range cases {
 		runner, out, recorder := newPolicyCheckNetworkRunner(t, sdk.PolicyDecision{Allowed: true, RuleID: "rul_net", Reason: "allow rule 192.0.2.0/24"})
@@ -413,8 +419,8 @@ func TestPolicyCheckNetworkProtocolAndPortDefaults(t *testing.T) {
 			t.Fatalf("%v: calls=%+v", tc.args, recorder.calls)
 		}
 		call := recorder.calls[0]
-		if call.ID != tc.id || call.Protocol != tc.protocol || call.Address != tc.address || call.Domain != tc.domain || call.Port != tc.port {
-			t.Fatalf("%v: call=%+v want id=%q protocol=%q address=%q domain=%q port=%d", tc.args, call, tc.id, tc.protocol, tc.address, tc.domain, tc.port)
+		if call.ID != tc.id || call.Protocol != tc.protocol || call.Address != tc.address || call.Domain != tc.domain || call.Port != tc.port || call.URL != tc.url || call.Method != tc.method {
+			t.Fatalf("%v: call=%+v want id=%q protocol=%q address=%q domain=%q port=%d url=%q method=%q", tc.args, call, tc.id, tc.protocol, tc.address, tc.domain, tc.port, tc.url, tc.method)
 		}
 	}
 }
@@ -614,4 +620,21 @@ func TestPolicyCheckNetworkOtherSchemeExplicitPort(t *testing.T) {
 	if _, _, _, err := parsePolicyCheckNetworkTarget("ssh://example.invalid/path"); err == nil {
 		t.Fatal("accepted scheme with no default or explicit port")
 	}
+}
+
+// sameRuleForFake mirrors the daemon's canonical selector identity so the
+// fake behaves like the production delete path for conditioned rules.
+func sameRuleForFake(a, b sdk.NetworkRule) bool {
+	return canonicalMethodsKey(a.Methods) == canonicalMethodsKey(b.Methods) &&
+		a.Path == b.Path && canonicalQueryKey(a.Query) == canonicalQueryKey(b.Query) &&
+		a.Protocol == b.Protocol && a.CIDR == b.CIDR && a.Domain == b.Domain && a.Port == b.Port
+}
+
+func containsRuleForFake(rules []sdk.NetworkRule, rule sdk.NetworkRule) bool {
+	for i := range rules {
+		if sameRuleForFake(rules[i], rule) {
+			return true
+		}
+	}
+	return false
 }

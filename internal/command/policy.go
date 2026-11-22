@@ -42,6 +42,9 @@ type policyRuleOutput struct {
 	Path         string
 	Access       string
 	Port         uint16
+	Methods      []string
+	HTTPPath     string
+	Query        []sdk.QueryCondition
 }
 
 type policyProvenanceOutput struct {
@@ -66,6 +69,18 @@ type policyRuleJSON struct {
 	SandboxID    string                 `json:"sandbox_id,omitempty" yaml:"sandbox_id,omitempty"`
 	Provenance   policyProvenanceOutput `json:"provenance" yaml:"provenance"`
 	Actions      []string               `json:"actions" yaml:"actions"`
+	// HTTP conditions are emitted only when present. The sbx JSON shape for
+	// conditioned rules is not yet confirmed by a version-matched fixture, so
+	// these are documented local extensions until the shared policy fixture
+	// acceptance fixes the exact schema (PLAN §23.4 P1.2 acceptance).
+	Methods []string          `json:"methods,omitempty" yaml:"methods,omitempty"`
+	Path    string            `json:"path,omitempty" yaml:"path,omitempty"`
+	Query   []policyQueryJSON `json:"query,omitempty" yaml:"query,omitempty"`
+}
+
+type policyQueryJSON struct {
+	Name  string `json:"name" yaml:"name"`
+	Value string `json:"value" yaml:"value"`
 }
 
 // policyListOutput is the top-level `sbx policy ls --json` object.
@@ -88,7 +103,7 @@ const policyCheckUsage = `usage: rsbx policy check SANDBOX IP PORT [PROTOCOL]
 Evaluate a request against a sandbox's stored network rules.
 `
 
-const policyCheckNetworkUsage = `usage: rsbx policy check network [--sandbox NAME] [--protocol tcp|udp] [--format table|json|yaml] [--json] TARGET
+const policyCheckNetworkUsage = `usage: rsbx policy check network [--sandbox NAME] [--protocol tcp|udp] [--method METHOD] [--format table|json|yaml] [--json] TARGET
 
 Evaluate an IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s) URL target.
 Bare targets without a port default to 443. JSON and YAML emit sbx's verdict
@@ -120,9 +135,10 @@ Add or remove a network policy rule.
 }
 
 func policyMutateNetworkUsage(action string) string {
-	return fmt.Sprintf(`usage: rsbx policy %s network [--sandbox NAME] CIDR[:PORT]|DOMAIN
+	return fmt.Sprintf(`usage: rsbx policy %s network [--sandbox NAME] [--method M[,M...]] [--path GLOB] [--query NAME=GLOB] CIDR[:PORT]|DOMAIN
 
 Flags may appear before, between or after arguments; use -- to end flag parsing.
+HTTP selectors require daemon API 0.0.31 or newer.
 `, action)
 }
 
@@ -153,7 +169,7 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		if len(args) > 1 && args[1] == networkKeyword {
 			return r.policyMutateNetwork(ctx, args[0], args[2:])
 		}
-		return r.policyMutate(ctx, args[0], args[1:])
+		return r.policyMutate(ctx, args[0], args[1:], networkHTTPSelectors{})
 	case "init":
 		return r.policyInit(ctx, args[1:])
 	case helpNameProfile:
@@ -265,18 +281,23 @@ func (r *Runner) policyUnsupported(name, reason string) int {
 // policyNetworkScope parses the shared `policy <verb> network [--sandbox NAME]`
 // grammar used by the Docker sbx baseline. An empty sandbox name means the
 // global scope, which the local runtime does not implement.
-func (r *Runner) policyNetworkScope(cmdPath string, args []string) (sandboxName string, rest []string, code int) {
-	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true})
+func (r *Runner) policyNetworkScope(cmdPath string, args []string) (sandboxName string, sel networkHTTPSelectors, rest []string, code int) {
+	args = reorderFlagArgs(args, map[string]bool{
+		sandboxFlag: true, methodFlag: true, "--path": true, "--query": true,
+	})
 	fs := r.newFlagSet(cmdPath)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&sandboxName, "sandbox", "", "scope the rule to one sandbox (global scope is not implemented locally)")
+	fs.Var(&sel.methods, helpNameMethod, "restrict the rule to these HTTP methods (comma list or repeats)")
+	fs.StringVar(&sel.path, "path", "", "restrict the rule to this HTTP path glob (** spans segments)")
+	fs.Var(&sel.queries, "query", "require an HTTP query parameter name=glob (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return "", nil, 0
+			return "", networkHTTPSelectors{}, nil, 0
 		}
-		return "", nil, r.flagParseFailure(cmdPath, err)
+		return "", networkHTTPSelectors{}, nil, r.flagParseFailure(cmdPath, err)
 	}
-	return sandboxName, fs.Args(), -1
+	return sandboxName, sel, fs.Args(), -1
 }
 
 func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []string) int {
@@ -286,7 +307,7 @@ func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []
 	if action == "rm" {
 		return r.policyRemoveNetwork(ctx, args)
 	}
-	sandboxName, rest, code := r.policyNetworkScope("policy "+action+" network", args)
+	sandboxName, sel, rest, code := r.policyNetworkScope("policy "+action+" network", args)
 	if code >= 0 {
 		return code
 	}
@@ -295,9 +316,9 @@ func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []
 		return 2
 	}
 	if sandboxName == "" {
-		return r.policyMutateGlobal(ctx, action, rest[0])
+		return r.policyMutateGlobal(ctx, action, rest[0], sel)
 	}
-	return r.policyMutate(ctx, action, []string{sandboxName, rest[0]})
+	return r.policyMutate(ctx, action, []string{sandboxName, rest[0]}, sel)
 }
 
 // policyRemoveNetwork implements the reference `policy rm network` selectors
@@ -318,6 +339,11 @@ func (r *Runner) policyRemoveNetwork(ctx context.Context, args []string) int {
 			return r.policyRemoveError(err.Error())
 		}
 		resources = []sdk.NetworkRule{rule}
+	}
+	for i := range resources {
+		if err := applyNetworkHTTPSelectors(&resources[i], opts.sel); err != nil {
+			return r.policyRemoveError(err.Error())
+		}
 	}
 	client, err := r.client()
 	if err != nil {
@@ -349,13 +375,14 @@ type policyRemoveOptions struct {
 	resource    string
 	id          string
 	force       bool
+	sel         networkHTTPSelectors
 }
 
 //nolint:gocyclo,cyclop // one parser mirrors the reference selector flags.
 func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOptions, string, int) {
 	args = reorderFlagArgs(args, map[string]bool{
 		"--sandbox": true, "--resource": true, "--id": true,
-		"--method": true, "--path": true, "--query": true,
+		methodFlag: true, "--path": true, "--query": true,
 	})
 	fs := r.newFlagSet("policy rm network")
 	fs.SetOutput(io.Discard)
@@ -367,9 +394,9 @@ func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOption
 	fs.StringVar(&opts.sandboxName, "sandbox", "", "scope the removal to a specific sandbox")
 	fs.StringVar(&opts.resource, "resource", "", "remove by resource value(s), comma-separated")
 	fs.StringVar(&opts.id, "id", "", "remove by rule ID")
-	fs.StringVar(&pathValue, "path", "", "restrict the rule to this HTTP path glob (unsupported)")
-	fs.Var(&methods, "method", "restrict the rule to these HTTP methods (unsupported)")
-	fs.Var(&queries, "query", "require an HTTP query parameter (unsupported)")
+	fs.StringVar(&pathValue, "path", "", "restrict the removal to this HTTP path glob")
+	fs.Var(&methods, helpNameMethod, "restrict the removal to these HTTP methods")
+	fs.Var(&queries, "query", "require an HTTP query parameter name=glob")
 	fs.BoolVar(&opts.force, "force", false, "skip confirmation prompts")
 	fs.BoolVar(&forceShort, "f", false, "skip confirmation prompts")
 	if err := fs.Parse(args); err != nil {
@@ -381,8 +408,8 @@ func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOption
 	opts.force = opts.force || forceShort
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	if set["method"] || set["path"] || set["query"] {
-		return policyRemoveOptions{}, "", r.policyRemoveError("HTTP method/path/query selectors are not supported: HTTP policy rules are not implemented")
+	if (set["method"] || set["path"] || set["query"]) && opts.id != "" {
+		return policyRemoveOptions{}, "", r.policyRemoveError("--id cannot be combined with HTTP selectors; remove by ID alone")
 	}
 	if fs.NArg() > 1 {
 		return policyRemoveOptions{}, "", r.policyRemoveError(fmt.Sprintf("accepts at most 1 positional argument, received %d", fs.NArg()))
@@ -400,6 +427,7 @@ func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOption
 	if positional == "" && opts.id == "" && opts.resource == "" {
 		return policyRemoveOptions{}, "", r.policyRemoveError("at least one selector is required: use --id or --resource")
 	}
+	opts.sel = networkHTTPSelectors{methods: methods, path: pathValue, queries: queries}
 	return opts, positional, 0
 }
 
@@ -544,8 +572,8 @@ func resolvePolicyRemovals(scope string, allow, deny []sdk.NetworkRule, ruleID s
 		if err != nil {
 			return nil, err
 		}
-		for _, removal := range matched {
-			add(removal)
+		for i := range matched {
+			add(matched[i])
 		}
 	}
 	return selected, nil
@@ -574,11 +602,13 @@ func policyRemovalByResource(candidates []policyRemoval, resource sdk.NetworkRul
 }
 
 func policyRuleIDForRemoval(scope, action string, rule sdk.NetworkRule) string {
-	return policyRuleJSONFrom(policyRuleOutput{
+	tmp := policyRuleOutput{
 		RuleID: rule.RuleID, Scope: scope, ResourceType: policyNetworkType, Action: action,
 		Provenance: policyProvenanceUser, Origin: originLocal, Protocol: rule.Protocol,
 		CIDR: rule.CIDR, Domain: rule.Domain, Port: rule.Port,
-	}).ID
+		Methods: rule.Methods, HTTPPath: rule.Path, Query: rule.Query,
+	}
+	return policyRuleJSONFrom(&tmp).ID
 }
 
 func networkRuleMatches(stored, target sdk.NetworkRule) bool {
@@ -590,8 +620,20 @@ func networkRuleMatches(stored, target sdk.NetworkRule) bool {
 	if targetProtocol == "" {
 		targetProtocol = tcpProtocol
 	}
-	return storedProtocol == targetProtocol && stored.CIDR == target.CIDR &&
-		stored.Domain == target.Domain && stored.Port == target.Port
+	if storedProtocol != targetProtocol || stored.CIDR != target.CIDR ||
+		stored.Domain != target.Domain || stored.Port != target.Port {
+		return false
+	}
+	// An authored selector must match the stored canonical form. Compare
+	// case- and order-insensitively on methods; path and query compare
+	// verbatim because the daemon rejects malformed globs at authoring.
+	if canonicalMethodsKey(stored.Methods) != canonicalMethodsKey(target.Methods) {
+		return false
+	}
+	if stored.Path != target.Path {
+		return false
+	}
+	return canonicalQueryKey(stored.Query) == canonicalQueryKey(target.Query)
 }
 
 func policyRemovalResource(rule sdk.NetworkRule) string {
@@ -614,9 +656,13 @@ func globalPolicyForList(ctx context.Context, client sdk.Client) ([]sdk.NetworkR
 	return allow, deny, err
 }
 
-func (r *Runner) policyMutateGlobal(ctx context.Context, action, value string) int {
+func (r *Runner) policyMutateGlobal(ctx context.Context, action, value string, sel networkHTTPSelectors) int {
 	rule, err := parseNetworkRule(value)
 	if err != nil {
+		r.error(err)
+		return 2
+	}
+	if err := applyNetworkHTTPSelectors(&rule, sel); err != nil {
 		r.error(err)
 		return 2
 	}
@@ -640,7 +686,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		return r.showCommandHelp(policyCheckNetworkHelp())
 	}
-	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, protocolFlag: true})
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, formatFlag: true, protocolFlag: true, methodFlag: true})
 	fs := r.newFlagSet("policy check network")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyCheckNetworkHelp()) }
@@ -648,6 +694,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 	protocol := fs.String("protocol", tcpProtocol, "protocol to evaluate: tcp or udp")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	method := fs.String(helpNameMethod, "", "HTTP method to evaluate against method-conditioned rules")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -668,7 +715,8 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 		r.error(errors.New("protocol must be tcp or udp"))
 		return 2
 	}
-	address, domain, port, err := parsePolicyCheckNetworkTarget(fs.Arg(0))
+	target := fs.Arg(0)
+	address, domain, port, err := parsePolicyCheckNetworkTarget(target)
 	if err != nil {
 		r.error(err)
 		return 2
@@ -687,7 +735,14 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 			return 1
 		}
 	}
-	decision, err := sdk.Policies(client).Check(ctx, id, selectedProtocol, address, domain, port)
+	prepared, err := preparePolicyCheckTarget(target, address, domain, port, *method)
+	if err != nil {
+		r.error(err)
+		return 2
+	}
+	checkURL, checkMethod, displayHost, displayPort := prepared.url, prepared.method, prepared.host, prepared.port
+	address, domain, port = prepared.address, prepared.domain, prepared.l4Port
+	decision, err := sdk.Policies(client).Check(ctx, id, selectedProtocol, address, domain, port, checkURL, checkMethod)
 	if err != nil {
 		r.error(err)
 		return 1
@@ -696,11 +751,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 	if *sandboxName != "" {
 		policyContext = sandboxPrefix + ":" + *sandboxName
 	}
-	host := address
-	if host == "" {
-		host = domain
-	}
-	if err := renderPolicyCheckNetwork(r.Out, selected, newPolicyCheckNetworkOutput(decision, selectedProtocol, policyContext, host, port)); err != nil {
+	if err := renderPolicyCheckNetwork(r.Out, selected, newPolicyCheckNetworkOutput(decision, selectedProtocol, policyContext, displayHost, displayPort)); err != nil {
 		r.error(err)
 		return 1
 	}
@@ -713,6 +764,36 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 // parsePolicyCheckNetworkTarget resolves an IP or domain target. A bare target
 // without an explicit port defaults to 443; URL targets keep their scheme
 // default (80/443).
+// preparedPolicyCheckTarget carries both wire halves (L4 fields or URL) and
+// the rendering host/port so the CLI never sends a URL together with an
+// address (the daemon refuses that combination).
+type preparedPolicyCheckTarget struct {
+	address, domain string
+	l4Port          uint16
+	url, method     string
+	host            string
+	port            uint16
+}
+
+func preparePolicyCheckTarget(target, address, domain string, port uint16, method string) (preparedPolicyCheckTarget, error) {
+	prepared := preparedPolicyCheckTarget{address: address, domain: domain, l4Port: port, host: address, port: port}
+	if prepared.host == "" {
+		prepared.host = domain
+	}
+	if !strings.Contains(target, "://") {
+		if strings.TrimSpace(method) != "" {
+			return prepared, errors.New("--method applies only to http(s) URL targets")
+		}
+		return prepared, nil
+	}
+	prepared.url = target
+	prepared.method = strings.TrimSpace(method)
+	// The daemon derives host, port, path and query from the URL; the parsed
+	// values stay in host/port only for the human/JSON target rendering.
+	prepared.address, prepared.domain, prepared.l4Port = "", "", 0
+	return prepared, nil
+}
+
 func parsePolicyCheckNetworkTarget(target string) (string, string, uint16, error) {
 	host, port, err := parsePolicyTarget(target)
 	if err != nil {
@@ -1166,8 +1247,8 @@ func renderPolicyQuiet(out io.Writer, list policyListOutput) {
 	}
 }
 
-// renderPolicyWideTable mirrors the reference wide rule table. METHOD and PATH
-// stay "-" because HTTP policy rules are rejected by this build.
+// renderPolicyWideTable mirrors the reference wide rule table, including the
+// METHOD and PATH columns for HTTP-conditioned rules.
 func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage string) error {
 	if len(list.Rules) == 0 {
 		_, err := fmt.Fprintln(out, emptyMessage)
@@ -1189,11 +1270,19 @@ func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage st
 		if len(resources) == 0 {
 			resources = []string{"-"}
 		}
+		methodText := "-"
+		if len(rule.Methods) > 0 {
+			methodText = strings.Join(rule.Methods, ",")
+		}
+		pathText := "-"
+		if rule.Path != "" {
+			pathText = rule.Path
+		}
 		for j, resource := range resources {
 			if j == 0 {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t-\t-\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					policyRuleSource(&rule), rule.Provenance.CreatedVia, rule.AppliesTo, rule.PolicyID,
-					name, rule.ID, rule.ResourceType, rule.Decision, protocols, resource)
+					name, rule.ID, rule.ResourceType, methodText, pathText, rule.Decision, protocols, resource)
 				continue
 			}
 			_, _ = fmt.Fprintf(tw, "\t\t\t\t\t\t\t\t\t\t\t\t%s\n", resource)
@@ -1253,7 +1342,7 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 	return 0
 }
 
-func (r *Runner) policyMutate(ctx context.Context, action string, args []string) int {
+func (r *Runner) policyMutate(ctx context.Context, action string, args []string, sel networkHTTPSelectors) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		return r.showCommandHelp(policyMutateHelp(action))
 	}
@@ -1263,6 +1352,10 @@ func (r *Runner) policyMutate(ctx context.Context, action string, args []string)
 	}
 	rule, err := parseNetworkRule(args[1])
 	if err != nil {
+		r.error(err)
+		return 2
+	}
+	if err := applyNetworkHTTPSelectors(&rule, sel); err != nil {
 		r.error(err)
 		return 2
 	}
@@ -1450,7 +1543,8 @@ func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOu
 				protocol = tcpProtocol
 			}
 			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, SandboxID: sandboxID, Scope: scope, ResourceType: networkKeyword,
-				Action: action, Provenance: policyProvenanceUser, Origin: originLocal, Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
+				Action: action, Provenance: policyProvenanceUser, Origin: originLocal, Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port,
+				Methods: rules[i].Methods, HTTPPath: rules[i].Path, Query: rules[i].Query})
 		}
 	}
 	appendRules("allow", allow)
@@ -1459,10 +1553,14 @@ func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOu
 }
 
 // policyRuleJSONFrom maps an internal rule onto the sbx rule schema.
-func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
+func policyRuleJSONFrom(rule *policyRuleOutput) policyRuleJSON {
 	id := rule.RuleID
 	if id == "" {
-		sum := sha256.Sum256([]byte(rule.Scope + "\x00" + rule.Action + "\x00" + rule.Target()))
+		summary := rule.Scope + "\x00" + rule.Action + "\x00" + rule.Target()
+		if len(rule.Methods) > 0 || rule.HTTPPath != "" || len(rule.Query) > 0 {
+			summary += "\x00" + canonicalMethodsKey(rule.Methods) + "\x00" + rule.HTTPPath + "\x00" + canonicalQueryKey(rule.Query)
+		}
+		sum := sha256.Sum256([]byte(summary))
 		id = "rul_" + hex.EncodeToString(sum[:8])
 	}
 	name := rule.Name
@@ -1494,11 +1592,7 @@ func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
 		}
 		provenance = policyProvenanceOutput{CreatedVia: policyCreatedViaProvisioned, Source: "sandboxes"}
 	default:
-		protocol := rule.Protocol
-		if protocol == "" {
-			protocol = tcpProtocol
-		}
-		actions = append(actions, policyNetworkActionPrefix+protocol)
+		actions = append(actions, policyNetworkActionPrefix+networkRuleProtocol(rule))
 		resources = append(resources, rule.NetworkResource())
 		editable = rule.Origin != orgScope
 		if rule.Origin == orgScope {
@@ -1512,7 +1606,7 @@ func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
 	if rule.Action == actionAllow {
 		decision = actionAllow
 	}
-	return policyRuleJSON{
+	out := policyRuleJSON{
 		ID:           id,
 		Name:         name,
 		PolicyID:     policyIDForScope(scope),
@@ -1528,10 +1622,46 @@ func policyRuleJSONFrom(rule policyRuleOutput) policyRuleJSON {
 		SandboxID:    rule.SandboxID,
 		Provenance:   provenance,
 		Actions:      actions,
+		Methods:      conditionMethods(rule),
+		Path:         conditionPath(rule),
+		Query:        policyQueryJSONFrom(rule.Query),
 	}
+	return out
 }
 
-func policyScopeOutput(rule policyRuleOutput) (string, string) {
+func networkRuleProtocol(rule *policyRuleOutput) string {
+	if rule.Protocol == "" {
+		return tcpProtocol
+	}
+	return rule.Protocol
+}
+
+func conditionMethods(rule *policyRuleOutput) []string {
+	if rule.ResourceType == filesystemKeyword {
+		return nil
+	}
+	return rule.Methods
+}
+
+func conditionPath(rule *policyRuleOutput) string {
+	if rule.ResourceType == filesystemKeyword {
+		return ""
+	}
+	return rule.HTTPPath
+}
+
+func policyQueryJSONFrom(query []sdk.QueryCondition) []policyQueryJSON {
+	if len(query) == 0 {
+		return nil
+	}
+	out := make([]policyQueryJSON, 0, len(query))
+	for _, q := range query {
+		out = append(out, policyQueryJSON{Name: q.Name, Value: q.Value})
+	}
+	return out
+}
+
+func policyScopeOutput(rule *policyRuleOutput) (string, string) {
 	scope := rule.Scope
 	if scope == "" {
 		scope = policyGlobalScope
@@ -1558,7 +1688,7 @@ func policyIDForScope(scope string) string {
 }
 
 // Target returns the network target without a port.
-func (rule policyRuleOutput) Target() string {
+func (rule *policyRuleOutput) Target() string {
 	if rule.Domain != "" {
 		return rule.Domain
 	}
@@ -1569,7 +1699,7 @@ func (rule policyRuleOutput) Target() string {
 }
 
 // NetworkResource renders the sbx resources entry for a network rule.
-func (rule policyRuleOutput) NetworkResource() string {
+func (rule *policyRuleOutput) NetworkResource() string {
 	target := rule.Target()
 	if target != "" && rule.Port != 0 {
 		return target + ":" + strconv.FormatUint(uint64(rule.Port), 10)
@@ -1600,7 +1730,7 @@ func defaultGlobalPolicyRules() []policyRuleJSON {
 func policyRulesOutput(rules []policyRuleOutput) policyListOutput {
 	out := policyListOutput{Rules: make([]policyRuleJSON, 0, len(rules))}
 	for i := range rules {
-		out.Rules = append(out.Rules, policyRuleJSONFrom(rules[i]))
+		out.Rules = append(out.Rules, policyRuleJSONFrom(&rules[i]))
 	}
 	return out
 }

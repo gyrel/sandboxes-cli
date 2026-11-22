@@ -38,7 +38,7 @@ func (p *policyRefreshFake) GetGlobalPolicy(context.Context) ([]sdk.NetworkRule,
 	return p.allow, p.deny, nil
 }
 
-func (p *policyRefreshFake) Check(context.Context, string, string, string, string, uint16) (sdk.PolicyDecision, error) {
+func (p *policyRefreshFake) Check(context.Context, string, string, string, string, uint16, string, string) (sdk.PolicyDecision, error) {
 	return sdk.PolicyDecision{}, errors.New("not implemented")
 }
 

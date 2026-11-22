@@ -3,6 +3,7 @@ package command
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,11 +13,11 @@ import (
 func TestPrepareSkillsModes(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
-	for _, mode := range []string{"", "off"} {
-		got, err := prepareSkills(mode)
-		if err != nil || got != nil {
-			t.Fatalf("mode %q: got %+v, %v", mode, got, err)
-		}
+	if _, err := prepareSkills(""); err == nil || !strings.Contains(err.Error(), "not resolved") {
+		t.Fatalf("unresolved mode must fail closed: %v", err)
+	}
+	if got, err := prepareSkills("off"); err != nil || got != nil {
+		t.Fatalf("mode off: got %+v, %v", got, err)
 	}
 	got, err := prepareSkills("readonly")
 	if err != nil {
@@ -34,6 +35,48 @@ func TestPrepareSkillsModes(t *testing.T) {
 	}
 	if _, err := prepareSkills("sometimes"); err == nil || !strings.Contains(err.Error(), "off, readonly or readwrite") {
 		t.Fatalf("invalid: %v", err)
+	}
+}
+
+func TestResolveSkillsMode(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+
+	// Explicit flag always wins.
+	if got, err := (&Runner{}).resolveSkillsMode("off"); err != nil || got != "off" {
+		t.Fatalf("explicit off: %q, %v", got, err)
+	}
+	// Omitted flag with no settings file uses the catalog default (readonly),
+	// matching the sbx run --help contract.
+	t.Setenv("RHEIC_SETTINGS_FILE", filepath.Join(config, "absent.toml"))
+	got, err := (&Runner{}).resolveSkillsMode("")
+	if err != nil || got != "readonly" {
+		t.Fatalf("default mode: %q, %v", got, err)
+	}
+	// An explicit skills.defaultMode setting is honored.
+	settingsPath := filepath.Join(config, "settings.toml")
+	if err := os.WriteFile(settingsPath, []byte("skills.defaultMode = \"off\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RHEIC_SETTINGS_FILE", settingsPath)
+	if runtime.GOOS == "windows" {
+		// Windows ACL validation is not implemented; settings loading stays
+		// fail closed there (see settings_windows_test.go), so the
+		// configured mode cannot be read and must not be guessed.
+		if _, err := (&Runner{}).resolveSkillsMode(""); err == nil {
+			t.Fatal("configured settings read must fail closed on Windows")
+		}
+		return
+	}
+	if got, err := (&Runner{}).resolveSkillsMode(""); err != nil || got != "off" {
+		t.Fatalf("configured mode: %q, %v", got, err)
+	}
+	// A malformed settings file fails closed rather than guessing a mount mode.
+	if err := os.WriteFile(settingsPath, []byte("this is not a setting\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&Runner{}).resolveSkillsMode(""); err == nil {
+		t.Fatal("malformed settings must fail closed")
 	}
 }
 

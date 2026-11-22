@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.0.65 — 2026-11-22
+
+### Added
+
+- Layered pull progress during create: a best-effort Watch follower shows
+  `… N/M layers` on the active spinner line via the resilient watch stream,
+  degrading silently against older daemons.
+- `daemon status` reports the signed-in Docker account (`Account: signed in
+  as <user>`; JSON `account`), login ensures a detached daemon, and logout
+  stops the daemon the CLI started.
+- sbx-compatible sandbox name precheck and a display-cells width helper for
+  CJK-safe clipping.
+
+### Changed
+
+- Skills default parity: explicit flag > `skills.defaultMode` settings >
+  catalog default (readonly); a broken settings file fails closed. Requires
+  daemon ≥ v0.0.75; against older daemons `run shell` keeps the previous
+  conflict behavior.
+
+### Fixed
+
+- Build version constant advanced to 0.0.65 (release-train invariant enforced
+  by the version test).
+- Skills default-mode tests now encode the documented Windows contract: ACL
+  validation is unimplemented, so settings loading (and `skills.defaultMode`)
+  stays fail closed on Windows instead of guessing a mount mode.
+
 ## v0.0.64 — 2026-11-19
 
 ### Fixed

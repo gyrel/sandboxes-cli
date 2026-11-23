@@ -219,16 +219,42 @@ func skillFrontmatter(data []byte) ([]byte, error) {
 }
 
 func (r *Runner) installSourceSkill(ctx context.Context, source *sourceSkill, force bool) int {
-	state, err := openSkillImportState(ctx)
+	decision, err := commitSourceSkill(ctx, source, force, skillsRegistryEntry{Source: source.path}, "")
 	if err != nil {
 		r.error(err)
 		return 1
 	}
+	_, _ = fmt.Fprintln(r.Out, skillImportLine(decision, source.name, source.path))
+	return 0
+}
+
+// skillImportLine renders the outcome of one commit for import and add.
+func skillImportLine(decision skillImportDecision, name, from string) string {
+	name = sanitizeSkillErrorText(name)
+	from = sanitizeSkillErrorText(from)
+	switch decision {
+	case skillImportNoop:
+		return fmt.Sprintf("Skill %q is already imported", name)
+	case skillImportReplace:
+		return fmt.Sprintf("Replaced skill %q from %s", name, from)
+	default:
+		return fmt.Sprintf("Imported skill %q from %s", name, from)
+	}
+}
+
+// commitSourceSkill stages source into the store and records entry. The
+// caller supplies provenance in entry; Name, Digest and ImportedAt are set
+// here. A non-empty expected digest requires the installed copy and its
+// registry record to still match it, so an update never overwrites local edits.
+func commitSourceSkill(ctx context.Context, source *sourceSkill, force bool, entry skillsRegistryEntry, expected string) (skillImportDecision, error) {
+	state, err := openSkillImportState(ctx)
+	if err != nil {
+		return 0, err
+	}
 	defer state.Close()
 	stageName, digest, err := stageSourceSkill(state.store, source)
 	if err != nil {
-		r.error(err)
-		return 1
+		return 0, err
 	}
 	stageInstalled := false
 	defer func() {
@@ -237,35 +263,46 @@ func (r *Runner) installSourceSkill(ctx context.Context, source *sourceSkill, fo
 		}
 	}()
 	if err := ctx.Err(); err != nil {
-		r.error(err)
-		return 1
+		return 0, err
+	}
+	if expected != "" {
+		if err := verifyRecordedSkill(state.store, state.registry, source.name, expected); err != nil {
+			return 0, err
+		}
 	}
 	decision, err := inspectSkillImportDecision(state.store, state.registry, source.name, digest, force)
 	if err != nil {
-		r.error(err)
-		return 1
+		return 0, err
 	}
 	if decision == skillImportNoop {
-		_, _ = fmt.Fprintf(r.Out, "Skill %q is already imported\n", sanitizeSkillErrorText(source.name))
-		return 0
+		return decision, nil
 	}
-	entry := skillsRegistryEntry{
-		Name:       source.name,
-		Source:     source.path,
-		Digest:     digest,
-		ImportedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+	entry.Name = source.name
+	entry.Digest = digest
+	entry.ImportedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := commitSkillImport(state.root, state.store, stageName, entry, decision == skillImportReplace); err != nil {
-		r.error(err)
-		return 1
+		return 0, err
 	}
 	stageInstalled = true
-	action := "Imported"
-	if decision == skillImportReplace {
-		action = "Replaced"
+	return decision, nil
+}
+
+func verifyRecordedSkill(store *os.Root, registry skillsRegistry, name, expected string) error {
+	recorded, managed := registryEntry(registry, name)
+	if !managed || recorded.Digest != expected {
+		return fmt.Errorf("skills update: %q is no longer recorded with the expected content; preserving it", sanitizeSkillErrorText(name))
 	}
-	_, _ = fmt.Fprintf(r.Out, "%s skill %q from %s\n", action, sanitizeSkillErrorText(source.name), sanitizeSkillErrorText(source.path))
-	return 0
+	installed, err := installedSkillDigest(store, name)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("skills update: %q was removed from the store; re-add it with skills add", sanitizeSkillErrorText(name))
+	}
+	if err != nil {
+		return err
+	}
+	if installed != expected {
+		return fmt.Errorf("skills update: %q has local changes; re-add it with skills add --force to replace them", sanitizeSkillErrorText(name))
+	}
+	return nil
 }
 
 type skillImportState struct {

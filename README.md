@@ -172,6 +172,8 @@ rsbx skills list
 rsbx skills import --dry-run
 rsbx skills import
 rsbx skills import ./my-skill
+rsbx skills add anthropics/skills --skill frontend-design
+rsbx skills update
 rsbx skills remove my-skill
 ```
 
@@ -351,9 +353,15 @@ stop after importing earlier skills if a later skill fails. Identical re-imports
 no-ops, `--force` replaces only content Rheic previously imported, and
 unmanaged directories are never overwritten. `rsbx skills list` supports table,
 JSON, YAML and quiet output. `rsbx skills remove NAME` prompts unless `--force`
-and removes only skills recorded in Rheic's registry. Guest VM delivery and
-Docker's Git-backed `skills add/update` are not implemented. Import currently
-fails closed on platforms without safe source and hard-link checks.
+and removes only skills recorded in Rheic's registry. `rsbx skills add
+REPOSITORY` clones an https URL, an `owner/repository` GitHub shorthand or a
+local directory into a private temporary directory and imports its skills under
+the same rules as import. URLs with credentials or query strings are refused,
+and a symlinked skill in the repository is refused. `rsbx skills update [NAME]`
+re-clones the recorded repository and refreshes skills whose installed copy is
+unchanged; a skill edited locally is refused. Guest VM delivery is not
+implemented. Import currently fails closed on platforms without safe source and
+hard-link checks.
 
 Remote MCP servers can be registered with `rsbx mcp add NAME --url
 https://HOST/mcp`. All remote headers must use host-vault references. Use

@@ -21,9 +21,11 @@ Experimental host-side agent skills store. Rheic keeps imported skills in its
 own config directory, never inside a sandbox workspace or Docker state.
 
 Commands:
-  ls, list       list skills imported by Rheic
-  import [PATH]  import from supported host directories or one local directory
-  rm, remove     remove a skill imported by Rheic
+  add REPOSITORY  add skills from a Git repository (https URL, owner/repository or local directory)
+  ls, list        list skills imported by Rheic
+  import [PATH]   import from supported host directories or one local directory
+  rm, remove      remove a skill imported by Rheic
+  update [NAME]   update skills added from a repository
 
 Import requires PATH to be a real directory containing SKILL.md with YAML
 frontmatter fields "name" and "description". Symlinks, special files, unsafe
@@ -53,12 +55,16 @@ func (r *Runner) skills(ctx context.Context, args []string) int {
 		return r.showCommandHelp(skillsHelp())
 	}
 	switch args[0] {
+	case helpNameAdd, "a":
+		return r.addSkills(ctx, args[1:])
 	case "ls", commandList:
 		return r.listSkills(args[1:])
 	case commandImport:
 		return r.importSkills(ctx, args[1:])
 	case "rm", commandRemove:
 		return r.removeSkills(ctx, args[1:])
+	case "update", "upgrade":
+		return r.updateSkills(ctx, args[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx skills: unknown subcommand %q\n", args[0])
 		_, _ = fmt.Fprint(r.Err, skillsUsage)

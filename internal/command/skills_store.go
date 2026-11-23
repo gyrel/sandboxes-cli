@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,6 +35,8 @@ var (
 	errSkillsRootMissing = errors.New("skills: config directory does not exist")
 	skillNamePattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	skillDigestPattern   = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	skillBranchPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`)
+	skillCommitPattern   = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 )
 
 type skillsPaths struct {
@@ -52,6 +55,11 @@ type skillsRegistryEntry struct {
 	Source     string `json:"source"`
 	Digest     string `json:"digest"`
 	ImportedAt string `json:"imported_at"`
+	// Repository, Branch and Commit are set only for skills added from a Git
+	// repository. They never hold credentials: a URL with userinfo is refused.
+	Repository string `json:"repository,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	Commit     string `json:"commit,omitempty"`
 }
 
 func resolveSkillsPaths() (skillsPaths, error) {
@@ -209,8 +217,8 @@ func validateSkillsRegistry(registry skillsRegistry) error {
 			return fmt.Errorf("skills: duplicate registry entry %q", entry.Name)
 		}
 		seen[entry.Name] = struct{}{}
-		if !filepath.IsAbs(entry.Source) {
-			return fmt.Errorf("skills: registry source for %q must be absolute", entry.Name)
+		if err := validateRegistrySource(entry); err != nil {
+			return err
 		}
 		if !skillDigestPattern.MatchString(entry.Digest) {
 			return fmt.Errorf("skills: registry digest for %q is invalid", entry.Name)
@@ -218,6 +226,42 @@ func validateSkillsRegistry(registry skillsRegistry) error {
 		if _, err := time.Parse(time.RFC3339, entry.ImportedAt); err != nil {
 			return fmt.Errorf("skills: registry timestamp for %q is invalid", entry.Name)
 		}
+	}
+	return nil
+}
+
+func validateRegistrySource(entry skillsRegistryEntry) error {
+	if entry.Repository == "" {
+		if entry.Branch != "" || entry.Commit != "" || !filepath.IsAbs(entry.Source) {
+			return fmt.Errorf("skills: registry source for %q must be absolute", entry.Name)
+		}
+		return nil
+	}
+	if err := validateRepositoryLocation(entry.Repository); err != nil {
+		return fmt.Errorf("skills: registry repository for %q is invalid: %w", entry.Name, err)
+	}
+	if entry.Source != entry.Repository {
+		return fmt.Errorf("skills: registry source for %q must match its repository", entry.Name)
+	}
+	if !skillBranchPattern.MatchString(entry.Branch) || !skillCommitPattern.MatchString(entry.Commit) {
+		return fmt.Errorf("skills: registry branch or commit for %q is invalid", entry.Name)
+	}
+	return nil
+}
+
+// validateRepositoryLocation accepts the two forms recorded for a repository:
+// an https URL or an absolute local directory. Userinfo is never accepted, so
+// no credential can reach the registry or a Git argv.
+func validateRepositoryLocation(location string) error {
+	if filepath.IsAbs(location) {
+		return nil
+	}
+	parsed, err := url.Parse(location)
+	if err != nil || parsed.Scheme != schemeHTTPS || parsed.Host == "" {
+		return errors.New("must be an https URL or an absolute directory")
+	}
+	if parsed.User != nil {
+		return errors.New("must not contain credentials")
 	}
 	return nil
 }

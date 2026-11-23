@@ -38,7 +38,7 @@ var completionTree = map[string][]string{
 	moveCommand:       {},
 	ttlCommand:        {},
 	volumeCommand:     {},
-	skillsCommand:     {formatFlag, jsonFlag, "-q", quietLongFlag, forceFlag, "-f"},
+	skillsCommand:     {formatFlag, jsonFlag, "-q", quietLongFlag, forceFlag, "-f", "--skill", "-s"},
 	completionCommand: {},
 	"help":            {},
 }
@@ -54,7 +54,7 @@ var completionSubcommands = map[string][]string{
 	kitCommand:        {commandInspect, "ls"},
 	settingsCommand:   {"ls", commandGet, commandSet, commandUnset},
 	templateCommand:   {"ls", commandInspect},
-	skillsCommand:     {"ls", commandList, commandImport, "rm", commandRemove},
+	skillsCommand:     {helpNameAdd, "ls", commandList, commandImport, "rm", commandRemove, "update"},
 }
 
 func completionCommands() []string {

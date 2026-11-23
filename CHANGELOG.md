@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.0.69 — 2026-11-23
+
+### Added
+
+- Skills from a Git repository: `skills add REPOSITORY [--skill NAME]...
+  [--force]` clones an https URL, an `owner/repository` GitHub shorthand or a
+  local directory on the host and imports its skills under the same
+  validation and symlink rules as `skills import`. Re-adding identical
+  content is a no-op; changed content requires `--force`. URLs with
+  credentials or query strings are refused.
+- `skills update [NAME]...` re-fetches the repository recorded for each skill
+  added from a repository and reports `Updated` or `already up to date` per
+  skill. A skill whose installed copy was edited locally is refused rather
+  than overwritten.
+
 ## v0.0.68 — 2026-11-22
 
 ### Changed

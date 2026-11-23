@@ -999,9 +999,16 @@ func (o policyListOptions) hasFilters() bool {
 		o.createdVia != "" || o.protocol != ""
 }
 
-func (o policyListOptions) filterRules(rules []policyRuleJSON) []policyRuleJSON {
+// visibleRules applies the list filters. Inactive rules are dropped unless
+// requested, and the count of dropped rules is recorded so an empty listing can
+// say why nothing is shown.
+func (o *policyListOptions) visibleRules(rules []policyRuleJSON) []policyRuleJSON {
 	out := make([]policyRuleJSON, 0, len(rules))
 	for i := range rules {
+		if rules[i].Status == policyStatusInactive && !o.includeInactive {
+			o.hiddenInactive++
+			continue
+		}
 		if o.matches(&rules[i]) {
 			out = append(out, rules[i])
 		}
@@ -1010,9 +1017,6 @@ func (o policyListOptions) filterRules(rules []policyRuleJSON) []policyRuleJSON 
 }
 
 func (o policyListOptions) matches(rule *policyRuleJSON) bool {
-	if rule.Status == policyStatusInactive && !o.includeInactive {
-		return false
-	}
 	switch o.resourceType {
 	case "", policyTypeAll:
 	case policyNetworkType:
@@ -1083,7 +1087,7 @@ func (r *Runner) policyListFlagError(err error) int {
 //nolint:funlen // flag parsing and validation mirror the reference contract.
 func (r *Runner) policyList(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{
-		"--format": true, "--type": true, "--source": true, "--decision": true,
+		formatFlag: true, "--type": true, "--source": true, "--decision": true,
 		"--profile": true, "--created-via": true, "--protocol": true,
 	})
 	fs := r.newFlagSet("policy ls")
@@ -1154,21 +1158,8 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 			list.Rules = append(defaultGlobalPolicyRules(), list.Rules...)
 		}
 	}
-	if !opts.includeInactive {
-		opts.hiddenInactive = countInactivePolicyRules(list.Rules)
-	}
-	list.Rules = opts.filterRules(list.Rules)
+	list.Rules = opts.visibleRules(list.Rules)
 	return r.renderPolicyListOutput(selected, opts, list)
-}
-
-func countInactivePolicyRules(rules []policyRuleJSON) int {
-	count := 0
-	for i := range rules {
-		if rules[i].Status == policyStatusInactive {
-			count++
-		}
-	}
-	return count
 }
 
 func (r *Runner) renderPolicyListOutput(selected string, opts policyListOptions, list policyListOutput) int {
@@ -1346,13 +1337,13 @@ func (r *Runner) policyProfileList(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		return r.showCommandHelp(policyProfileListHelp())
 	}
-	args = reorderFlagArgs(args, map[string]bool{"--format": true})
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := r.newFlagSet("policy profile ls")
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() { r.showCommandHelp(policyProfileListHelp()) }
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	quiet := fs.Bool("quiet", false, "only display profile names")
+	quiet := fs.Bool(helpNameQuiet, false, "only display profile names")
 	quietShort := fs.Bool("q", false, "only display profile names")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

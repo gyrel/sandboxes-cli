@@ -1060,7 +1060,7 @@ func policyProfileListHelp() commandHelp {
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
 			{Short: "h", Name: helpCommand, Description: "help for ls"},
 			{Name: listFormatJSON, Description: helpJSONLowerDescription},
-			{Short: "q", Name: "quiet", Description: "only display profile names"},
+			{Short: "q", Name: helpNameQuiet, Description: "only display profile names"},
 		},
 	}
 }

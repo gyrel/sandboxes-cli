@@ -230,6 +230,15 @@ func TestPolicyListIncludeInactiveOrgRules(t *testing.T) {
 	}
 
 	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "ls", "-q", "dev"}); code != 0 || strings.Contains(out.String(), "rule-advisory") {
+		t.Fatalf("quiet default exit=%d output=%q", code, out.String())
+	}
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "ls", "-q", "--include-inactive", "--decision", "allow", "dev"}); code != 0 || !strings.Contains(out.String(), "rule-advisory") {
+		t.Fatalf("quiet include-inactive exit=%d output=%q", code, out.String())
+	}
+
+	out.Reset()
 	if code := runner.Run(context.Background(), []string{"policy", "ls", "--wide", "--include-inactive", "dev"}); code != 0 {
 		t.Fatalf("wide exit=%d output=%q", code, out.String())
 	}

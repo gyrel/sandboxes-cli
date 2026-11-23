@@ -126,7 +126,7 @@ Set the global default policy profile.
 
 const policyProfileUsage = `usage: rsbx policy profile [ls]
 
-Show the global default profile and the available profiles.
+Show the global default policy profile. ls lists governance profiles.
 `
 
 func policyMutateUsage(action string) string {
@@ -1339,11 +1339,52 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 	return 0
 }
 
-func (r *Runner) policyProfile(ctx context.Context, args []string) int {
+// policyProfileList lists governance policy profiles. The daemon API exposes
+// only the global default profile, not governance profile names or their
+// policy attachments, so the listing fails closed rather than guessing.
+func (r *Runner) policyProfileList(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		return r.showCommandHelp(policyProfileListHelp())
+	}
+	args = reorderFlagArgs(args, map[string]bool{"--format": true})
+	fs := r.newFlagSet("policy profile ls")
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { r.showCommandHelp(policyProfileListHelp()) }
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	quiet := fs.Bool("quiet", false, "only display profile names")
+	quietShort := fs.Bool("q", false, "only display profile names")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("policy profile ls", err)
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if fs.NArg() != 0 {
+		return r.commandError("policy profile ls", fmt.Sprintf("accepts 0 arg(s), received %d", fs.NArg()))
+	}
+	if (*quiet || *quietShort) && (*jsonOutput || set["format"]) {
+		return r.commandError("policy profile ls", "--quiet cannot be combined with --json or --format")
+	}
+	if _, err := resolveOperationFormat(*format, *jsonOutput); err != nil {
+		return r.commandError("policy profile ls", err.Error())
+	}
+	return r.commandError("policy profile ls", "governance policy profiles are not available: the daemon does not expose profile names or their policy attachments")
+}
+
+func (r *Runner) policyProfile(ctx context.Context, args []string) int {
+	if len(args) > 0 && (args[0] == "ls" || args[0] == commandList) {
+		return r.policyProfileList(args[1:])
+	}
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		if slices.Contains(args, "ls") || slices.Contains(args, commandList) {
+			return r.showCommandHelp(policyProfileListHelp())
+		}
 		return r.showCommandHelp(policyProfileHelp())
 	}
-	if len(args) > 1 || (len(args) == 1 && args[0] != "ls" && args[0] != commandList) {
+	if len(args) > 0 {
 		_, _ = fmt.Fprint(r.Err, policyProfileUsage)
 		return 2
 	}
@@ -1358,7 +1399,7 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(r.Out, "global: %s\navailable: deny-all, balanced, allow-all\n", profile)
+	_, _ = fmt.Fprintf(r.Out, "global: %s\nchoices: deny-all, balanced, allow-all\n", profile)
 	return 0
 }
 

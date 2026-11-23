@@ -1030,9 +1030,38 @@ func policyInitHelp() commandHelp {
 
 func policyProfileHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"Show the global default profile and the available profiles."},
-		Usage:       []string{"rsbx policy profile [ls]"},
-		Flags:       []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for policy profile"}},
+		Description: []string{
+			"Show the global default policy profile.",
+			"",
+			"Governance policy profiles are listed by \"rsbx policy profile ls\", which",
+			"fails closed until the daemon exposes profile names.",
+		},
+		Usage: []string{"rsbx policy profile [ls]"},
+		AvailableCommands: []commandSummary{
+			{Name: "ls", Description: "List policy profiles (fails closed; see help)"},
+		},
+		Flags: []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for policy profile"}},
+	}
+}
+
+func policyProfileListHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			"List policy profiles available from remote governance policies.",
+			"",
+			"The daemon does not expose governance profile names or the policies attached",
+			"to them, so this command fails closed instead of printing an incomplete list.",
+			"Use \"rsbx policy profile\" to show the global default profile.",
+		},
+		Usage:    []string{"rsbx policy profile ls [flags]"},
+		Aliases:  []string{"ls", "list"},
+		Examples: []string{"rsbx policy profile ls", "rsbx policy profile ls --json"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
+			{Short: "h", Name: helpCommand, Description: "help for ls"},
+			{Name: listFormatJSON, Description: helpJSONLowerDescription},
+			{Short: "q", Name: "quiet", Description: "only display profile names"},
+		},
 	}
 }
 

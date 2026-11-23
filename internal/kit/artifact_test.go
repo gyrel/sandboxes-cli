@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -155,6 +156,9 @@ func TestValidateDirectoryRejectsStructuralProblems(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "backslash name" && runtime.GOOS == "windows" {
+				t.Skip("NTFS cannot store backslashes in names; the same check is covered on every platform by TestValidateZipRejectsUnsafeEntryNames")
+			}
 			root := newKitDir(t, "kit", tt.files)
 			result, err := Validate(root, nil)
 			if err != nil {
@@ -225,9 +229,50 @@ func TestValidateRejectsUnsupportedReferences(t *testing.T) {
 	}
 }
 
+// TestValidateZipRejectsUnsafeEntryNames runs the name grammar on raw ZIP
+// entry strings, which every platform can construct even where the local
+// filesystem forbids such names (backslashes and colons on Windows).
+func TestValidateZipRejectsUnsafeEntryNames(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "unsafe-kit.zip")
+	writeZipFixture(t, archive, []zipFixture{
+		{name: "spec.yaml", body: goodSpec},
+		{name: `files/a\b`, body: "x"},
+		{name: "/absolute", body: "x"},
+		{name: "../escape", body: "x"},
+		{name: "C:drive", body: "x"},
+		{name: "./redundant", body: "x"},
+	})
+	result, err := Validate(archive, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{`files/a\b`, "/absolute", "../escape", "C:drive", "./redundant"} {
+		found := false
+		for _, violation := range result.Violations {
+			if violation.Path == name && strings.Contains(violation.Message, "archive entry name is unsafe") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("unsafe entry %q not rejected: %v", name, violationMessages(result.Violations))
+		}
+	}
+	for _, entry := range result.Entries {
+		if entry.Name != "spec.yaml" {
+			t.Fatalf("unsafe entry reached the listing: %q", entry.Name)
+		}
+	}
+}
+
 func TestIsGitReference(t *testing.T) {
 	t.Chdir(t.TempDir())
-	writeTree(t, ".", map[string]string{"git@example.com:kit/spec.yaml": goodSpec})
+	// The SCP-style reference is only a local path when that exact name
+	// exists; NTFS forbids colons in names, so the "existing path wins"
+	// fixture is built only where representable.
+	localSCP := `git@example.com:kit`
+	if runtime.GOOS != "windows" {
+		writeTree(t, ".", map[string]string{localSCP + "/spec.yaml": goodSpec})
+	}
 	tests := []struct {
 		reference string
 		want      bool
@@ -240,9 +285,12 @@ func TestIsGitReference(t *testing.T) {
 		{"./my-kit", false},
 		{"ghcr.io/org/kit:1.0", false},
 		{"file:///tmp/kit", false},
-		{"git@example.com:kit", false},
+		{localSCP, false},
 	}
 	for _, tt := range tests {
+		if tt.reference == localSCP && runtime.GOOS == "windows" {
+			continue // name not representable; covered on Unix hosts
+		}
 		if got := IsGitReference(tt.reference); got != tt.want {
 			t.Fatalf("IsGitReference(%q)=%v want %v", tt.reference, got, tt.want)
 		}

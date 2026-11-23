@@ -4,9 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,8 +56,14 @@ func TestPackIsDeterministicAndRoundTrips(t *testing.T) {
 		if !file.Modified.Equal(packTime) {
 			t.Fatalf("%s modified=%v", file.Name, file.Modified)
 		}
-		if file.Name == "files/run.sh" && file.Mode().Perm() != 0o755 {
-			t.Fatalf("run.sh mode=%v", file.Mode())
+		// NTFS has no executable bit: the scanned mode stays non-executable
+		// there, so the packed header is 0644 by design.
+		wantRunMode := fs.FileMode(0o755)
+		if runtime.GOOS == "windows" {
+			wantRunMode = 0o644
+		}
+		if file.Name == "files/run.sh" && file.Mode().Perm() != wantRunMode {
+			t.Fatalf("run.sh mode=%v want %v", file.Mode(), wantRunMode)
 		}
 	}
 	want := []string{"files/a.txt", "files/a/b.txt", "files/empty.txt", "files/run.sh", "files/z.txt", "spec.yaml"}

@@ -15,6 +15,21 @@
   skill. A skill whose installed copy was edited locally is refused rather
   than overwritten.
 
+### Changed
+
+- `policy ls` hides organization rules that remote governance does not
+  enforce (advisory rules, or rules while org enforcement is off). They are
+  shown with `--include-inactive` and marked `inactive`; `--wide` gains a
+  STATUS column. Enforcement is unchanged: hidden rules are not applied.
+- `policy profile ls` (alias `list`) now parses `--format`, `--json` and
+  `-q/--quiet`, then fails closed with exit 1. The daemon exposes only the
+  global default profile, not governance profile names, so the command no
+  longer lists the global default as if it were a governance profile. Bare
+  `policy profile` still shows the global default; its `available` line is
+  now `choices`.
+- `policy ls --profile` and `--created-via approval` remain fail-closed:
+  the daemon does not expose profile attachments or approval-created rules.
+
 ## v0.0.68 — 2026-11-22
 
 ### Changed

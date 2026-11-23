@@ -28,7 +28,7 @@ var documentedHelpPaths = [][]string{
 	{"policy", "check"}, {"policy", "check", "network"},
 	{"policy", "check", "filesystem"}, {"policy", "init"},
 	{"policy", "profile"}, {"policy", "org"},
-	{"kit"}, {"kit", "inspect"}, {"kit", "ls"},
+	{"kit"}, {"kit", "inspect"}, {"kit", "ls"}, {"kit", "pack"}, {"kit", "validate"},
 	{"daemon"}, {"daemon", "status"},
 	{"template"}, {"template", "ls"}, {"template", "inspect"},
 	{"env"}, {"env", "plan"}, {"env", "create"}, {"env", "run"},

@@ -1427,6 +1427,8 @@ func kitHelp() commandHelp {
 		AvailableCommands: []commandSummary{
 			{Name: commandInspect, Description: "Show kit artifact details"},
 			{Name: "ls", Description: "List local .yaml kits"},
+			{Name: commandPack, Description: "Package a directory as a kit artifact"},
+			{Name: commandValidate, Description: "Validate a kit artifact"},
 		},
 		Flags:  []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for kit"}},
 		Footer: "Use \"rsbx kit COMMAND --help\" for more information about a command.",
@@ -1450,6 +1452,70 @@ func kitListHelp() commandHelp {
 		Description: []string{"List local .yaml kit files in DIR (default: current directory)."},
 		Usage:       []string{"rsbx kit ls [DIR]"},
 		Flags:       []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for kit ls"}},
+	}
+}
+
+func kitValidateHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			helpExperimentalLine,
+			"",
+			"Validate that a directory or ZIP file is a valid kit artifact.",
+			"",
+			"The reference can be a local directory or ZIP file path. Git repository",
+			"references are not implemented yet.",
+			"",
+			"A kit that declares required arguments is invalid until they are supplied,",
+			"so pass the values the kit needs with --kit-arg or --kit-args-file.",
+			"",
+			"--offline skips the daemon-backed kit policy (kit.allowedSources,",
+			"kit.allowLocalKits, kit.requireSignature) so the command needs neither",
+			"sandboxd nor a signed-in session; it only accepts a local directory or",
+			"ZIP reference, since those are the only ones this check applies to.",
+		},
+		Usage: []string{"rsbx kit validate REFERENCE [flags]"},
+		Examples: []string{
+			"# Validate a directory or archive",
+			"rsbx kit validate ./my-kit",
+			"rsbx kit validate ./my-kit.zip",
+			"",
+			"# Supply the arguments a kit declares",
+			"rsbx kit validate ./my-kit --kit-arg region=eu",
+			"",
+			"# Validate without sandboxd running or a Docker sign-in",
+			"rsbx kit validate ./my-kit --offline",
+		},
+		Flags: []commandFlagHelp{
+			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
+			{Short: "h", Name: helpCommand, Description: "help for validate"},
+			{Name: listFormatJSON, Description: helpJSONLowerDescription},
+			{Name: "kit-arg", Value: helpNameStringArray, Description: "(Experimental) Value for an argument the kit declares, as name=value for every kit or kit.name=value for one (can be repeated)"},
+			{Name: "kit-args-file", Value: helpNameStringArray, Description: "(Experimental) File of name=value kit arguments, one per line or a YAML/JSON map (can be repeated); --kit-arg overrides"},
+			{Name: "offline", Description: "Skip the daemon-backed kit policy check; local directory or ZIP references only"},
+		},
+	}
+}
+
+func kitPackHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			helpExperimentalLine,
+			"",
+			"Validate and package a kit artifact directory as a ZIP file.",
+			"",
+			"The directory must contain a valid spec.yaml and an optional files/ directory.",
+		},
+		Usage: []string{"rsbx kit pack DIRECTORY [flags]"},
+		Examples: []string{
+			"rsbx kit pack ./my-kit",
+			"",
+			"# Choose the archive name",
+			"rsbx kit pack ./my-kit --output dist/my-kit.zip",
+		},
+		Flags: []commandFlagHelp{
+			{Short: "h", Name: helpCommand, Description: "help for pack"},
+			{Short: "o", Name: "output", Value: helpValueString, Description: "output file path; must end in .zip (default: <name>.zip)"},
+		},
 	}
 }
 

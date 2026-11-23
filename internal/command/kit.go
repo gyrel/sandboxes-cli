@@ -29,6 +29,8 @@ signatures and MCP allowlists are not implemented yet.
 Commands:
   inspect FILE_OR_DIR [--format table|json|yaml]   validate and print a kit
   ls [DIR]                                  list local .yaml kits
+  pack DIRECTORY [--output PATH]            package a kit directory as a .zip
+  validate REFERENCE [--offline]            validate a kit directory or .zip
 `
 
 const kitInspectUsage = `usage: rsbx kit inspect FILE_OR_DIR [--format table|json|yaml] [--json]
@@ -57,6 +59,10 @@ func (r *Runner) kit(args []string) int {
 		return r.kitInspect(args[1:])
 	case "ls":
 		return r.kitList(args[1:])
+	case commandValidate:
+		return r.kitValidate(args[1:])
+	case commandPack:
+		return r.kitPack(args[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx kit: unknown subcommand %q\n", args[0])
 		return 2

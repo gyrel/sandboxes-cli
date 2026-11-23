@@ -1,0 +1,227 @@
+package kit
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"os"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+const maxArgumentsFileBytes = 1 << 20
+
+// CollectArguments merges kit argument files and then --kit-arg values. Flag
+// values override file values.
+func CollectArguments(files, values []string) (map[string]string, error) {
+	collected := make(map[string]string, len(values))
+	for _, file := range files {
+		fromFile, err := ReadArgumentsFile(file)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(collected, fromFile)
+	}
+	for _, item := range values {
+		key, value, err := parseArgumentPair(item)
+		if err != nil {
+			return nil, err
+		}
+		collected[key] = value
+	}
+	return collected, nil
+}
+
+// ReadArgumentsFile reads a regular file of name=value lines, or a YAML or
+// JSON map of scalar values. Blank lines and # comments are ignored in line
+// form.
+func ReadArgumentsFile(path string) (map[string]string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("read kit arguments file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("kit arguments file must be a regular file")
+	}
+	if info.Size() > maxArgumentsFileBytes {
+		return nil, fmt.Errorf("kit arguments file exceeds %d KiB", maxArgumentsFileBytes>>10)
+	}
+	file, err := os.Open(path) // #nosec G304 -- user-selected kit arguments file
+	if err != nil {
+		return nil, fmt.Errorf("read kit arguments file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maxArgumentsFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read kit arguments file: %w", err)
+	}
+	return parseArgumentsFile(data)
+}
+
+func parseArgumentsFile(data []byte) (map[string]string, error) {
+	if len(data) > maxArgumentsFileBytes {
+		return nil, fmt.Errorf("kit arguments file exceeds %d KiB", maxArgumentsFileBytes>>10)
+	}
+	lines := meaningfulLines(string(data))
+	if len(lines) > 0 && (strings.HasPrefix(lines[0], "{") || !allContainEquals(lines)) {
+		return parseArgumentsMapping(data)
+	}
+	values := make(map[string]string, len(lines))
+	for _, line := range lines {
+		key, value, err := parseArgumentPair(line)
+		if err != nil {
+			return nil, err
+		}
+		values[key] = value
+	}
+	return values, nil
+}
+
+func meaningfulLines(text string) []string {
+	lines := make([]string, 0)
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		lines = append(lines, trimmed)
+	}
+	return lines
+}
+
+func allContainEquals(lines []string) bool {
+	for _, line := range lines {
+		if !strings.Contains(line, "=") {
+			return false
+		}
+	}
+	return true
+}
+
+func parseArgumentsMapping(data []byte) (map[string]string, error) {
+	var raw map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, errors.New("kit arguments file must contain name=value lines or a YAML/JSON map")
+	}
+	values := make(map[string]string, len(raw))
+	for key := range raw {
+		node := raw[key]
+		if !validArgumentKey(key) || node.Kind != yaml.ScalarNode || node.Tag == "!!null" {
+			return nil, fmt.Errorf("kit arguments file entry %q must map a name to a scalar value", key)
+		}
+		values[key] = node.Value
+	}
+	return values, nil
+}
+
+// parseArgumentPair splits one name=value item. A key of the form kit.name
+// targets only the kit called kit; the split is on the last dot because
+// argument names cannot contain dots but kit names may.
+func parseArgumentPair(item string) (string, string, error) {
+	key, value, ok := strings.Cut(item, "=")
+	if !ok || !validArgumentKey(key) {
+		return "", "", errors.New("kit argument must use name=value or kit.name=value syntax")
+	}
+	return key, value, nil
+}
+
+func validArgumentKey(key string) bool {
+	name := key
+	if index := strings.LastIndex(key, "."); index >= 0 {
+		if strings.ContainsAny(key[:index], " \t") || index == 0 {
+			return false
+		}
+		name = key[index+1:]
+	}
+	return v3ArgKeyPattern.MatchString(name)
+}
+
+// checkArguments reports arguments the kit does not declare, required
+// arguments that are missing, and values outside an argument's enum or
+// pattern. Kits without a v3 args block declare nothing.
+func checkArguments(doc Kit, kitName, specPath string, arguments map[string]string) []Violation {
+	var declared map[string]V3Arg
+	if doc.V3 != nil {
+		declared = doc.V3.Args
+	}
+	values, violations := resolveArguments(kitName, specPath, declared, arguments)
+	names := make([]string, 0, len(declared))
+	for name := range declared {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		arg := declared[name]
+		value, given := values[name]
+		if !given && arg.HasDefault {
+			value, given = arg.Default, true
+		}
+		if !given {
+			if arg.Required {
+				violations = append(violations, Violation{Path: specPath, Message: fmt.Sprintf("required kit argument %q is not set", name)})
+			}
+			continue
+		}
+		if problem := argumentValueProblem(arg, value); problem != "" {
+			violations = append(violations, Violation{Path: specPath, Message: fmt.Sprintf("kit argument %q %s", name, problem)})
+		}
+	}
+	return violations
+}
+
+// resolveArguments maps supplied keys onto declared names. Unqualified keys
+// apply to every kit and are applied first, so kit.name keys override them.
+func resolveArguments(kitName, specPath string, declared map[string]V3Arg, arguments map[string]string) (map[string]string, []Violation) {
+	keys := make([]string, 0, len(arguments))
+	for key := range arguments {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		qi, qj := strings.Contains(keys[i], "."), strings.Contains(keys[j], ".")
+		if qi != qj {
+			return !qi
+		}
+		return keys[i] < keys[j]
+	})
+	values := make(map[string]string, len(arguments))
+	var violations []Violation
+	for _, key := range keys {
+		name := key
+		if index := strings.LastIndex(key, "."); index >= 0 {
+			if key[:index] != kitName {
+				violations = append(violations, Violation{Path: specPath, Message: fmt.Sprintf("kit argument %q is for kit %q, not this kit", key, key[:index])})
+				continue
+			}
+			name = key[index+1:]
+		}
+		if _, ok := declared[name]; !ok {
+			violations = append(violations, Violation{Path: specPath, Message: fmt.Sprintf("kit argument %q is not declared by this kit", key)})
+			continue
+		}
+		values[name] = arguments[key]
+	}
+	return values, violations
+}
+
+func argumentValueProblem(arg V3Arg, value string) string {
+	if len(arg.Enum) > 0 && !slices.Contains(arg.Enum, value) {
+		return "is not one of its allowed values"
+	}
+	if arg.Pattern == "" {
+		return ""
+	}
+	compiled, err := regexp.Compile(arg.Pattern)
+	if err != nil {
+		return "has an invalid pattern"
+	}
+	match := compiled.FindStringIndex(value)
+	if len(match) != 2 || match[0] != 0 || match[1] != len(value) {
+		return "does not match its pattern"
+	}
+	return ""
+}

@@ -164,7 +164,7 @@ func findKitSpec(directory string) (string, error) {
 	stem := filepath.Base(directory)
 	// Docker kit v3 sources use <kit>/<kit>.yaml; v2 and Rheic kits use
 	// spec.yaml. Prefer the stem-named descriptor when it exists.
-	for _, name := range []string{stem + ".yaml", stem + ".yml", "spec.yaml", "spec.yml"} {
+	for _, name := range kitSpecNames(stem) {
 		candidate := filepath.Join(directory, name)
 		info, err := os.Stat(candidate)
 		if err == nil && info.Mode().IsRegular() {

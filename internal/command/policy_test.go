@@ -216,10 +216,10 @@ func TestPolicyInitAndProfile(t *testing.T) {
 		t.Fatalf("profile=%q", client.profile)
 	}
 	out.Reset()
-	if code := runner.Run(context.Background(), []string{"policy", "profile", "ls"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"policy", "profile"}); code != 0 {
 		t.Fatalf("profile exit=%d output=%q", code, out.String())
 	}
-	if !strings.Contains(out.String(), "balanced") {
+	if !strings.Contains(out.String(), "global: balanced") {
 		t.Fatalf("output=%q", out.String())
 	}
 	if code := runner.Run(context.Background(), []string{"policy", "init", "unknown"}); code != 2 {

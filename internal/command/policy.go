@@ -45,6 +45,7 @@ type policyRuleOutput struct {
 	Methods      []string
 	HTTPPath     string
 	Query        []sdk.QueryCondition
+	Status       string
 }
 
 type policyProvenanceOutput struct {
@@ -95,6 +96,8 @@ const (
 	policyCreatedViaApproval    = "approval"
 	policyApprovalCommand       = "approval"
 	policyProvenanceUser        = "user"
+	policyStatusActive          = "active"
+	policyStatusInactive        = "inactive"
 	schemeHTTP                  = "http"
 )
 
@@ -123,7 +126,7 @@ Set the global default policy profile.
 
 const policyProfileUsage = `usage: rsbx policy profile [ls]
 
-Show the global default profile and the available profiles.
+Show the global default policy profile. ls lists governance profiles.
 `
 
 func policyMutateUsage(action string) string {
@@ -988,6 +991,7 @@ type policyListOptions struct {
 	quiet           bool
 	includeInactive bool
 	json            bool
+	hiddenInactive  int
 }
 
 func (o policyListOptions) hasFilters() bool {
@@ -995,9 +999,16 @@ func (o policyListOptions) hasFilters() bool {
 		o.createdVia != "" || o.protocol != ""
 }
 
-func (o policyListOptions) filterRules(rules []policyRuleJSON) []policyRuleJSON {
+// visibleRules applies the list filters. Inactive rules are dropped unless
+// requested, and the count of dropped rules is recorded so an empty listing can
+// say why nothing is shown.
+func (o *policyListOptions) visibleRules(rules []policyRuleJSON) []policyRuleJSON {
 	out := make([]policyRuleJSON, 0, len(rules))
 	for i := range rules {
+		if rules[i].Status == policyStatusInactive && !o.includeInactive {
+			o.hiddenInactive++
+			continue
+		}
 		if o.matches(&rules[i]) {
 			out = append(out, rules[i])
 		}
@@ -1076,7 +1087,7 @@ func (r *Runner) policyListFlagError(err error) int {
 //nolint:funlen // flag parsing and validation mirror the reference contract.
 func (r *Runner) policyList(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, map[string]bool{
-		"--format": true, "--type": true, "--source": true, "--decision": true,
+		formatFlag: true, "--type": true, "--source": true, "--decision": true,
 		"--profile": true, "--created-via": true, "--protocol": true,
 	})
 	fs := r.newFlagSet("policy ls")
@@ -1095,7 +1106,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 	fs.BoolVar(&opts.wide, "wide", false, "show detailed rule-level output with rule IDs and resources")
 	fs.BoolVar(&opts.quiet, "quiet", false, "only display rule IDs")
 	fs.BoolVar(&quietShort, "q", false, "only display rule IDs")
-	fs.BoolVar(&opts.includeInactive, "include-inactive", false, "show inactive policy rules hidden by remote governance (unsupported)")
+	fs.BoolVar(&opts.includeInactive, "include-inactive", false, "show inactive policy rules hidden by remote governance")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -1147,7 +1158,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 			list.Rules = append(defaultGlobalPolicyRules(), list.Rules...)
 		}
 	}
-	list.Rules = opts.filterRules(list.Rules)
+	list.Rules = opts.visibleRules(list.Rules)
 	return r.renderPolicyListOutput(selected, opts, list)
 }
 
@@ -1181,9 +1192,6 @@ func validatePolicyListOptions(opts policyListOptions, set map[string]bool) erro
 func validatePolicyListOutputOptions(opts policyListOptions, set map[string]bool) error {
 	if opts.profile != "" || set["profile"] {
 		return errors.New("--profile requires remote governance, which is not implemented")
-	}
-	if opts.includeInactive {
-		return errors.New("--include-inactive requires remote governance, which is not implemented")
 	}
 	if opts.quiet && (opts.wide || opts.json || set["format"]) {
 		return errors.New("--quiet cannot be combined with --wide, --json or --format")
@@ -1232,6 +1240,9 @@ func validatePolicyListFilters(opts policyListOptions) error {
 }
 
 func policyEmptyMessage(opts policyListOptions) string {
+	if opts.hiddenInactive > 0 {
+		return fmt.Sprintf("No active policy rules match; %d inactive rule(s) hidden by remote governance (use --include-inactive to show them)", opts.hiddenInactive)
+	}
 	if !opts.hasFilters() {
 		return "No policy rules (default deny)"
 	}
@@ -1255,7 +1266,7 @@ func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage st
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SOURCE\tCREATED VIA\tAPPLIES TO\tPOLICY\tPOLICY_ID\tRULE\tRULE_ID\tTYPE\tMETHOD\tPATH\tDECISION\tPROTOCOLS\tRESOURCES")
+	_, _ = fmt.Fprintln(tw, "SOURCE\tCREATED VIA\tAPPLIES TO\tPOLICY\tPOLICY_ID\tRULE\tRULE_ID\tTYPE\tMETHOD\tPATH\tDECISION\tPROTOCOLS\tSTATUS\tRESOURCES")
 	for i := range list.Rules {
 		rule := list.Rules[i]
 		name := rule.Name
@@ -1280,12 +1291,12 @@ func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage st
 		}
 		for j, resource := range resources {
 			if j == 0 {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					policyRuleSource(&rule), rule.Provenance.CreatedVia, rule.AppliesTo, rule.PolicyID,
-					name, rule.ID, rule.ResourceType, methodText, pathText, rule.Decision, protocols, resource)
+					name, rule.ID, rule.ResourceType, methodText, pathText, rule.Decision, protocols, rule.Status, resource)
 				continue
 			}
-			_, _ = fmt.Fprintf(tw, "\t\t\t\t\t\t\t\t\t\t\t\t%s\n", resource)
+			_, _ = fmt.Fprintf(tw, "\t\t\t\t\t\t\t\t\t\t\t\t\t%s\n", resource)
 		}
 	}
 	return tw.Flush()
@@ -1319,11 +1330,52 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 	return 0
 }
 
-func (r *Runner) policyProfile(ctx context.Context, args []string) int {
+// policyProfileList lists governance policy profiles. The daemon API exposes
+// only the global default profile, not governance profile names or their
+// policy attachments, so the listing fails closed rather than guessing.
+func (r *Runner) policyProfileList(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		return r.showCommandHelp(policyProfileListHelp())
+	}
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
+	fs := r.newFlagSet("policy profile ls")
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { r.showCommandHelp(policyProfileListHelp()) }
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	quiet := fs.Bool(helpNameQuiet, false, "only display profile names")
+	quietShort := fs.Bool("q", false, "only display profile names")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("policy profile ls", err)
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if fs.NArg() != 0 {
+		return r.commandError("policy profile ls", fmt.Sprintf("accepts 0 arg(s), received %d", fs.NArg()))
+	}
+	if (*quiet || *quietShort) && (*jsonOutput || set["format"]) {
+		return r.commandError("policy profile ls", "--quiet cannot be combined with --json or --format")
+	}
+	if _, err := resolveOperationFormat(*format, *jsonOutput); err != nil {
+		return r.commandError("policy profile ls", err.Error())
+	}
+	return r.commandError("policy profile ls", "governance policy profiles are not available: the daemon does not expose profile names or their policy attachments")
+}
+
+func (r *Runner) policyProfile(ctx context.Context, args []string) int {
+	if len(args) > 0 && (args[0] == "ls" || args[0] == commandList) {
+		return r.policyProfileList(args[1:])
+	}
+	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
+		if slices.Contains(args, "ls") || slices.Contains(args, commandList) {
+			return r.showCommandHelp(policyProfileListHelp())
+		}
 		return r.showCommandHelp(policyProfileHelp())
 	}
-	if len(args) > 1 || (len(args) == 1 && args[0] != "ls" && args[0] != commandList) {
+	if len(args) > 0 {
 		_, _ = fmt.Fprint(r.Err, policyProfileUsage)
 		return 2
 	}
@@ -1338,7 +1390,7 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(r.Out, "global: %s\navailable: deny-all, balanced, allow-all\n", profile)
+	_, _ = fmt.Fprintf(r.Out, "global: %s\nchoices: deny-all, balanced, allow-all\n", profile)
 	return 0
 }
 
@@ -1617,7 +1669,7 @@ func policyRuleJSONFrom(rule *policyRuleOutput) policyRuleJSON {
 		Resources:    resources,
 		Origin:       origin,
 		Layer:        originLocal,
-		Status:       "active",
+		Status:       policyStatusOrActive(rule.Status),
 		Editable:     editable,
 		SandboxID:    rule.SandboxID,
 		Provenance:   provenance,
@@ -1627,6 +1679,13 @@ func policyRuleJSONFrom(rule *policyRuleOutput) policyRuleJSON {
 		Query:        policyQueryJSONFrom(rule.Query),
 	}
 	return out
+}
+
+func policyStatusOrActive(status string) string {
+	if status == "" {
+		return policyStatusActive
+	}
+	return status
 }
 
 func networkRuleProtocol(rule *policyRuleOutput) string {

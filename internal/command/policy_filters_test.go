@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+
+	localv1 "github.com/rheic/sandboxes-api/gen/go/sandboxes/local/v1"
 )
 
 // policyFilterFake serves a deterministic global and sandbox policy so list
@@ -152,6 +154,99 @@ func TestPolicyListFilters(t *testing.T) {
 	}
 }
 
+func TestPolicyListIncludeInactiveOrgRules(t *testing.T) {
+	fake, _ := policyFilterFixture(t)
+	orgClient := &fakeOrgPolicyClient{response: &localv1.GetOrgPolicyResponse{
+		Org: "acme", SchemaVersion: 1, Revision: 3, BundleId: "sha256:abcd", EnforcementEnabled: true,
+		Rules: []*localv1.OrgPolicyRule{
+			{RuleId: "rule-enforced", Action: "deny", Source: "org", ResourceType: "network",
+				Protocol: "tcp", Cidr: "203.0.113.7/32", Port: 8443, Enforced: true},
+			{RuleId: "rule-advisory", Action: "allow", Source: "org", ResourceType: "network",
+				Domain: "api.example.test", Port: 443, AdvisoryReason: "organization allow rules are advisory"},
+		},
+	}}
+	listOrg := func(t *testing.T, args ...string) (policyListOutput, int, string) {
+		t.Helper()
+		var out bytes.Buffer
+		runner := &Runner{
+			Out: &out, Err: &out, In: strings.NewReader(""), Socket: t.TempDir() + "/sandboxesd.sock",
+			NewClient:          func(string) (sdk.Client, error) { return fake, nil },
+			NewOrgPolicyClient: func(string) (orgPolicyClient, error) { return orgClient, nil },
+		}
+		code := runner.Run(context.Background(), append(append([]string{"policy", "ls", "--json"}, args...), "dev"))
+		var list policyListOutput
+		if code == 0 {
+			if err := json.Unmarshal(out.Bytes(), &list); err != nil {
+				t.Fatalf("%v: json decode: %v output=%q", args, err, out.String())
+			}
+		}
+		return list, code, out.String()
+	}
+	statusByID := func(list policyListOutput) map[string]string {
+		got := map[string]string{}
+		for i := range list.Rules {
+			got[list.Rules[i].ID] = list.Rules[i].Status
+		}
+		return got
+	}
+
+	list, code, output := listOrg(t)
+	if code != 0 {
+		t.Fatalf("default exit=%d output=%q", code, output)
+	}
+	got := statusByID(list)
+	if _, ok := got["rule-advisory"]; ok {
+		t.Fatalf("inactive rule shown by default: %q", output)
+	}
+	if got["rule-enforced"] != policyStatusActive {
+		t.Fatalf("enforced org rule status=%q want active: %q", got["rule-enforced"], output)
+	}
+
+	list, code, output = listOrg(t, "--include-inactive")
+	if code != 0 {
+		t.Fatalf("include-inactive exit=%d output=%q", code, output)
+	}
+	got = statusByID(list)
+	if got["rule-advisory"] != policyStatusInactive || got["rule-enforced"] != policyStatusActive {
+		t.Fatalf("include-inactive statuses=%v output=%q", got, output)
+	}
+
+	list, code, output = listOrg(t, "--source", "org", "--decision", "allow")
+	if code != 0 || len(list.Rules) != 0 {
+		t.Fatalf("org allow filter exit=%d rules=%d output=%q", code, len(list.Rules), output)
+	}
+
+	var out bytes.Buffer
+	runner := &Runner{
+		Out: &out, Err: &out, In: strings.NewReader(""), Socket: t.TempDir() + "/sandboxesd.sock",
+		NewClient:          func(string) (sdk.Client, error) { return fake, nil },
+		NewOrgPolicyClient: func(string) (orgPolicyClient, error) { return orgClient, nil },
+	}
+	if code := runner.Run(context.Background(), []string{"policy", "ls", "--source", "org", "--decision", "allow"}); code != 0 {
+		t.Fatalf("table exit=%d output=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "1 inactive rule(s) hidden by remote governance") {
+		t.Fatalf("hidden-rule hint missing: %q", out.String())
+	}
+
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "ls", "-q", "dev"}); code != 0 || strings.Contains(out.String(), "rule-advisory") {
+		t.Fatalf("quiet default exit=%d output=%q", code, out.String())
+	}
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "ls", "-q", "--include-inactive", "--decision", "allow", "dev"}); code != 0 || !strings.Contains(out.String(), "rule-advisory") {
+		t.Fatalf("quiet include-inactive exit=%d output=%q", code, out.String())
+	}
+
+	out.Reset()
+	if code := runner.Run(context.Background(), []string{"policy", "ls", "--wide", "--include-inactive", "dev"}); code != 0 {
+		t.Fatalf("wide exit=%d output=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "inactive") || !strings.Contains(out.String(), "api.example.test:443") {
+		t.Fatalf("wide include-inactive output=%q", out.String())
+	}
+}
+
 func TestPolicyListEmptyJSONIsAnArray(t *testing.T) {
 	fake, _ := policyFilterFixture(t)
 	list, code, output := runPolicyFilterJSON(t, fake, "--source", "org")
@@ -239,7 +334,7 @@ func TestPolicyListQuietAndWideOutput(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"policy", "ls", "--wide", "dev"}); code != 0 {
 		t.Fatalf("wide exit=%d output=%q", code, out.String())
 	}
-	for _, want := range []string{"SOURCE", "CREATED VIA", "RULE_ID", "TYPE", "DECISION", "PROTOCOLS", "RESOURCES", "rul_allow_tcp", "10.0.0.0/8:443", "api.example.com:8443"} {
+	for _, want := range []string{"SOURCE", "CREATED VIA", "RULE_ID", "TYPE", "DECISION", "PROTOCOLS", "STATUS", "RESOURCES", "rul_allow_tcp", "10.0.0.0/8:443", "api.example.com:8443"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("wide output missing %q:\n%s", want, out.String())
 		}
@@ -275,7 +370,7 @@ func TestPolicyListInvalidCombinations(t *testing.T) {
 		{name: "protocol invalid", args: []string{"--protocol", "sctp"}, contains: "invalid protocol"},
 		{name: "protocol filesystem", args: []string{"--protocol", "tcp", "--type", "filesystem"}, contains: "only compatible with --type all or --type network"},
 		{name: "profile unsupported", args: []string{"--profile", "default"}, contains: "requires remote governance"},
-		{name: "include inactive unsupported", args: []string{"--include-inactive"}, contains: "requires remote governance"},
+		{name: "profile unsupported with include inactive", args: []string{"--profile", "default", "--include-inactive"}, contains: "requires remote governance"},
 		{name: "format invalid", args: []string{"--format", "xml"}, contains: "invalid format"},
 		{name: "too many args", args: []string{"one", "two"}, contains: "accepts at most 1 arg"},
 		{name: "unknown flag", args: []string{"--bogus"}, contains: "unknown flag"},

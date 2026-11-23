@@ -816,9 +816,11 @@ func policyListHelp() commandHelp {
 			"Without SANDBOX, the command shows one overview row per policy. With",
 			"SANDBOX, it summarizes active rules that apply to that sandbox.",
 			"",
-			"Use --wide to show detailed rule-level rows with RULE_ID and resources.",
+			"Use --wide to show detailed rule-level rows with RULE_ID, STATUS and resources.",
 			"Use --quiet to print only rule IDs. --quiet cannot be combined with",
 			"--wide, --json or --format.",
+			"Org rules that remote governance does not enforce are inactive and hidden",
+			"unless --include-inactive is set.",
 		},
 		Usage: []string{"rsbx policy ls [SANDBOX] [flags]"},
 		Examples: []string{
@@ -829,13 +831,14 @@ func policyListHelp() commandHelp {
 			"rsbx policy ls -q",
 			"rsbx policy ls --type network",
 			"rsbx policy ls --source local --decision deny",
+			"rsbx policy ls --include-inactive",
 		},
 		Flags: []commandFlagHelp{
 			{Name: "created-via", Value: helpValueString, Description: "filter policies by creation method: default, added or provisioned"},
 			{Name: "decision", Value: helpValueString, Description: "filter policies by decision: allow or deny"},
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
 			{Short: "h", Name: helpCommand, Description: "help for policy ls"},
-			{Name: "include-inactive", Description: "show inactive rules hidden by remote governance (unsupported)"},
+			{Name: "include-inactive", Description: "show inactive policy rules hidden by remote governance"},
 			{Name: listFormatJSON, Description: helpJSONLowerDescription},
 			{Name: helpNameProfile, Value: helpValueString, Description: "filter policies by governance profile (unsupported)"},
 			{Name: "protocol", Value: helpValueString, Description: "filter network rules by protocol: tcp or udp"},
@@ -1027,9 +1030,38 @@ func policyInitHelp() commandHelp {
 
 func policyProfileHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"Show the global default profile and the available profiles."},
-		Usage:       []string{"rsbx policy profile [ls]"},
-		Flags:       []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for policy profile"}},
+		Description: []string{
+			"Show the global default policy profile.",
+			"",
+			"Governance policy profiles are listed by \"rsbx policy profile ls\", which",
+			"fails closed until the daemon exposes profile names.",
+		},
+		Usage: []string{"rsbx policy profile [ls]"},
+		AvailableCommands: []commandSummary{
+			{Name: "ls", Description: "List policy profiles (fails closed; see help)"},
+		},
+		Flags: []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for policy profile"}},
+	}
+}
+
+func policyProfileListHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			"List policy profiles available from remote governance policies.",
+			"",
+			"The daemon does not expose governance profile names or the policies attached",
+			"to them, so this command fails closed instead of printing an incomplete list.",
+			"Use \"rsbx policy profile\" to show the global default profile.",
+		},
+		Usage:    []string{"rsbx policy profile ls [flags]"},
+		Aliases:  []string{"ls", "list"},
+		Examples: []string{"rsbx policy profile ls", "rsbx policy profile ls --json"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
+			{Short: "h", Name: helpCommand, Description: "help for ls"},
+			{Name: listFormatJSON, Description: helpJSONLowerDescription},
+			{Short: "q", Name: helpNameQuiet, Description: "only display profile names"},
+		},
 	}
 }
 

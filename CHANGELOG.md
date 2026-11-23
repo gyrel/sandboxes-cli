@@ -14,6 +14,18 @@
   added from a repository and reports `Updated` or `already up to date` per
   skill. A skill whose installed copy was edited locally is refused rather
   than overwritten.
+- EXPERIMENTAL: `kit validate REFERENCE [--offline] [--kit-arg NAME=VALUE]...
+  [--kit-args-file FILE]... [--format table|json|yaml]` checks a local kit
+  directory or ZIP file. A kit that declares required arguments is invalid
+  until they are supplied; violations are reported with paths relative to the
+  kit root. Without `--offline` the command fails closed, because the
+  daemon-backed kit policy (`kit.allowedSources`, `kit.allowLocalKits`,
+  `kit.requireSignature`) has no contract yet. Git references are refused.
+- EXPERIMENTAL: `kit pack DIRECTORY [--output PATH]` validates a kit directory
+  and writes a deterministic `.zip` containing `spec.yaml` and an optional
+  `files/` directory. Symbolic links, other root entries and oversized trees
+  are refused, the output must end in `.zip`, and an existing output is never
+  overwritten.
 
 ### Changed
 

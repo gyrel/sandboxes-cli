@@ -130,10 +130,15 @@ func (r *Runner) appendOrgPolicyRules(ctx context.Context, rules []policyRuleOut
 		if protocol == "" {
 			protocol = "any"
 		}
+		status := policyStatusActive
+		if !rule.GetEnforced() {
+			status = policyStatusInactive
+		}
 		rules = append(rules, policyRuleOutput{
 			RuleID: rule.GetRuleId(), Scope: orgScope, ResourceType: networkKeyword,
 			Action: rule.GetAction(), Provenance: orgScope, Origin: orgScope,
 			Protocol: protocol, CIDR: rule.GetCidr(), Domain: rule.GetDomain(), Port: uint16(rule.GetPort()), //nolint:gosec // daemon bounds ports to 65535.
+			Status: status,
 		})
 	}
 	return rules

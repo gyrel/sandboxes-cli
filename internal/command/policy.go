@@ -45,6 +45,7 @@ type policyRuleOutput struct {
 	Methods      []string
 	HTTPPath     string
 	Query        []sdk.QueryCondition
+	Status       string
 }
 
 type policyProvenanceOutput struct {
@@ -95,6 +96,8 @@ const (
 	policyCreatedViaApproval    = "approval"
 	policyApprovalCommand       = "approval"
 	policyProvenanceUser        = "user"
+	policyStatusActive          = "active"
+	policyStatusInactive        = "inactive"
 	schemeHTTP                  = "http"
 )
 
@@ -988,6 +991,7 @@ type policyListOptions struct {
 	quiet           bool
 	includeInactive bool
 	json            bool
+	hiddenInactive  int
 }
 
 func (o policyListOptions) hasFilters() bool {
@@ -1006,6 +1010,9 @@ func (o policyListOptions) filterRules(rules []policyRuleJSON) []policyRuleJSON 
 }
 
 func (o policyListOptions) matches(rule *policyRuleJSON) bool {
+	if rule.Status == policyStatusInactive && !o.includeInactive {
+		return false
+	}
 	switch o.resourceType {
 	case "", policyTypeAll:
 	case policyNetworkType:
@@ -1095,7 +1102,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 	fs.BoolVar(&opts.wide, "wide", false, "show detailed rule-level output with rule IDs and resources")
 	fs.BoolVar(&opts.quiet, "quiet", false, "only display rule IDs")
 	fs.BoolVar(&quietShort, "q", false, "only display rule IDs")
-	fs.BoolVar(&opts.includeInactive, "include-inactive", false, "show inactive policy rules hidden by remote governance (unsupported)")
+	fs.BoolVar(&opts.includeInactive, "include-inactive", false, "show inactive policy rules hidden by remote governance")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -1147,8 +1154,21 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 			list.Rules = append(defaultGlobalPolicyRules(), list.Rules...)
 		}
 	}
+	if !opts.includeInactive {
+		opts.hiddenInactive = countInactivePolicyRules(list.Rules)
+	}
 	list.Rules = opts.filterRules(list.Rules)
 	return r.renderPolicyListOutput(selected, opts, list)
+}
+
+func countInactivePolicyRules(rules []policyRuleJSON) int {
+	count := 0
+	for i := range rules {
+		if rules[i].Status == policyStatusInactive {
+			count++
+		}
+	}
+	return count
 }
 
 func (r *Runner) renderPolicyListOutput(selected string, opts policyListOptions, list policyListOutput) int {
@@ -1181,9 +1201,6 @@ func validatePolicyListOptions(opts policyListOptions, set map[string]bool) erro
 func validatePolicyListOutputOptions(opts policyListOptions, set map[string]bool) error {
 	if opts.profile != "" || set["profile"] {
 		return errors.New("--profile requires remote governance, which is not implemented")
-	}
-	if opts.includeInactive {
-		return errors.New("--include-inactive requires remote governance, which is not implemented")
 	}
 	if opts.quiet && (opts.wide || opts.json || set["format"]) {
 		return errors.New("--quiet cannot be combined with --wide, --json or --format")
@@ -1232,6 +1249,9 @@ func validatePolicyListFilters(opts policyListOptions) error {
 }
 
 func policyEmptyMessage(opts policyListOptions) string {
+	if opts.hiddenInactive > 0 {
+		return fmt.Sprintf("No active policy rules match; %d inactive rule(s) hidden by remote governance (use --include-inactive to show them)", opts.hiddenInactive)
+	}
 	if !opts.hasFilters() {
 		return "No policy rules (default deny)"
 	}
@@ -1255,7 +1275,7 @@ func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage st
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SOURCE\tCREATED VIA\tAPPLIES TO\tPOLICY\tPOLICY_ID\tRULE\tRULE_ID\tTYPE\tMETHOD\tPATH\tDECISION\tPROTOCOLS\tRESOURCES")
+	_, _ = fmt.Fprintln(tw, "SOURCE\tCREATED VIA\tAPPLIES TO\tPOLICY\tPOLICY_ID\tRULE\tRULE_ID\tTYPE\tMETHOD\tPATH\tDECISION\tPROTOCOLS\tSTATUS\tRESOURCES")
 	for i := range list.Rules {
 		rule := list.Rules[i]
 		name := rule.Name
@@ -1280,12 +1300,12 @@ func renderPolicyWideTable(out io.Writer, list policyListOutput, emptyMessage st
 		}
 		for j, resource := range resources {
 			if j == 0 {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					policyRuleSource(&rule), rule.Provenance.CreatedVia, rule.AppliesTo, rule.PolicyID,
-					name, rule.ID, rule.ResourceType, methodText, pathText, rule.Decision, protocols, resource)
+					name, rule.ID, rule.ResourceType, methodText, pathText, rule.Decision, protocols, rule.Status, resource)
 				continue
 			}
-			_, _ = fmt.Fprintf(tw, "\t\t\t\t\t\t\t\t\t\t\t\t%s\n", resource)
+			_, _ = fmt.Fprintf(tw, "\t\t\t\t\t\t\t\t\t\t\t\t\t%s\n", resource)
 		}
 	}
 	return tw.Flush()
@@ -1617,7 +1637,7 @@ func policyRuleJSONFrom(rule *policyRuleOutput) policyRuleJSON {
 		Resources:    resources,
 		Origin:       origin,
 		Layer:        originLocal,
-		Status:       "active",
+		Status:       policyStatusOrActive(rule.Status),
 		Editable:     editable,
 		SandboxID:    rule.SandboxID,
 		Provenance:   provenance,
@@ -1627,6 +1647,13 @@ func policyRuleJSONFrom(rule *policyRuleOutput) policyRuleJSON {
 		Query:        policyQueryJSONFrom(rule.Query),
 	}
 	return out
+}
+
+func policyStatusOrActive(status string) string {
+	if status == "" {
+		return policyStatusActive
+	}
+	return status
 }
 
 func networkRuleProtocol(rule *policyRuleOutput) string {

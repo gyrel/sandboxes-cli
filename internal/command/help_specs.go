@@ -34,6 +34,7 @@ const (
 	helpNameZsh         = "zsh"
 	helpNameFormat      = "format"
 	helpValueString     = "string"
+	helpValueName       = "NAME"
 	helpNameUser        = "user"
 
 	helpFormatDescription      = "Output format: table, json or yaml"
@@ -1470,12 +1471,74 @@ func skillsHelp() commandHelp {
 		},
 		Usage: []string{"rsbx skills COMMAND"},
 		AvailableCommands: []commandSummary{
+			{Name: "add, a", Description: "Add skills from a Git repository"},
 			{Name: "ls, list", Description: "List skills imported by Rheic"},
 			{Name: commandImport, Description: "Validate and import a local skill directory"},
 			{Name: "rm, remove", Description: "Remove a skill imported by Rheic"},
+			{Name: "update, upgrade", Description: "Update skills added from repositories"},
 		},
 		Flags:  []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for skills"}},
 		Footer: "Use \"rsbx skills COMMAND --help\" for more information about a command.",
+	}
+}
+
+const helpExperimentalLine = "EXPERIMENTAL: this command may change or be removed in future releases."
+
+func skillsAddHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			helpExperimentalLine,
+			"",
+			"Install skills from a Git repository for use in Rheic sandboxes. The",
+			"repository must contain one or more valid SKILL.md files.",
+			"",
+			"All discovered skills are installed when --skill is omitted. Use --skill one",
+			"or more times, or pass a comma-separated list, to install only named skills.",
+			"Replacing an installed skill with different content requires --force; identical",
+			"skills are left unchanged. Repositories with a credential in the URL are refused.",
+			"",
+			"The repository can be specified as a Git URL or as GitHub owner/repository",
+			"shorthand. Skills installed with this command can later be refreshed with",
+			"'rsbx skills update'.",
+		},
+		Usage:   []string{"rsbx skills add REPOSITORY [flags]"},
+		Aliases: []string{"add, a"},
+		Examples: []string{
+			"rsbx skills add https://github.com/anthropics/skills --skill frontend-design",
+			"rsbx skills add anthropics/skills --skill frontend-design --skill pdf",
+			"rsbx skills add https://github.com/anthropics/skills --force",
+		},
+		Flags: []commandFlagHelp{
+			{Short: "f", Name: helpNameForce, Description: "Overwrite existing skills without prompting"},
+			{Short: "h", Name: helpCommand, Description: "help for add"},
+			{Short: "s", Name: "skill", Value: helpValueName, Description: "Add only the named skill (repeatable or comma-separated)"},
+		},
+	}
+}
+
+func skillsUpdateHelp() commandHelp {
+	return commandHelp{
+		Description: []string{
+			helpExperimentalLine,
+			"",
+			"Download the latest versions of skills installed with 'rsbx skills add'.",
+			"",
+			"With no names, every skill added from a repository is updated. Specify one or",
+			"more names to update only those skills. Skills installed with 'rsbx skills",
+			"import' must be added from a repository before they can be updated.",
+		},
+		Usage:   []string{"rsbx skills update [SKILL...] [flags]"},
+		Aliases: []string{"update, upgrade"},
+		Examples: []string{
+			"# Update every skill added from a repository",
+			"rsbx skills update",
+			"",
+			"# Update one skill",
+			"rsbx skills update my-skill",
+		},
+		Flags: []commandFlagHelp{
+			{Short: "h", Name: helpCommand, Description: "help for update"},
+		},
 	}
 }
 

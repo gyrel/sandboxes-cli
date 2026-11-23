@@ -257,7 +257,7 @@ func validateRepositoryLocation(location string) error {
 		return nil
 	}
 	parsed, err := url.Parse(location)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	if err != nil || parsed.Scheme != schemeHTTPS || parsed.Host == "" {
 		return errors.New("must be an https URL or an absolute directory")
 	}
 	if parsed.User != nil {

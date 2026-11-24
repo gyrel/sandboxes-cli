@@ -1355,7 +1355,7 @@ func secretCustomHelp() commandHelp {
 			{Name: "header", Value: helpValueString, Description: "HTTP header the proxy sets to the secret on requests to --host; default Authorization (with --cloud)"},
 			{Short: "h", Name: helpCommand, Description: "help for set-custom"},
 			{Name: "host", Value: helpNameStringArray, Description: "Host, IP, or wildcard pattern (e.g. *.example.com); repeatable; with --cloud, exact DNS names only"},
-			{Name: "name", Value: helpValueString, Description: "Secret name; default derived from the first --host (with --cloud)"},
+			{Name: helpNameName, Value: helpValueString, Description: "Secret name; default derived from the first --host (with --cloud)"},
 			{Name: "no-verify", Description: "Skip checking the --ref or --command source when storing it"},
 			{Name: "placeholder", Value: helpValueString, Description: "Placeholder value; use {rand} for a random suffix (e.g. sk-{rand})"},
 			{Name: "ref", Value: helpValueString, Description: "Use a 1Password op:// reference or AWS Secrets Manager ARN as the secret source"},

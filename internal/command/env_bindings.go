@@ -156,7 +156,7 @@ func pruneBindingsMap(entries map[string]any, name string) bool {
 		delete(entries, name)
 		changed = true
 	}
-	for _, itemKey := range []string{"name", "environment", "environmentName", helpNameSandbox, "sandboxName"} {
+	for _, itemKey := range []string{helpNameName, "environment", "environmentName", helpNameSandbox, "sandboxName"} {
 		for entryKey, entryValue := range entries {
 			entryMap, ok := entryValue.(map[string]any)
 			if !ok {
@@ -186,7 +186,7 @@ func pruneBindingsList(items []any, name string) ([]any, bool) {
 
 func shouldPruneBindingItem(item any, name string) bool {
 	if m, ok := item.(map[string]any); ok {
-		for _, key := range []string{"name", "environment", "environmentName", helpNameSandbox, "sandboxName"} {
+		for _, key := range []string{helpNameName, "environment", "environmentName", helpNameSandbox, "sandboxName"} {
 			if scalarString(m[key]) == name {
 				return true
 			}

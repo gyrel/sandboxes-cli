@@ -670,8 +670,7 @@ func (r *Runner) secretExtendedCommand(ctx context.Context, args []string) int {
 		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
 			return r.secretCustomHelp()
 		}
-		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: custom secret storage and proxy substitution are not implemented; no secret was stored")
-		return 1
+		return r.serviceSecretSetCustom(ctx, args[1:])
 	}
 	if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
 		return r.secretImportHelp()

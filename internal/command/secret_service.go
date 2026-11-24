@@ -78,7 +78,7 @@ func machineSecretList(items []serviceSecretOutput) secretListOutput {
 }
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, tokenFlag: true, "-t": true, refFlag: true, commandFlag: true, refreshFlag: true, forceFlag: false, "-f": false, oauthFlag: false, "--no-verify": false, "--show-error": false})
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, tokenFlag: true, "-t": true, refFlag: true, commandFlag: true, refreshFlag: true, forceFlag: false, "-f": false, oauthFlag: false, "--no-verify": false, "--show-error": false})
 	fs := r.newFlagSet("secret set")
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
@@ -695,7 +695,15 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 	}
 	for i := range items {
 		item := &items[i]
-		out = append(out, serviceSecretOutput{Type: "service", Service: item.Service, Scope: string(item.Scope), SandboxName: item.SandboxName, State: storedSecretDisplay})
+		itemType := "service"
+		secretState := storedSecretDisplay
+		if item.PlaceholderMasked != "" || item.EnvName != "" || len(item.Hosts) > 0 {
+			itemType = "custom"
+			if item.PlaceholderMasked != "" {
+				secretState = item.PlaceholderMasked
+			}
+		}
+		out = append(out, serviceSecretOutput{Type: itemType, Service: item.Service, Scope: string(item.Scope), SandboxName: item.SandboxName, State: secretState})
 	}
 	if lister, ok := sdk.RegistryCredentialList(client); ok {
 		registries, regErr := lister.ListRegistryCredentials(ctx)
@@ -785,4 +793,168 @@ func filterSecretList(items []serviceSecretOutput, global bool, sandbox, service
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+//nolint:gocognit,gocyclo,cyclop,funlen,maintidx,nestif // command flag parsing and output handling
+func (r *Runner) serviceSecretSetCustom(ctx context.Context, args []string) int {
+	if hasFlag(args, "--cloud") {
+		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: --cloud is not supported in this build")
+		return 1
+	}
+	args = reorderFlagArgs(args, map[string]bool{
+		"--host": true, "--env": true, "--placeholder": true, "--value": true, "--token": true, "-t": true,
+		"--ref": true, "--command": true, "--refresh": true, "--name": true, "--sandbox": true,
+		"--header": true, "--format": true,
+	})
+	fs := r.newFlagSet("secret set-custom")
+	fs.SetOutput(r.Err)
+	var hosts stringListFlag
+	fs.Var(&hosts, "host", "Host, IP, or wildcard pattern (e.g. *.example.com); repeatable")
+	env := fs.String("env", "", "Set this env var in the sandbox to the placeholder value")
+	placeholder := fs.String("placeholder", "", "Placeholder value; use {rand} for a random suffix (e.g. sk-{rand})")
+	value := fs.String("value", "", "Secret value (less secure: visible in shell history)")
+	token := fs.String("token", "", "Secret value (less secure: visible in shell history)")
+	fs.StringVar(token, "t", "", "Secret value (less secure: visible in shell history)")
+	ref := fs.String("ref", "", "Use a 1Password op:// reference or AWS Secrets Manager ARN as the secret source")
+	command := fs.String("command", "", "Use a command's standard output as the secret value")
+	refresh := fs.String("refresh", "", "Secret refresh policy: on-demand (default) or after a duration")
+	noVerify := fs.Bool("no-verify", false, "Skip checking the --ref or --command source when storing it")
+	showError := fs.Bool("show-error", false, "Show resolver standard error if the initial check fails (may contain secrets)")
+	name := fs.String("name", "", "Secret name; default derived from the first --host")
+	sandboxName := fs.String("sandbox", "", "Scope the secret to one sandbox (default: all sandboxes)")
+	header := fs.String("header", "", "HTTP header the proxy sets to the secret on requests to --host")
+	format := fs.String("format", "", "How the value fills the header, with one %s")
+	_ = header
+	_ = format
+	fs.Usage = func() { r.showCommandHelp(secretCustomHelp()) }
+	if code, done := r.parseFlagsOrFail("secret set-custom", fs, args); done {
+		return code
+	}
+	if len(hosts) == 0 {
+		_, _ = fmt.Fprintln(r.Err, "error: --host is required\n  try: rsbx secret set-custom --help")
+		return 2
+	}
+	if flagWasProvided(fs, "header") || flagWasProvided(fs, "format") {
+		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: Rheic local is vault-only; legacy static headers (--header/--format) are removed")
+		return 1
+	}
+	valueProvided := flagWasProvided(fs, "value") || flagWasProvided(fs, "token") || flagWasProvided(fs, "t")
+	refProvided := flagWasProvided(fs, "ref")
+	commandProvided := flagWasProvided(fs, "command")
+	count := 0
+	if valueProvided {
+		count++
+	}
+	if refProvided {
+		count++
+	}
+	if commandProvided {
+		count++
+	}
+	if count != 1 {
+		_, _ = fmt.Fprintln(r.Err, "error: exactly one of --value/-t, --ref, or --command is required\n  try: rsbx secret set-custom --help")
+		return 2
+	}
+	if refProvided && *ref == "" || commandProvided && *command == "" {
+		_, _ = fmt.Fprintln(r.Err, "error: --ref and --command require a non-empty value\n  try: rsbx secret set-custom --help")
+		return 2
+	}
+	if *refresh != "" || *noVerify || *showError {
+		if !refProvided && !commandProvided {
+			_, _ = fmt.Fprintln(r.Err, "error: --refresh, --no-verify, and --show-error require --ref or --command\n  try: rsbx secret set-custom --help")
+			return 2
+		}
+	}
+	if *noVerify && *showError {
+		_, _ = fmt.Fprintln(r.Err, "error: --show-error cannot be combined with --no-verify\n  try: rsbx secret set-custom --help")
+		return 2
+	}
+	if valueProvided && (*ref != "" || *command != "") {
+		_, _ = fmt.Fprintln(r.Err, "error: --value/-t cannot be combined with --ref or --command\n  try: rsbx secret set-custom --help")
+		return 2
+	}
+	if refProvided && commandProvided {
+		_, _ = fmt.Fprintln(r.Err, "error: --ref and --command cannot be combined\n  try: rsbx secret set-custom --help")
+		return 2
+	}
+	if valueProvided {
+		secretValue := *value
+		if *token != "" {
+			secretValue = *token
+		}
+		if secretValue == "" {
+			_, _ = fmt.Fprintln(r.Err, "error: --value/-t requires a non-empty value\n  try: rsbx secret set-custom --help")
+			return 2
+		}
+		_, _ = fmt.Fprintln(r.Err, "warning: values passed via --value/-t are visible in shell history")
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	scope := sdk.SecretScopeGlobal
+	if *sandboxName != "" {
+		scope = sdk.SecretScopeSandbox
+	}
+	req := sdk.CustomSecretRequest{
+		Service:     *name,
+		Scope:       scope,
+		SandboxName: *sandboxName,
+		Env:         *env,
+		Placeholder: *placeholder,
+		Hosts:       append([]string(nil), hosts...),
+	}
+	if valueProvided {
+		secretValue := *value
+		if *token != "" {
+			secretValue = *token
+		}
+		req.Value = []byte(secretValue)
+	} else {
+		req.Source = &sdk.SecretSource{
+			Reference: *ref,
+			Command:   *command,
+			Refresh:   *refresh,
+			NoVerify:  *noVerify,
+			ShowError: *showError,
+		}
+		if strings.HasPrefix(*ref, "op://") {
+			req.Source.OPAccount = os.Getenv("OP_ACCOUNT")
+		}
+		if strings.HasPrefix(*ref, "arn:") {
+			req.Source.AWSProfile = os.Getenv("AWS_PROFILE")
+		}
+	}
+	result, err := sdk.CustomSecrets(client).SetCustomSecret(ctx, req)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if result.ApprovalRequired {
+		label := *name
+		if label == "" && len(hosts) > 0 {
+			label = hosts[0]
+		}
+		_, _ = fmt.Fprintf(r.Out, "Custom secret %q requires host approval (challenge %s).\n", label, result.ApprovalID)
+		_, _ = fmt.Fprintln(r.Out, "Run 'rsbx policy approval ls' to review pending approvals.")
+		return 0
+	}
+	if result.Placeholder != "" {
+		_, _ = fmt.Fprintf(r.Out, "Placeholder: %s\n", result.Placeholder)
+	}
+	secret := result.Secret
+	displayScope := string(secret.Scope)
+	if secret.SandboxName != "" {
+		displayScope += " " + secret.SandboxName
+	}
+	_, _ = fmt.Fprintf(r.Out, "Stored custom secret %s (%s)\n", secret.Service, displayScope)
+	if secret.EnvName != "" {
+		_, _ = fmt.Fprintf(r.Out, "Env: %s\n", secret.EnvName)
+	}
+	if len(secret.Hosts) > 0 {
+		_, _ = fmt.Fprintf(r.Out, "Hosts: %s\n", strings.Join(secret.Hosts, ", "))
+	}
+	return 0
 }

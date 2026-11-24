@@ -186,10 +186,7 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 	case commandReset:
 		return r.policyReset(ctx, args[1:])
 	case policyApprovalCommand:
-		if hasFlag(args[1:], helpFlag) || hasFlag(args[1:], helpShort) {
-			return r.showCommandHelp(policyApprovalHelp())
-		}
-		return r.policyUnsupported(policyApprovalCommand, "approval-gated operations are not implemented, so no approvals can be pending")
+		return r.policyApproval(ctx, args[1:])
 	case helpCommand, helpShort, helpFlag:
 		return r.showCommandHelp(policyHelp())
 	default:
@@ -274,11 +271,6 @@ func (r *Runner) policyReset(ctx context.Context, args []string) int {
 
 func (r *Runner) confirmResetPolicy(count int) (bool, error) {
 	return r.confirmDestructive("policy reset", fmt.Sprintf("Remove all %d custom global policy rule(s)? Sandbox rules are kept.", count))
-}
-
-func (r *Runner) policyUnsupported(name, reason string) int {
-	_, _ = fmt.Fprintf(r.Err, "rsbx policy %s: %s\n", name, reason)
-	return 1
 }
 
 // policyNetworkScope parses the shared `policy <verb> network [--sandbox NAME]`
@@ -384,7 +376,7 @@ type policyRemoveOptions struct {
 //nolint:gocyclo,cyclop // one parser mirrors the reference selector flags.
 func (r *Runner) parsePolicyRemoveNetworkArgs(args []string) (policyRemoveOptions, string, int) {
 	args = reorderFlagArgs(args, map[string]bool{
-		"--sandbox": true, "--resource": true, "--id": true,
+		sandboxFlag: true, "--resource": true, "--id": true,
 		methodFlag: true, "--path": true, "--query": true,
 	})
 	fs := r.newFlagSet("policy rm network")

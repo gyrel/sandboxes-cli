@@ -916,10 +916,48 @@ func policyApprovalHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
 			"Review and respond to pending approvals.",
-			"Not implemented: approval-gated operations are unavailable, so no approvals can be pending.",
 		},
-		Usage: []string{"rsbx policy approval"},
-		Flags: []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for policy approval"}},
+		Usage:   []string{"rsbx policy approval COMMAND"},
+		Aliases: []string{},
+		AvailableCommands: []commandSummary{
+			{Name: "inspect", Description: "Inspect a pending approval"},
+			{Name: "ls", Description: "List pending approvals"},
+			{Name: "respond", Description: "Respond to a pending approval"},
+		},
+		Flags:  []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for policy approval"}},
+		Footer: "Use \"rsbx policy approval COMMAND --help\" for more information about a command.",
+	}
+}
+
+func policyApprovalLsHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"List pending approvals"},
+		Usage:       []string{"rsbx policy approval ls [flags]"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatDescription},
+			{Short: "h", Name: helpCommand, Description: helpForLs},
+			{Name: listFormatJSON, Description: helpJSONDescription},
+			{Short: "q", Name: helpNameQuiet, Description: "Only display approval IDs"},
+		},
+	}
+}
+
+func policyApprovalInspectHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Inspect a pending approval"},
+		Usage:       []string{"rsbx policy approval inspect APPROVAL-ID [flags]"},
+		Flags:       []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for inspect"}},
+	}
+}
+
+func policyApprovalRespondHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Respond to a pending approval"},
+		Usage:       []string{"rsbx policy approval respond APPROVAL-ID --option OPTION-ID [flags]"},
+		Flags: []commandFlagHelp{
+			{Short: "h", Name: helpCommand, Description: "help for respond"},
+			{Name: "option", Value: helpValueString, Description: "Option ID offered by the approval"},
+		},
 	}
 }
 
@@ -1140,7 +1178,7 @@ func secretHelp() commandHelp {
 			{Name: "ls", Description: "List stored secrets"},
 			{Name: "rm", Description: "Remove a secret"},
 			{Name: commandSet, Description: "Create or update a secret"},
-			{Name: "set-custom", Description: "(Experimental) Create or update a custom secret (unsupported)"},
+			{Name: "set-custom", Description: "(Experimental) Create or update a custom secret"},
 		},
 		Flags:  []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for secret"}},
 		Footer: "Use \"rsbx secret COMMAND --help\" for more information about a command.",
@@ -1189,7 +1227,7 @@ func secretSetHelp() commandHelp {
 			{Name: helpNameRegistry, Value: helpValueString, Description: "Registry hostname for pull credentials"},
 			{Name: helpNameSandbox, Value: helpValueString, Description: "Scope the secret to one sandbox"},
 			{Name: "show-error", Description: "Show provider stderr on initial verification failure (may contain secrets)"},
-			{Short: "t", Name: "token", Value: helpValueString, Description: "Secret value (less secure: visible in shell history)"},
+			{Short: "t", Name: "token", Value: helpValueString, Description: helpValueHistory},
 			{Name: "username", Value: helpValueString, Description: "Registry username"},
 		},
 	}
@@ -1296,16 +1334,36 @@ func secretImportHelp() commandHelp {
 func secretCustomHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
-			"Docker sbx supports custom secrets by storing a placeholder in the sandbox and",
-			"replacing it in matching outbound request headers. Rheic does not implement",
-			"custom-secret storage or proxy substitution yet.",
+			"EXPERIMENTAL: this command may change or be removed in future releases.",
 			"",
-			"Unsupported. This command will not store or inject a secret. Passing Docker sbx",
-			"option families to Rheic currently fails closed.",
+			"Create or update a custom secret for a service not built into sbx.",
+			"",
+			"Custom secrets work via a placeholder: the sandbox sees the placeholder value",
+			"instead of the real secret. When the sandbox makes an outbound request to the",
+			"target host, the proxy replaces the placeholder with the real secret in the",
+			"request headers — the secret never enters the sandbox directly.",
 		},
 		Usage: []string{"rsbx secret set-custom [flags]"},
+		Examples: []string{
+			"# Create a global custom secret. A unique placeholder is generated automatically.",
+			"rsbx secret set-custom --host api.example.com --env API_KEY --value secret123",
+		},
 		Flags: []commandFlagHelp{
-			{Short: "h", Name: helpCommand, Description: "help for secret set-custom"},
+			{Name: "command", Value: helpValueString, Description: "Use a command's standard output as the secret value"},
+			{Name: "env", Value: helpValueString, Description: "Set this env var in the sandbox to the placeholder value"},
+			{Name: helpNameFormat, Value: helpValueString, Description: "How the value fills the header, with one %s; default \"Bearer %s\" when --header is omitted (with --cloud)"},
+			{Name: "header", Value: helpValueString, Description: "HTTP header the proxy sets to the secret on requests to --host; default Authorization (with --cloud)"},
+			{Short: "h", Name: helpCommand, Description: "help for set-custom"},
+			{Name: "host", Value: helpNameStringArray, Description: "Host, IP, or wildcard pattern (e.g. *.example.com); repeatable; with --cloud, exact DNS names only"},
+			{Name: helpNameName, Value: helpValueString, Description: "Secret name; default derived from the first --host (with --cloud)"},
+			{Name: "no-verify", Description: "Skip checking the --ref or --command source when storing it"},
+			{Name: "placeholder", Value: helpValueString, Description: "Placeholder value; use {rand} for a random suffix (e.g. sk-{rand})"},
+			{Name: "ref", Value: helpValueString, Description: "Use a 1Password op:// reference or AWS Secrets Manager ARN as the secret source"},
+			{Name: helpNameRefresh, Value: helpValueString, Description: "Secret refresh policy: on-demand (default) or after a duration"},
+			{Name: "sandbox", Value: helpValueString, Description: "Scope the secret to one sandbox (default: all sandboxes)"},
+			{Name: "show-error", Description: "Show resolver standard error if the initial check fails (may contain secrets)"},
+			{Short: "t", Name: "token", Value: helpValueString, Description: helpValueHistory},
+			{Name: "value", Value: helpValueString, Description: helpValueHistory},
 		},
 	}
 }
@@ -1595,6 +1653,8 @@ func skillsHelp() commandHelp {
 }
 
 const helpExperimentalLine = "EXPERIMENTAL: this command may change or be removed in future releases."
+const helpForLs = "help for ls"
+const helpValueHistory = "Secret value (less secure: visible in shell history)"
 
 func skillsAddHelp() commandHelp {
 	return commandHelp{

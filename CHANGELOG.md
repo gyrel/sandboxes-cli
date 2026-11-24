@@ -4,6 +4,16 @@
 
 ### Added
 
+- EXPERIMENTAL: `secret set-custom` stores inline custom secrets through the
+  daemon (masked placeholders, host patterns, env binding, global/sandbox
+  scoping); the write response echoes the generated placeholder once.
+  `--ref`/`--command` sources report the daemon's approval-unavailable state
+  until the ApprovalService daemon slice lands. `--header`/`--format` and
+  `--cloud` stay refused (Rheic is vault-only; local contract).
+- `secret ls` renders custom-secret rows with their masked placeholder.
+- `policy approval ls|inspect|respond` surface the daemon approval stream;
+  approve and EXACT-persist fail closed without a trusted OS provider
+  (denial always works); unknown `--option` values are refused.
 - EXPERIMENTAL: `env create`, `env run`, `env rm` and `env plan` accept
   `--skip-host-commands`; `env create`/`env run`/`env rm` accept `--force`,
   and `env rm` accepts `--prune-bindings`, matching the captured help

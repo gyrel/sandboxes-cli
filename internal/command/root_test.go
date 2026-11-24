@@ -776,18 +776,11 @@ func TestSecretHelp(t *testing.T) {
 func TestSecretCustomFailsClosedAndImportHelpIsAvailable(t *testing.T) {
 	var output bytes.Buffer
 	runner := &Runner{Out: &output, Err: &output}
-	if code := runner.Run(context.Background(), []string{"secret", "set-custom", "--host", "api.example.invalid", "--value", "synthetic"}); code != 1 {
-		t.Fatalf("set-custom exit=%d output=%q", code, output.String())
-	}
-	if !strings.Contains(output.String(), "no secret was stored") {
-		t.Fatalf("set-custom did not explain fail-closed result: %q", output.String())
-	}
-
 	output.Reset()
 	if code := runner.Run(context.Background(), []string{"secret", "set-custom", "--help"}); code != 0 {
 		t.Fatalf("set-custom help exit=%d output=%q", code, output.String())
 	}
-	for _, expected := range []string{"Description:", "Usage:", "Flags:", "Unsupported.", "will not store or inject"} {
+	for _, expected := range []string{"Description:", "Usage:", "Flags:", "set-custom"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("set-custom help lacks %q: %s", expected, output.String())
 		}
@@ -822,6 +815,8 @@ func TestSecretListHelpMatchesSupportedFilterSurface(t *testing.T) {
 type fakeClient struct {
 	registry        *fakeRegistryCredentials
 	secrets         sdk.SecretService
+	customSecrets   sdk.CustomSecretService
+	approvals       sdk.ApprovalService
 	sandbox         sdk.SandboxService
 	operations      sdk.OperationService
 	accounts        sdk.AccountService
@@ -876,6 +871,18 @@ func (f fakeClient) ListRegistryCredentials(context.Context) ([]sdk.RegistryCred
 	return f.registry.items, f.registry.listErr
 }
 func (f fakeClient) SecretService() sdk.SecretService { return f.secrets }
+func (f fakeClient) CustomSecretService() sdk.CustomSecretService {
+	if f.customSecrets != nil {
+		return f.customSecrets
+	}
+	return nil
+}
+func (f fakeClient) ApprovalService() sdk.ApprovalService {
+	if f.approvals != nil {
+		return f.approvals
+	}
+	return nil
+}
 func (f fakeClient) AccountService() sdk.AccountService {
 	if f.accounts == nil {
 		return nil

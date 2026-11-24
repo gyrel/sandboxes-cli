@@ -9,8 +9,8 @@ import (
 // completionTree maps each command to its flags. Subcommand-bearing commands
 // list their subcommands in completionSubcommands.
 var completionTree = map[string][]string{
-	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, skillsFlag, removeFlag, newFlag, helpShort, helpFlag},
-	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, skillsFlag, helpShort, helpFlag},
+	commandRun:        {nameFlag, detachShort, detachFlag, imageFlag, templateShort, templateFlag, publishShort, publishFlag, allowFlag, denyFlag, cpusFlag, memoryShort, memoryFlag, envShort, envFlag, envFileFlag, kitFlag, kitArgFlag, kitArgsFileFlag, skillsFlag, removeFlag, newFlag, helpShort, helpFlag},
+	commandCreate:     {nameFlag, publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, policyProfileFlag, dockerFlag, "--clone", kitFlag, kitArgFlag, kitArgsFileFlag, denyWriteFlag, cpusFlag, memoryShort, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag, skillsFlag, helpShort, helpFlag},
 	commandExec:       {"-i", interactiveFlag, "-t", ttyFlag, "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, helpShort, helpFlag},
 	"cp":              {"-L", "--follow-link"},
 	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
@@ -269,7 +269,7 @@ func flagsTakingValue(flags []string) []string {
 		publishShort: true, publishFlag: true, allowFlag: true, denyFlag: true,
 		cpusFlag: true, memoryShort: true, memoryFlag: true, envShort: true, envFlag: true,
 		envFileFlag: true, "--idempotency-key": true, policyProfileFlag: true,
-		kitFlag: true, denyWriteFlag: true, protocolFlag: true, logTypeFlag: true,
+		kitFlag: true, kitArgFlag: true, kitArgsFileFlag: true, denyWriteFlag: true, protocolFlag: true, logTypeFlag: true,
 		"-w": true, workdirFlag: true, "-u": true, userFlag: true,
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
 		usernameFlag: true, registryFlag: true, sandboxFlag: true,

@@ -173,7 +173,8 @@ func (a artifact) validate(arguments map[string]string) Result {
 	} else if doc.Metadata.Name != "" {
 		result.Name = doc.Metadata.Name
 	}
-	result.Violations = append(result.Violations, checkArguments(doc, result.Name, specName, arguments)...)
+	_, violations := ResolveArgumentValues(doc, result.Name, specName, arguments)
+	result.Violations = append(result.Violations, violations...)
 	return result.sorted()
 }
 

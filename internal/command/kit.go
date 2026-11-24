@@ -205,13 +205,42 @@ func (r *Runner) kitList(args []string) int {
 	return 0
 }
 
-func applyKit(ctx context.Context, path string, agent, image, profile *string, paths, env *[]string, oauthCredentials *[]sdk.OAuthCredential) error {
+// kitInputs carries the kit flags that applyKit resolves against the kit.
+type kitInputs struct {
+	arguments map[string]string
+	envFiles  []string
+}
+
+// kitArgumentsFromFlags collects --kit-arg and --kit-args-file values for one
+// kit reference. Arguments without a kit are refused so they are never dropped.
+func kitArgumentsFromFlags(kitRef string, values, files []string) (map[string]string, error) {
+	if kitRef == "" {
+		if len(values) > 0 || len(files) > 0 {
+			return nil, errors.New("--kit-arg and --kit-args-file require --kit")
+		}
+		return map[string]string{}, nil
+	}
+	return kit.CollectArguments(files, values)
+}
+
+func applyKit(ctx context.Context, path string, agent, image, profile *string, paths, env *[]string, oauthCredentials *[]sdk.OAuthCredential, inputs kitInputs) error {
 	doc, err := kit.Load(path)
 	if err != nil {
 		return err
 	}
-	if doc.V3 != nil {
+	if doc.V3 != nil && v3NeedsBuilder(doc.V3) {
 		return errors.New("kit v3 descriptors require a kit builder; building and applying v3 kits is not implemented")
+	}
+	kitName, err := kitNameForArguments(path)
+	if err != nil {
+		return err
+	}
+	values, violations := kit.ResolveArgumentValues(doc, kitName, "", inputs.arguments)
+	if len(violations) > 0 {
+		return &kit.ViolationError{Violations: violations}
+	}
+	if doc.V3 != nil {
+		return applyV3KitArguments(doc, values, env, inputs.envFiles)
 	}
 	for _, value := range []struct {
 		label   string
@@ -238,6 +267,68 @@ func applyKit(ctx context.Context, path string, agent, image, profile *string, p
 	}
 	*oauthCredentials = append(*oauthCredentials, converted...)
 	return mergeOAuthEnvironment(doc, env)
+}
+
+// v3NeedsBuilder reports whether a v3 descriptor carries content or dependency
+// declarations that only a kit builder can apply. Provides claims tools the kit
+// installs, so applying its args without the builder would deliver a sandbox
+// that silently lacks them.
+func v3NeedsBuilder(doc *kit.V3Descriptor) bool {
+	return doc.NeedsBuild || len(doc.Capabilities) > 0 || len(doc.Kits) > 0 ||
+		len(doc.Provides) > 0 ||
+		len(doc.Requires) > 0 || len(doc.Integrates) > 0 || len(doc.Conflicts) > 0
+}
+
+// kitNameForArguments returns the name that kit.name=value keys match. It is
+// the directory name, or the file name without its extension, as kit validate
+// reports it.
+func kitNameForArguments(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve kit reference: %w", err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("inspect kit reference: %w", err)
+	}
+	name := filepath.Base(abs)
+	if !info.IsDir() {
+		name = strings.TrimSuffix(name, filepath.Ext(name))
+	}
+	return name, nil
+}
+
+// applyV3KitArguments delivers the resolved arguments of a builder-free v3 kit
+// through the same environment list that --env feeds. A value that would
+// silently replace an explicit --env or --env-file entry is refused.
+func applyV3KitArguments(doc kit.Kit, values map[string]string, env *[]string, envFiles []string) error {
+	entries, err := kit.ArgumentEnvironment(doc, values)
+	if err != nil {
+		return err
+	}
+	taken := make(map[string]struct{}, len(*env))
+	for _, entry := range *env {
+		key, _, _ := strings.Cut(entry, "=")
+		taken[key] = struct{}{}
+	}
+	for _, file := range envFiles {
+		lines, err := readExecEnvFile(file)
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			key, _, _ := strings.Cut(line, "=")
+			taken[key] = struct{}{}
+		}
+	}
+	for _, entry := range entries {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, clash := taken[key]; clash {
+			return fmt.Errorf("environment variable %s is set by a kit argument and by --env or --env-file", key)
+		}
+	}
+	*env = append(*env, entries...)
+	return nil
 }
 
 func mergeKitValue(label string, target *string, fromKit string) error {

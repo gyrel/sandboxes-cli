@@ -26,6 +26,13 @@
   `files/` directory. Symbolic links, other root entries and oversized trees
   are refused, the output must end in `.zip`, and an existing output is never
   overwritten.
+- EXPERIMENTAL: `run` and `create` accept `--kit-arg NAME=VALUE` (or
+  `kit.NAME=VALUE`) and `--kit-args-file FILE` for the kit given with `--kit`.
+  Arguments that declare `env` are passed to the sandbox as environment
+  variables; required, enum and pattern rules match `kit validate`. Values
+  are never printed in errors. Arguments without `--kit`, a second `--kit`,
+  build arguments (`buildArg`, `buildSecret`) and v3 kits that need a kit
+  builder are refused rather than dropped.
 
 ### Changed
 

@@ -1470,7 +1470,36 @@ func validateCreateResources(cpus uint, memory string) (uint32, uint32, error) {
 	return cpuCount, memoryMiB, nil
 }
 
-//nolint:gocyclo,cyclop,funlen // create accepts the full documented flag matrix.
+// kitAgentPositional takes the agent from the kit when create was given none.
+func kitAgentPositional(kitPath string, positionals []string) ([]string, error) {
+	if kitPath == "" || len(positionals) > 0 {
+		return positionals, nil
+	}
+	doc, err := kit.Load(kitPath)
+	if err != nil {
+		return nil, err
+	}
+	if doc.Spec.Agent == "" {
+		return nil, fmt.Errorf("kit %s does not define an agent", kitPath)
+	}
+	return []string{doc.Spec.Agent}, nil
+}
+
+// createKitSelection returns the single --kit reference and its arguments.
+// Several kits are refused because only one kit is applied per command.
+func createKitSelection(kitRefs, values, files []string) (string, map[string]string, error) {
+	if len(kitRefs) > 1 {
+		return "", nil, errors.New("--kit can be given only once; multiple kits are not supported")
+	}
+	kitPath := ""
+	if len(kitRefs) == 1 {
+		kitPath = kitRefs[0]
+	}
+	arguments, err := kitArgumentsFromFlags(kitPath, values, files)
+	return kitPath, arguments, err
+}
+
+//nolint:funlen // create accepts the full documented flag matrix.
 func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createOptions, bool, error) {
 	fs := r.newFlagSet(commandCreate)
 	fs.SetOutput(io.Discard)
@@ -1496,7 +1525,10 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 	privileged := fs.Bool("docker", false, "run the dedicated Docker profile")
 	cloneMode := fs.Bool("clone", false, "run the agent on a private in-guest clone of PATH")
 	fs.Bool("no-progress", false, "suppress progress output")
-	kitPath := fs.String("kit", "", "apply a local kit definition")
+	var kitRefs, kitArgs, kitArgFiles stringListFlag
+	fs.Var(&kitRefs, "kit", "apply a local kit definition (only one kit per command)")
+	fs.Var(&kitArgs, "kit-arg", "value for an argument the kit declares, as name=value or kit.name=value (can be repeated)")
+	fs.Var(&kitArgFiles, "kit-args-file", "file of name=value kit arguments (can be repeated); --kit-arg overrides")
 	skillsMode := fs.String("skills", "", "shared skills mode: off, readonly or readwrite (empty uses skills.defaultMode)")
 	var denyWriteFlags stringListFlag
 	fs.Var(&denyWriteFlags, "deny-write", "mount PATH read-only (repeatable)")
@@ -1506,16 +1538,13 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 		}
 		return createOptions{}, false, flagParseError{err: err}
 	}
-	positionals := fs.Args()
-	if *kitPath != "" && len(positionals) == 0 {
-		doc, err := kit.Load(*kitPath)
-		if err != nil {
-			return createOptions{}, false, err
-		}
-		if doc.Spec.Agent == "" {
-			return createOptions{}, false, fmt.Errorf("kit %s does not define an agent", *kitPath)
-		}
-		positionals = []string{doc.Spec.Agent}
+	kitPath, kitArguments, err := createKitSelection(kitRefs, kitArgs, kitArgFiles)
+	if err != nil {
+		return createOptions{}, false, err
+	}
+	positionals, err := kitAgentPositional(kitPath, fs.Args())
+	if err != nil {
+		return createOptions{}, false, err
 	}
 	name, agent, paths, err := parseCreatePositionals(positionals, *nameFlag)
 	if err != nil {
@@ -1526,10 +1555,11 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 		return createOptions{}, false, err
 	}
 	var oauthCredentials []sdk.OAuthCredential
-	if *kitPath != "" {
+	if kitPath != "" {
 		kitPaths := make([]string, 0, len(paths))
 		kitEnv := []string(envFlags)
-		if err := applyKit(ctx, *kitPath, &agent, &imageRef, profile, &kitPaths, &kitEnv, &oauthCredentials); err != nil {
+		inputs := kitInputs{arguments: kitArguments, envFiles: envFileFlags}
+		if err := applyKit(ctx, kitPath, &agent, &imageRef, profile, &kitPaths, &kitEnv, &oauthCredentials, inputs); err != nil {
 			return createOptions{}, false, err
 		}
 		paths = append(kitPaths, paths...)

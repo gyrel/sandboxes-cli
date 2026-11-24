@@ -141,23 +141,23 @@ func validArgumentKey(key string) bool {
 	return v3ArgKeyPattern.MatchString(name)
 }
 
-// checkArguments reports arguments the kit does not declare, required
-// arguments that are missing, and values outside an argument's enum or
-// pattern. Kits without a v3 args block declare nothing.
-func checkArguments(doc Kit, kitName, specPath string, arguments map[string]string) []Violation {
+// ResolveArgumentValues checks arguments against the kit's v3 declarations and
+// returns the value each declared argument takes, with defaults applied. It
+// reports arguments the kit does not declare, required arguments that are
+// missing, and values outside an argument's enum or pattern. Kits without a
+// v3 args block declare nothing. Values must not be used when violations are
+// returned.
+func ResolveArgumentValues(doc Kit, kitName, specPath string, arguments map[string]string) (map[string]string, []Violation) {
 	var declared map[string]V3Arg
 	if doc.V3 != nil {
 		declared = doc.V3.Args
 	}
-	values, violations := resolveArguments(kitName, specPath, declared, arguments)
-	names := make([]string, 0, len(declared))
-	for name := range declared {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	supplied, violations := resolveArguments(kitName, specPath, declared, arguments)
+	names := sortedArgumentNames(declared)
+	resolved := make(map[string]string, len(declared))
 	for _, name := range names {
 		arg := declared[name]
-		value, given := values[name]
+		value, given := supplied[name]
 		if !given && arg.HasDefault {
 			value, given = arg.Default, true
 		}
@@ -167,11 +167,52 @@ func checkArguments(doc Kit, kitName, specPath string, arguments map[string]stri
 			}
 			continue
 		}
+		resolved[name] = value
 		if problem := argumentValueProblem(arg, value); problem != "" {
 			violations = append(violations, Violation{Path: specPath, Message: fmt.Sprintf("kit argument %q %s", name, problem)})
 		}
 	}
-	return violations
+	return resolved, violations
+}
+
+// ArgumentEnvironment returns NAME=VALUE entries for the resolved values of
+// arguments that deliver through env. It refuses build-delivered arguments
+// (buildArg and buildSecret) because building kits needs a kit builder, and it
+// never drops them silently. Error messages name arguments but never values.
+func ArgumentEnvironment(doc Kit, values map[string]string) ([]string, error) {
+	if doc.V3 == nil {
+		return nil, nil
+	}
+	var entries []string
+	owners := make(map[string]string)
+	for _, name := range sortedArgumentNames(doc.V3.Args) {
+		arg := doc.V3.Args[name]
+		if arg.BuildArg != "" || arg.BuildSecret != "" {
+			return nil, fmt.Errorf("kit argument %q is a build argument; building kits is not implemented", name)
+		}
+		value, resolved := values[name]
+		if arg.Env == "" || !resolved {
+			continue
+		}
+		if !v3ArgKeyPattern.MatchString(arg.Env) {
+			return nil, fmt.Errorf("kit argument %q declares an invalid env name", name)
+		}
+		if owner, taken := owners[arg.Env]; taken {
+			return nil, fmt.Errorf("kit arguments %q and %q both set env %s", owner, name, arg.Env)
+		}
+		owners[arg.Env] = name
+		entries = append(entries, arg.Env+"="+value)
+	}
+	return entries, nil
+}
+
+func sortedArgumentNames(declared map[string]V3Arg) []string {
+	names := make([]string, 0, len(declared))
+	for name := range declared {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // resolveArguments maps supplied keys onto declared names. Unqualified keys

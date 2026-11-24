@@ -287,7 +287,7 @@ func kitNameForArguments(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve kit reference: %w", err)
 	}
-	info, err := os.Stat(abs)
+	info, err := os.Stat(abs) // #nosec G304,G703 -- user-selected kit reference from the CLI flag; read-only stat of the chosen path (AGENTS 8 workspace-trust grammar)
 	if err != nil {
 		return "", fmt.Errorf("inspect kit reference: %w", err)
 	}

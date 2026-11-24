@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.0.71 — unreleased (train)
+
+### Added
+
+- EXPERIMENTAL: `env create`, `env run`, `env rm` and `env plan` accept
+  `--skip-host-commands`; `env create`/`env run`/`env rm` accept `--force`,
+  and `env rm` accepts `--prune-bindings`, matching the captured help
+  grammar. Non-interactive plan application and removal fail closed unless
+  `--force` is passed.
+
 ## v0.0.70 — 2026-11-24
 
 ### Added

@@ -73,7 +73,7 @@ func TestKitValidateGrammarAndOutcomes(t *testing.T) {
 		{name: "missing args file", args: []string{"validate", good, "--kit-args-file", "/nonexistent/args.txt", "--offline"}, code: 1, stderr: "read kit arguments file"},
 		{name: "git https reference", args: []string{"validate", "https://example.com/org/kit.git", "--offline"}, code: 1, stderr: "error: kit validate git references are not implemented yet\n"},
 		{name: "git scp reference without offline", args: []string{"validate", "git@example.com:org/kit.git"}, code: 1, stderr: "error: kit validate git references are not implemented yet\n"},
-		{name: "policy check fails closed", args: []string{"validate", good}, code: 1, stderr: "error: daemon-backed kit policy check is not implemented yet; "},
+		{name: "policy check fails closed", args: []string{"validate", good}, code: 1, stderr: "error: policy could not be checked: "},
 		{name: "policy hint", args: []string{"validate", good}, code: 1, stderr: "\n  try: rsbx kit validate --offline "},
 		{name: "offline table", args: []string{"validate", good, "--offline"}, code: 0, stdout: "Validated kit good-kit (offline: daemon kit policy not checked)\n"},
 		{name: "flag before reference", args: []string{"validate", "--offline", good}, code: 0, stdout: "Validated kit good-kit"},

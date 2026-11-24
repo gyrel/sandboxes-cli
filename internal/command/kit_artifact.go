@@ -1,14 +1,18 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	sdk "github.com/rheic/sandboxes-go-sdk"
 
 	"github.com/rheic/sandboxes-cli/internal/kit"
 )
@@ -84,24 +88,73 @@ func (r *Runner) kitValidate(args []string) int {
 	if len(result.Violations) > 0 {
 		return r.kitViolations("kit validate", result.Violations)
 	}
-	if !*offline {
-		return r.kitPolicyUnavailable(reference)
+	if *offline {
+		return r.printKitValidated(result, selected, false)
 	}
-	return r.printKitValidated(result, selected)
+	return r.kitPolicyValidate(reference, result, selected)
 }
 
-// kitPolicyUnavailable fails closed: the daemon-backed policy check has no
-// contract yet, so a kit is never reported as passing it.
-func (r *Runner) kitPolicyUnavailable(reference string) int {
-	_, _ = fmt.Fprintf(r.Err, "error: daemon-backed kit policy check is not implemented yet; the kit was not checked against kit.allowedSources, kit.allowLocalKits or kit.requireSignature\n  try: rsbx kit validate --offline %s\n", sanitizeTerminalText(reference))
+func (r *Runner) kitPolicyValidate(reference string, result kit.Result, selected string) int {
+	sourceKind := sdk.KitSourceKindDirectory
+	if strings.EqualFold(filepath.Ext(reference), ".zip") {
+		sourceKind = sdk.KitSourceKindZip
+	}
+
+	client, err := r.client()
+	if err != nil {
+		return r.kitPolicyDaemonError(reference, err)
+	}
+	defer func() { _ = client.Close() }()
+
+	check, err := sdk.KitPolicy(client).CheckKit(context.Background(), sdk.KitCheckRequest{
+		SourceKind:       sourceKind,
+		SourceRef:        reference,
+		SignaturePresent: false,
+	})
+	if err != nil {
+		return r.kitPolicyDaemonError(reference, err)
+	}
+	if !check.Allowed {
+		return r.kitPolicyDenied(check)
+	}
+	return r.printKitValidated(result, selected, true)
+}
+
+// kitPolicyDenied prints a daemon-provided denial without claiming success.
+func (r *Runner) kitPolicyDenied(check sdk.KitCheck) int {
+	message := strings.TrimSpace(check.Message)
+	if message == "" {
+		message = string(check.Reason)
+	}
+	if message == "" {
+		message = "kit policy denied"
+	}
+	_, _ = fmt.Fprintf(r.Err, "error: %s\n", sanitizeTerminalText(message))
+	settings := check.CheckedSettings
+	hint := "rsbx settings"
+	if len(settings) > 0 {
+		hint = "rsbx settings " + strings.Join(settings, ", ")
+	}
+	_, _ = fmt.Fprintf(r.Err, "  try: %s\n", sanitizeTerminalText(hint))
 	return 1
 }
 
-func (r *Runner) printKitValidated(result kit.Result, format string) int {
-	out := kitValidateOutput{Name: result.Name, Kind: result.Kind, Valid: true}
+// kitPolicyDaemonError fails closed when the daemon cannot be reached or the
+// client is version-gated; it never falls back to --offline semantics.
+func (r *Runner) kitPolicyDaemonError(reference string, err error) int {
+	_, _ = fmt.Fprintf(r.Err, "error: policy could not be checked: %s\n  try: rsbx kit validate --offline %s\n", sanitizeTerminalText(err.Error()), sanitizeTerminalText(reference))
+	return 1
+}
+
+func (r *Runner) printKitValidated(result kit.Result, format string, policyChecked bool) int {
+	out := kitValidateOutput{Name: result.Name, Kind: result.Kind, Valid: true, PolicyChecked: policyChecked}
 	switch format {
 	case listFormatTable:
-		_, _ = fmt.Fprintf(r.Out, "Validated kit %s (offline: daemon kit policy not checked)\n", sanitizeTerminalText(out.Name))
+		if policyChecked {
+			_, _ = fmt.Fprintf(r.Out, "Validated kit %s (policy: daemon-checked)\n", sanitizeTerminalText(out.Name))
+		} else {
+			_, _ = fmt.Fprintf(r.Out, "Validated kit %s (offline: daemon kit policy not checked)\n", sanitizeTerminalText(out.Name))
+		}
 		return 0
 	case listFormatYAML:
 		data, err := yaml.Marshal(out)

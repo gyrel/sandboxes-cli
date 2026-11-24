@@ -33,7 +33,7 @@ func parseWorkspaceSpec(value string) (sdk.Workspace, error) {
 	// direct); normalize explicitly so the stat target is unambiguously a
 	// cleaned absolute path rather than a tainted passthrough.
 	absolute = filepath.Clean(absolute)
-	info, err := os.Stat(absolute)
+	info, err := os.Stat(absolute) // #nosec G304,G703 -- user-selected workspace path (AGENTS 8: direct workspace = explicit host trust); stat only
 	if err != nil {
 		return sdk.Workspace{}, fmt.Errorf("workspace %s: %w", path, err)
 	}

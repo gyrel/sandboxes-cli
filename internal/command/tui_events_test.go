@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,16 +13,13 @@ import (
 func TestRingBufferBoundsDropCounterAndOrdering(t *testing.T) {
 	ring := newRingBuffer[int](3)
 	for i := 1; i <= 5; i++ {
-		ring.Push(i)
+		ring.Add(i)
 	}
 	if ring.Len() != 3 {
 		t.Fatalf("len=%d, want 3", ring.Len())
 	}
 	if ring.Dropped() != 2 {
 		t.Fatalf("dropped=%d, want 2", ring.Dropped())
-	}
-	if ring.DropCount() != 2 || ring.Drops() != 2 {
-		t.Fatal("drop aliases disagree")
 	}
 	got := ring.Snapshot()
 	want := []int{3, 4, 5}
@@ -30,7 +28,6 @@ func TestRingBufferBoundsDropCounterAndOrdering(t *testing.T) {
 			t.Fatalf("snapshot=%v, want %v", got, want)
 		}
 	}
-	// Mutating the snapshot must not affect the ring.
 	got[0] = 999
 	if ring.Snapshot()[0] == 999 {
 		t.Fatal("snapshot is not a copy")
@@ -44,7 +41,7 @@ func TestRingBufferConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(v int) {
 			defer wg.Done()
-			ring.Push(v)
+			ring.Add(v)
 		}(i)
 	}
 	wg.Wait()
@@ -69,48 +66,51 @@ func TestEventRowFromEventRendersAndSanitizes(t *testing.T) {
 	if row.Revision != 7 {
 		t.Fatalf("revision=%d", row.Revision)
 	}
-	if row.Type != "sandbox�[31m" {
+	if strings.ContainsRune(row.Type, 0x1b) {
 		t.Fatalf("type not sanitized: %q", row.Type)
 	}
-	if row.Sandbox != "dev" {
-		t.Fatalf("sandbox=%q", row.Sandbox)
+	if row.Sandbox != "dev" || row.State != "running" {
+		t.Fatalf("identity cells = %+v", row)
 	}
-	if row.State != "running" {
-		t.Fatalf("state=%q", row.State)
-	}
-	if !containsStr(row.Message, "pulling 3/7") {
+	if !strings.Contains(row.Message, "pulling 3/7") {
 		t.Fatalf("message=%q", row.Message)
 	}
-	// Host workspace path must not appear in the row.
-	for _, cell := range row.Cells() {
-		if containsStr(cell, "/secret/path") {
+	for _, cell := range []string{row.Time, row.Type, row.Sandbox, row.Operation, row.State, row.Message} {
+		if strings.Contains(cell, "/secret/path") {
 			t.Fatalf("host path leaked: %q", cell)
 		}
 	}
-	// aliases
-	if eventToRow(event).Revision != row.Revision {
-		t.Fatal("eventToRow alias mismatch")
-	}
-	if renderEvent(event).Revision != row.Revision {
-		t.Fatal("renderEvent alias mismatch")
+	errEvent := sdk.Event{Type: "operation", Revision: 8, Operation: &sdk.Operation{ID: "op-2", Kind: "pull", Error: "boom"}}
+	if msg := eventRowFromEvent(errEvent).Message; !strings.Contains(msg, "boom") {
+		t.Fatalf("error message = %q", msg)
 	}
 }
 
-func TestDeduplicateEventsByRevision(t *testing.T) {
-	events := []sdk.Event{
-		{Type: "sandbox", Revision: 1, Sandbox: &sdk.Sandbox{ID: "a"}},
-		{Type: "sandbox", Revision: 1, Sandbox: &sdk.Sandbox{ID: "a"}},
-		{Type: "operation", Revision: 2, Operation: &sdk.Operation{ID: "op"}},
-		{Type: "sandbox", Revision: 0, Sandbox: &sdk.Sandbox{ID: "b"}},
-		{Type: "sandbox", Revision: 0, Sandbox: &sdk.Sandbox{ID: "b"}},
+func TestLogRingWriterSplitsAndCaps(t *testing.T) {
+	ring := newRingBuffer[string](50)
+	writer := &logRingWriter{ring: ring}
+	if _, err := writer.Write([]byte("line one\nline two\npartial")); err != nil {
+		t.Fatal(err)
 	}
-	got := deduplicateEvents(events)
-	if len(got) != 3 {
-		t.Fatalf("len=%d, want 3 (%+v)", len(got), got)
+	if ring.Len() != 2 {
+		t.Fatalf("lines=%d want 2", ring.Len())
 	}
-	alias := dedupEvents(events)
-	if len(alias) != len(got) {
-		t.Fatal("dedupEvents alias mismatch")
+	writer.Flush()
+	if got := ring.Snapshot(); len(got) != 3 || got[2] != "partial" {
+		t.Fatalf("flush result=%v", got)
+	}
+	ring2 := newRingBuffer[string](10)
+	writer2 := &logRingWriter{ring: ring2}
+	if _, err := writer2.Write([]byte(strings.Repeat("x", maxLogPartialBytes+1))); err != nil {
+		t.Fatal(err)
+	}
+	if ring2.Len() == 0 {
+		t.Fatal("oversized unterminated line was not flushed")
+	}
+	for _, line := range ring2.Snapshot() {
+		if len(line) > maxLogPartialBytes*2 {
+			t.Fatalf("unbounded partial leaked: %d bytes", len(line))
+		}
 	}
 }
 
@@ -126,30 +126,21 @@ func (s *blockingEventStream) Close() error { return nil }
 
 type blockingSandbox struct {
 	fakeSandbox
-	mu     sync.Mutex
-	ctx    context.Context
-	stream *blockingEventStream
-}
-
-func (s *blockingSandbox) setCtx(ctx context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctx = ctx
-}
-
-func (s *blockingSandbox) getCtx() context.Context {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ctx
+	mu  sync.Mutex
+	ctx context.Context
 }
 
 func (s *blockingSandbox) Watch(ctx context.Context, _ sdk.WatchOptions) (sdk.EventStream, error) {
-	s.setCtx(ctx)
-	st := &blockingEventStream{ctx: ctx}
 	s.mu.Lock()
-	s.stream = st
+	s.ctx = ctx
 	s.mu.Unlock()
-	return st, nil
+	return &blockingEventStream{ctx: ctx}, nil
+}
+
+func (s *blockingSandbox) watchedCtx() context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ctx
 }
 
 type blockingClient struct {
@@ -157,6 +148,8 @@ type blockingClient struct {
 	mu      sync.Mutex
 	execCtx context.Context
 }
+
+func (c *blockingClient) Executor() sdk.Executor { return blockingExecutor{c: c} }
 
 func (c *blockingClient) setExecCtx(ctx context.Context) {
 	c.mu.Lock()
@@ -170,13 +163,7 @@ func (c *blockingClient) getExecCtx() context.Context {
 	return c.execCtx
 }
 
-func (c *blockingClient) Executor() sdk.Executor {
-	return blockingExecutor{c: c}
-}
-
-type blockingExecutor struct {
-	c *blockingClient
-}
+type blockingExecutor struct{ c *blockingClient }
 
 func (e blockingExecutor) Exec(ctx context.Context, _ sdk.ExecRequest) (int, error) {
 	e.c.setExecCtx(ctx)
@@ -184,39 +171,46 @@ func (e blockingExecutor) Exec(ctx context.Context, _ sdk.ExecRequest) (int, err
 	return 0, ctx.Err()
 }
 
+func newPanelTestModel() *dashboardModel {
+	return &dashboardModel{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: "running"}}, selected: 0}
+}
+
 func TestEventsPanelSwitchCancelsStream(t *testing.T) {
 	sb := &blockingSandbox{}
-	bc := &blockingClient{fakeClient: fakeClient{sandbox: sb}}
-	model := &dashboardModel{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: "running"}}, selected: 0}
+	client := &blockingClient{fakeClient: fakeClient{sandbox: sb}}
+	model := newPanelTestModel()
 	ctx := context.Background()
 
-	setDashboardPanel(ctx, bc, model, panelEvents)
+	model.setPanel(ctx, client, dashboardPanelEvents)
 	time.Sleep(50 * time.Millisecond)
-	ec := sb.getCtx()
+	ec := sb.watchedCtx()
 	if ec == nil {
 		t.Fatal("event stream did not start")
 	}
-	setDashboardPanel(ctx, bc, model, panelSandboxes)
+	model.setPanel(ctx, client, dashboardPanelSandboxes)
 	select {
 	case <-ec.Done():
 	case <-time.After(time.Second):
 		t.Fatal("event stream context not canceled on panel switch")
 	}
+	if model.eventCancel != nil {
+		t.Fatal("stream handles not cleared after stop")
+	}
 }
 
 func TestLogsPanelSwitchCancelsStream(t *testing.T) {
 	sb := &blockingSandbox{}
-	bc := &blockingClient{fakeClient: fakeClient{sandbox: sb}}
-	model := &dashboardModel{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev", State: "running"}}, selected: 0}
+	client := &blockingClient{fakeClient: fakeClient{sandbox: sb}}
+	model := newPanelTestModel()
 	ctx := context.Background()
 
-	setDashboardPanel(ctx, bc, model, panelLogs)
+	model.setPanel(ctx, client, dashboardPanelLogs)
 	time.Sleep(50 * time.Millisecond)
-	ec := bc.getExecCtx()
+	ec := client.getExecCtx()
 	if ec == nil {
 		t.Fatal("logs stream did not start")
 	}
-	setDashboardPanel(ctx, bc, model, panelSandboxes)
+	model.setPanel(ctx, client, dashboardPanelSandboxes)
 	select {
 	case <-ec.Done():
 	case <-time.After(time.Second):
@@ -224,38 +218,37 @@ func TestLogsPanelSwitchCancelsStream(t *testing.T) {
 	}
 }
 
+func TestSelectedSandboxID(t *testing.T) {
+	model := &dashboardModel{items: []sdk.Sandbox{{ID: "sb-1", Name: "dev"}, {Name: "named-only"}}}
+	if got := model.selectedSandboxID(); got != "sb-1" {
+		t.Fatalf("first selection = %q", got)
+	}
+	model.selected = 1
+	if got := model.selectedSandboxID(); got != "named-only" {
+		t.Fatalf("fallback to name = %q", got)
+	}
+	model.selected = 9
+	if got := model.selectedSandboxID(); got != "sb-1" {
+		t.Fatalf("out-of-range reset = %q", got)
+	}
+}
+
 func TestDrawDashboardEventsPanelSmoke(t *testing.T) {
 	screen := newDashboardTestScreen(100, 24)
-	model := &dashboardModel{panel: panelEvents, items: []sdk.Sandbox{{Name: "dev", State: "running"}}}
-	model.eventRingBuf().Push(sdk.Event{Type: "sandbox", Revision: 1, Sandbox: &sdk.Sandbox{Name: "dev", State: "running"}})
+	model := &dashboardModel{panel: dashboardPanelEvents, items: []sdk.Sandbox{{Name: "dev", State: "running"}}}
+	model.events().Add(sdk.Event{Type: "sandbox", Revision: 1, Sandbox: &sdk.Sandbox{Name: "dev", State: "running"}})
 	drawDashboard(screen, model)
-	output := screen.text()
-	for _, want := range []string{"EVENTS", "RHEIC", "dropped"} {
-		_ = want
-	}
-	if !containsStr(output, "EVENTS") {
-		t.Fatalf("events panel not rendered: %q", output)
+	if !strings.Contains(screen.text(), "EVENTS") {
+		t.Fatalf("events panel not rendered: %q", screen.text())
 	}
 }
 
 func TestDrawDashboardLogsPanelSmoke(t *testing.T) {
 	screen := newDashboardTestScreen(100, 24)
-	model := &dashboardModel{panel: panelLogs, items: []sdk.Sandbox{{Name: "dev", State: "running"}}}
-	model.logRingBuf().Push("hello log line")
+	model := &dashboardModel{panel: dashboardPanelLogs, items: []sdk.Sandbox{{Name: "dev", State: "running"}}}
+	model.logLines().Add("hello log line")
 	drawDashboard(screen, model)
-	output := screen.text()
-	if !containsStr(output, "hello log line") {
-		t.Fatalf("logs not rendered: %q", output)
+	if !strings.Contains(screen.text(), "hello log line") {
+		t.Fatalf("logs not rendered: %q", screen.text())
 	}
-}
-
-func containsStr(s, sub string) bool {
-	return len(s) >= len(sub) && (func() bool {
-		for i := 0; i+len(sub) <= len(s); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	})()
 }

@@ -1,4 +1,3 @@
-//nolint:gocognit,gocritic,nestif,gocyclo,cyclop,funlen
 package command
 
 import (
@@ -56,33 +55,20 @@ type dashboardModel struct {
 	pendingCreate sdk.CreateRequest
 	notice        string
 
-	// Panel state (aliases kept in sync for compatibility with tests/callers).
-	panel       dashboardPanel
-	view        dashboardPanel
-	tab         dashboardPanel
-	activePanel dashboardPanel
+	// Panel state.
+	panel dashboardPanel
 
-	// Bounded streams.
-	events       *ringBuffer[sdk.Event]
-	eventRing    *ringBuffer[sdk.Event]
-	eventBuffer  *ringBuffer[sdk.Event]
-	eventLog     *ringBuffer[sdk.Event]
-	eventStream2 *ringBuffer[sdk.Event]
-	logs         *ringBuffer[string]
-	logRing      *ringBuffer[string]
-	logBuffer    *ringBuffer[string]
-	logLines     *ringBuffer[string]
-	logTail      *ringBuffer[string]
+	// Bounded streams (lazily initialized via events()/logLines()).
+	eventsRing *ringBuffer[sdk.Event]
+	logsRing   *ringBuffer[string]
 
-	// Stream control.
+	// Stream control. mu guards err and lastEventRevision across the
+	// dashboard tick and the stream goroutines.
 	mu                sync.Mutex
 	eventCancel       context.CancelFunc
 	eventDone         chan struct{}
-	eventStream       sdk.EventStream
-	eventStreamCtx    context.Context
 	logsCancel        context.CancelFunc
 	logsDone          chan struct{}
-	logsStreamCtx     context.Context
 	lastEventRevision int64
 
 	// Scroll offsets.
@@ -144,6 +130,10 @@ func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client
 	defer screen.Fini()
 	screen.SetTitle("RHEIC | Sandboxes")
 	model := &dashboardModel{}
+	defer func() {
+		model.stopEventStream()
+		model.stopLogsStream()
+	}()
 	refreshDashboard(ctx, client, model)
 	drawDashboard(screen, model)
 
@@ -258,71 +248,13 @@ func dashboardKeyList(event *tcell.EventKey, model *dashboardModel, ctx context.
 	if event.Key() == tcell.KeyEscape || event.Str() == "q" || event.Str() == "Q" {
 		return true
 	}
-	// Global panel switching.
-	switch event.Str() {
-	case "1":
-		setDashboardPanel(ctx, client, model, dashboardPanelSandboxes)
-		return false
-	case "2":
-		setDashboardPanel(ctx, client, model, dashboardPanelEvents)
-		return false
-	case "3":
-		setDashboardPanel(ctx, client, model, dashboardPanelLogs)
-		return false
-	case "e", "E":
-		setDashboardPanel(ctx, client, model, dashboardPanelEvents)
-		return false
-	case "l", "L":
-		setDashboardPanel(ctx, client, model, dashboardPanelLogs)
-		return false
-	case "b", "B", "o", "O":
-		setDashboardPanel(ctx, client, model, dashboardPanelSandboxes)
+	if dashboardPanelSwitchKey(event, model, ctx, client) {
 		return false
 	}
-	if event.Key() == tcell.KeyTab {
-		next := dashboardPanel((int(model.panel) + 1) % 3)
-		setDashboardPanel(ctx, client, model, next)
-		return false
-	}
-	if event.Key() == tcell.KeyBacktab {
-		next := dashboardPanel((int(model.panel) + 2) % 3)
-		setDashboardPanel(ctx, client, model, next)
-		return false
-	}
-
-	// Panel-specific scrolling/actions.
 	if model.panel != dashboardPanelSandboxes {
-		switch {
-		case event.Key() == tcell.KeyUp || event.Str() == "k":
-			if model.panel == dashboardPanelEvents {
-				model.eventScroll++
-			} else {
-				model.logScroll++
-			}
-		case event.Key() == tcell.KeyDown || event.Str() == "j":
-			if model.panel == dashboardPanelEvents {
-				if model.eventScroll > 0 {
-					model.eventScroll--
-				}
-			} else {
-				if model.logScroll > 0 {
-					model.logScroll--
-				}
-			}
-		case event.Str() == "r" || event.Str() == "R":
-			if model.panel == dashboardPanelEvents {
-				// Reconnect is handled by the resilient watcher; reset dedup tail.
-				model.lastEventRevision = 0
-			}
-			if model.panel == dashboardPanelLogs {
-				stopLogsStream(model)
-				id := selectedSandboxID(model)
-				startLogsStream(ctx, client, model, id)
-			}
-		}
+		dashboardAuxPanelKey(event, model, ctx, client)
 		return false
 	}
-
 	switch {
 	case event.Key() == tcell.KeyUp || event.Str() == "k":
 		if model.selected > 0 {
@@ -338,6 +270,63 @@ func dashboardKeyList(event *tcell.EventKey, model *dashboardModel, ctx context.
 		return dashboardKeyAction(event, model, ctx, client)
 	}
 	return false
+}
+
+// dashboardPanelSwitchKey handles global panel selection keys and reports
+// whether the event was consumed.
+func dashboardPanelSwitchKey(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
+	panel := dashboardPanelSandboxes
+	switch event.Str() {
+	case "1":
+	case "2", "e", "E":
+		panel = dashboardPanelEvents
+	case "3", "l", "L":
+		panel = dashboardPanelLogs
+	case "b", "B", "o", "O":
+	default:
+		switch event.Key() {
+		case tcell.KeyTab:
+			panel = dashboardPanel((int(model.panel) + 1) % 3)
+		case tcell.KeyBacktab:
+			panel = dashboardPanel((int(model.panel) + 2) % 3)
+		default:
+			return false
+		}
+	}
+	model.setPanel(ctx, client, panel)
+	return true
+}
+
+// dashboardAuxPanelKey handles scroll and reconnect inside the events and
+// logs panels.
+func dashboardAuxPanelKey(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) {
+	events := model.panel == dashboardPanelEvents
+	switch {
+	case event.Key() == tcell.KeyUp || event.Str() == "k":
+		model.scrollAuxPanel(1)
+	case event.Key() == tcell.KeyDown || event.Str() == "j":
+		model.scrollAuxPanel(-1)
+	case event.Str() == "r" || event.Str() == "R":
+		if events {
+			// Reconnect is handled by the resilient watcher; reset dedup tail.
+			model.mu.Lock()
+			model.lastEventRevision = 0
+			model.mu.Unlock()
+			return
+		}
+		model.stopLogsStream()
+		model.startLogsStream(ctx, client, model.selectedSandboxID())
+	}
+}
+
+// scrollAuxPanel moves the scroll offset of the active auxiliary panel by
+// delta, clamped at zero.
+func (m *dashboardModel) scrollAuxPanel(delta int) {
+	if m.panel == dashboardPanelEvents {
+		m.eventScroll = max(m.eventScroll+delta, 0)
+		return
+	}
+	m.logScroll = max(m.logScroll+delta, 0)
 }
 
 // dashboardKeyAction handles single-letter list actions (new, start, stop,
@@ -406,47 +395,17 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 	}
 	detailX := leftWidth + 3
 
-	if model.panel == dashboardPanelSandboxes {
-		drawText(screen, 3, 11, "SANDBOXES", muted, leftWidth-4)
-		drawText(screen, 3, 12, "NAME", accent, 22)
-		drawText(screen, 27, 12, dashboardStateLabel, accent, 12)
-		drawText(screen, 40, 12, "AGENT", accent, leftWidth-43)
-		for y := 13; y < height-3; y++ {
-			drawText(screen, 3, y, strings.Repeat(" ", leftWidth-4), primary, leftWidth-4)
-			index := y - 13
-			if index >= len(model.items) {
-				continue
-			}
-			item := model.items[index]
-			style := primary
-			marker := " "
-			if index == model.selected {
-				style = selected
-				marker = "›"
-			}
-			drawText(screen, 2, y, marker, accent, 1)
-			drawText(screen, 3, y, clipCell(item.Name, 22), style, 22)
-			drawText(screen, 27, y, clipCell(item.State, 12), style, 12)
-			drawText(screen, 40, y, clipCell(item.Agent, leftWidth-43), style, leftWidth-43)
-		}
-
-		if detailX < width-22 {
-			drawText(screen, detailX, 11, "SELECTED SANDBOX", muted, width-detailX-2)
-			if len(model.items) > 0 {
-				drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
-			} else if model.err == "" {
-				drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
-				drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
-			}
-		}
-	} else if model.panel == dashboardPanelEvents {
+	switch model.panel {
+	case dashboardPanelSandboxes:
+		drawSandboxPanel(screen, model, leftWidth, detailX, width, height, primary, accent, muted, warm, selected)
+	case dashboardPanelEvents:
 		drawText(screen, 3, 11, "EVENTS", muted, leftWidth-4)
 		drawEventPanel(screen, model, 3, leftWidth, height, primary, muted)
 		if detailX < width-22 {
 			drawText(screen, detailX, 11, "EVENT TAIL", muted, width-detailX-2)
-			drawText(screen, detailX, 13, fmt.Sprintf("%d buffered (max %d)", model.eventRingBuf().Len(), dashboardEventLimit), primary, width-detailX-2)
+			drawText(screen, detailX, 13, fmt.Sprintf("%d buffered (max %d)", model.events().Len(), dashboardEventLimit), primary, width-detailX-2)
 		}
-	} else {
+	default:
 		drawText(screen, 3, 11, "LOGS", muted, leftWidth-4)
 		drawLogPanel(screen, model, 3, leftWidth, height, primary, muted)
 		if detailX < width-22 {
@@ -458,6 +417,43 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 	}
 	drawDashboardFooter(screen, model, width, height, accent, muted, warm)
 	screen.Show()
+}
+
+// drawSandboxPanel renders the sandbox list and its detail column.
+func drawSandboxPanel(screen dashboardScreen, model *dashboardModel, leftWidth, detailX, width, height int, primary, accent, muted, warm, selected tcell.Style) {
+	drawText(screen, 3, 11, "SANDBOXES", muted, leftWidth-4)
+	drawText(screen, 3, 12, "NAME", accent, 22)
+	drawText(screen, 27, 12, dashboardStateLabel, accent, 12)
+	drawText(screen, 40, 12, "AGENT", accent, leftWidth-43)
+	for y := 13; y < height-3; y++ {
+		drawText(screen, 3, y, strings.Repeat(" ", leftWidth-4), primary, leftWidth-4)
+		index := y - 13
+		if index >= len(model.items) {
+			continue
+		}
+		item := model.items[index]
+		style := primary
+		marker := " "
+		if index == model.selected {
+			style = selected
+			marker = "›"
+		}
+		drawText(screen, 2, y, marker, accent, 1)
+		drawText(screen, 3, y, clipCell(item.Name, 22), style, 22)
+		drawText(screen, 27, y, clipCell(item.State, 12), style, 12)
+		drawText(screen, 40, y, clipCell(item.Agent, leftWidth-43), style, leftWidth-43)
+	}
+	if detailX >= width-22 {
+		return
+	}
+	drawText(screen, detailX, 11, "SELECTED SANDBOX", muted, width-detailX-2)
+	switch {
+	case len(model.items) > 0:
+		drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
+	case model.err == "":
+		drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
+		drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
+	}
 }
 
 // drawDashboardFooter renders the status, notice, mode overlay and key hints.

@@ -1,4 +1,3 @@
-//nolint:unused,unparam,gocognit,gocritic,nestif
 package command
 
 import (
@@ -15,8 +14,12 @@ import (
 const (
 	dashboardEventLimit = 200
 	dashboardLogLimit   = 200
+	// maxLogPartialBytes bounds an unterminated log line before it is flushed
+	// so a hostile or binary stream cannot grow the buffer unbounded.
+	maxLogPartialBytes = 4 << 10
 )
 
+// dashboardPanel selects which pane the dashboard left column renders.
 type dashboardPanel int
 
 const (
@@ -25,24 +28,7 @@ const (
 	dashboardPanelLogs
 )
 
-type panel = dashboardPanel
-type view = dashboardPanel
-type tab = dashboardPanel
-
-const (
-	panelSandboxes = dashboardPanelSandboxes
-	panelEvents    = dashboardPanelEvents
-	panelLogs      = dashboardPanelLogs
-
-	viewSandboxes = dashboardPanelSandboxes
-	viewEvents    = dashboardPanelEvents
-	viewLogs      = dashboardPanelLogs
-
-	tabSandboxes = dashboardPanelSandboxes
-	tabEvents    = dashboardPanelEvents
-	tabLogs      = dashboardPanelLogs
-)
-
+// ringBuffer is a bounded FIFO that counts dropped entries.
 type ringBuffer[T any] struct {
 	mu       sync.Mutex
 	capacity int
@@ -57,16 +43,29 @@ func newRingBuffer[T any](capacity int) *ringBuffer[T] {
 	return &ringBuffer[T]{capacity: capacity, items: make([]T, 0, capacity)}
 }
 
-func (r *ringBuffer[T]) Capacity() int {
+func (r *ringBuffer[T]) Add(value T) {
 	if r == nil {
-		return 0
+		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.capacity
+	if len(r.items) >= r.capacity {
+		r.items = r.items[1:]
+		r.dropped++
+	}
+	r.items = append(r.items, value)
 }
 
-func (r *ringBuffer[T]) Cap() int { return r.Capacity() }
+func (r *ringBuffer[T]) Snapshot() []T {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]T, len(r.items))
+	copy(out, r.items)
+	return out
+}
 
 func (r *ringBuffer[T]) Len() int {
 	if r == nil {
@@ -86,58 +85,8 @@ func (r *ringBuffer[T]) Dropped() int {
 	return r.dropped
 }
 
-func (r *ringBuffer[T]) DropCount() int { return r.Dropped() }
-func (r *ringBuffer[T]) Drops() int     { return r.Dropped() }
-
-func (r *ringBuffer[T]) Push(value T)   { r.Add(value) }
-func (r *ringBuffer[T]) Append(value T) { r.Add(value) }
-func (r *ringBuffer[T]) Add(value T) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.capacity < 1 {
-		r.capacity = 1
-	}
-	if len(r.items) >= r.capacity {
-		r.items = r.items[1:]
-		r.dropped++
-	}
-	r.items = append(r.items, value)
-}
-func (r *ringBuffer[T]) Write(value T) { r.Push(value) }
-
-func (r *ringBuffer[T]) Snapshot() []T {
-	if r == nil {
-		return nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]T, len(r.items))
-	copy(out, r.items)
-	return out
-}
-func (r *ringBuffer[T]) Items() []T   { return r.Snapshot() }
-func (r *ringBuffer[T]) All() []T     { return r.Snapshot() }
-func (r *ringBuffer[T]) Tail() []T    { return r.Snapshot() }
-func (r *ringBuffer[T]) Entries() []T { return r.Snapshot() }
-func (r *ringBuffer[T]) Lines() []string {
-	snap := r.Snapshot()
-	out := make([]string, 0, len(snap))
-	for _, v := range snap {
-		out = append(out, fmt.Sprint(v))
-	}
-	return out
-}
-
-type eventRing = ringBuffer[sdk.Event]
-type eventRingBuffer = ringBuffer[sdk.Event]
-type logRing = ringBuffer[string]
-type logRingBuffer = ringBuffer[string]
-type textRing = ringBuffer[string]
-type textRingBuffer = ringBuffer[string]
-
+// eventRow is one rendered dashboard event line. Every field is already
+// sanitized; raw payloads never reach the struct.
 type eventRow struct {
 	Time      string
 	Type      string
@@ -146,20 +95,13 @@ type eventRow struct {
 	State     string
 	Message   string
 	Revision  int64
-	Columns   []string
-}
-
-func (r eventRow) Cells() []string {
-	if r.Columns != nil {
-		return r.Columns
-	}
-	return []string{r.Time, r.Type, r.Sandbox, r.Operation, r.State, r.Message}
 }
 
 func eventRowFromEvent(event sdk.Event) eventRow {
 	row := eventRow{
 		Revision: event.Revision,
 		Type:     sanitizeTerminalText(event.Type),
+		Time:     fmt.Sprintf("rev %d", event.Revision),
 	}
 	if row.Type == "" {
 		row.Type = "event"
@@ -173,91 +115,38 @@ func eventRowFromEvent(event sdk.Event) eventRow {
 		row.State = sanitizeTerminalText(event.Sandbox.State)
 	}
 	if event.Operation != nil {
-		op := sanitizeTerminalText(event.Operation.Kind)
-		if op == "" {
-			op = "operation"
-		}
-		if id := sanitizeTerminalText(event.Operation.ID); id != "" {
-			op = op + " " + id
-		}
-		row.Operation = strings.TrimSpace(op)
-		if row.State == "" {
-			row.State = sanitizeTerminalText(event.Operation.State)
-		}
-		if event.Operation.Progress != nil {
-			p := event.Operation.Progress
-			row.Message = sanitizeTerminalText(fmt.Sprintf("%s %d/%d", p.Phase, p.Completed, p.Total))
-		}
-		if event.Operation.Error != "" {
-			if row.Message != "" {
-				row.Message += " "
-			}
-			row.Message += sanitizeTerminalText(event.Operation.Error)
-		}
+		applyOperationToRow(&row, event.Operation)
 	}
-	row.Time = fmt.Sprintf("rev %d", event.Revision)
-	row.Columns = []string{row.Time, row.Type, row.Sandbox, row.Operation, row.State, row.Message}
 	return row
 }
 
-func eventToRow(event sdk.Event) eventRow           { return eventRowFromEvent(event) }
-func renderEvent(event sdk.Event) eventRow          { return eventRowFromEvent(event) }
-func eventRowFromSDKEvent(event sdk.Event) eventRow { return eventRowFromEvent(event) }
-func eventRowFromWatchEvent(event sdk.Event) eventRow {
-	return eventRowFromEvent(event)
-}
-
-func eventRowsFromEvents(events []sdk.Event) []eventRow {
-	out := make([]eventRow, 0, len(events))
-	for _, e := range events {
-		out = append(out, eventRowFromEvent(e))
+// applyOperationToRow fills the operation-derived cells with sanitized text.
+func applyOperationToRow(row *eventRow, op *sdk.Operation) {
+	label := sanitizeTerminalText(op.Kind)
+	if label == "" {
+		label = "operation"
 	}
-	return out
-}
-
-func eventRowStrings(event sdk.Event) []string {
-	return eventRowFromEvent(event).Cells()
-}
-
-func dedupEvents(events []sdk.Event) []sdk.Event {
-	return deduplicateEvents(events)
-}
-
-func deduplicateEvents(events []sdk.Event) []sdk.Event {
-	seen := make(map[string]struct{})
-	out := make([]sdk.Event, 0, len(events))
-	for _, e := range events {
-		key := fmt.Sprintf("%d|%s|%s", e.Revision, e.Type, sandboxKey(e.Sandbox))
-		if e.Revision == 0 {
-			key = fmt.Sprintf("0|%s|%s|%s", e.Type, sandboxKey(e.Sandbox), operationKey(e.Operation))
+	if id := sanitizeTerminalText(op.ID); id != "" {
+		label += " " + id
+	}
+	row.Operation = strings.TrimSpace(label)
+	if row.State == "" {
+		row.State = sanitizeTerminalText(op.State)
+	}
+	if op.Progress != nil {
+		p := op.Progress
+		row.Message = sanitizeTerminalText(fmt.Sprintf("%s %d/%d", p.Phase, p.Completed, p.Total))
+	}
+	if op.Error != "" {
+		if row.Message != "" {
+			row.Message += " "
 		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, e)
+		row.Message += sanitizeTerminalText(op.Error)
 	}
-	return out
 }
 
-func sandboxKey(s *sdk.Sandbox) string {
-	if s == nil {
-		return ""
-	}
-	return s.ID + "|" + s.Name
-}
-
-func operationKey(o *sdk.Operation) string {
-	if o == nil {
-		return ""
-	}
-	return o.ID + "|" + o.State
-}
-
-func redactSensitiveText(value string) string {
-	return sanitizeTerminalText(value)
-}
-
+// logRingWriter splits an exec stream into sanitized ring lines, flushing an
+// unterminated tail once maxLogPartialBytes is exceeded.
 type logRingWriter struct {
 	ring   *ringBuffer[string]
 	buffer strings.Builder
@@ -272,15 +161,13 @@ func (w *logRingWriter) Write(p []byte) (int, error) {
 		s := w.buffer.String()
 		idx := strings.IndexByte(s, '\n')
 		if idx < 0 {
-			if w.buffer.Len() > 4096 {
-				line := sanitizeTerminalText(w.buffer.String())
-				w.ring.Push(line)
+			if w.buffer.Len() > maxLogPartialBytes {
+				w.ring.Add(sanitizeTerminalText(s))
 				w.buffer.Reset()
 			}
 			break
 		}
-		line := sanitizeTerminalText(s[:idx])
-		w.ring.Push(line)
+		w.ring.Add(sanitizeTerminalText(s[:idx]))
 		w.buffer.Reset()
 		w.buffer.WriteString(s[idx+1:])
 	}
@@ -292,160 +179,95 @@ func (w *logRingWriter) Flush() {
 		return
 	}
 	if w.buffer.Len() > 0 {
-		w.ring.Push(sanitizeTerminalText(w.buffer.String()))
+		w.ring.Add(sanitizeTerminalText(w.buffer.String()))
 		w.buffer.Reset()
 	}
 }
 
-func (m *dashboardModel) eventRingBuf() *ringBuffer[sdk.Event] {
-	if m == nil {
-		return newRingBuffer[sdk.Event](dashboardEventLimit)
+// events returns the model's event ring, initializing it on first use.
+func (m *dashboardModel) events() *ringBuffer[sdk.Event] {
+	if m.eventsRing == nil {
+		m.eventsRing = newRingBuffer[sdk.Event](dashboardEventLimit)
 	}
-	for _, r := range []*ringBuffer[sdk.Event]{m.events, m.eventRing, m.eventBuffer, m.eventLog, m.eventStream2} {
-		if r != nil {
-			m.events = r
-			m.eventRing = r
-			m.eventBuffer = r
-			m.eventLog = r
-			m.eventStream2 = r
-			return r
-		}
-	}
-	r := newRingBuffer[sdk.Event](dashboardEventLimit)
-	m.events = r
-	m.eventRing = r
-	m.eventBuffer = r
-	m.eventLog = r
-	m.eventStream2 = r
-	return r
+	return m.eventsRing
 }
 
-func (m *dashboardModel) logRingBuf() *ringBuffer[string] {
-	if m == nil {
-		return newRingBuffer[string](dashboardLogLimit)
+// logLines returns the model's log ring, initializing it on first use.
+func (m *dashboardModel) logLines() *ringBuffer[string] {
+	if m.logsRing == nil {
+		m.logsRing = newRingBuffer[string](dashboardLogLimit)
 	}
-	for _, r := range []*ringBuffer[string]{m.logs, m.logRing, m.logBuffer, m.logLines, m.logTail} {
-		if r != nil {
-			m.logs = r
-			m.logRing = r
-			m.logBuffer = r
-			m.logLines = r
-			m.logTail = r
-			return r
-		}
-	}
-	r := newRingBuffer[string](dashboardLogLimit)
-	m.logs = r
-	m.logRing = r
-	m.logBuffer = r
-	m.logLines = r
-	m.logTail = r
-	return r
+	return m.logsRing
 }
 
-type dashboardStream struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-}
-
-func (m *dashboardModel) eventStreamHandle() *dashboardStream {
-	if m.eventCancel == nil && m.eventDone == nil {
-		return nil
-	}
-	return &dashboardStream{cancel: m.eventCancel, done: m.eventDone}
-}
-
-func startEventStream(ctx context.Context, client sdk.Client, model *dashboardModel) {
-	if model == nil {
-		return
-	}
-	if model.eventCancel != nil {
+// startEventStream subscribes the resilient Watch feed into the events ring.
+// It is idempotent while a stream is active.
+func (m *dashboardModel) startEventStream(ctx context.Context, client sdk.Client) {
+	if m == nil || m.eventCancel != nil {
 		return
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	model.eventCancel = cancel
-	model.eventDone = done
-	model.eventStreamCtx = streamCtx
+	m.eventCancel = cancel
+	m.eventDone = done
+	ring := m.events()
 	go func() {
 		defer close(done)
 		stream, err := sdk.WatchResilient(streamCtx, client, sdk.WatchOptions{})
 		if err != nil {
-			model.mu.Lock()
-			model.err = sanitizeTerminalText(err.Error())
-			model.mu.Unlock()
+			m.mu.Lock()
+			m.err = sanitizeTerminalText(err.Error())
+			m.mu.Unlock()
 			return
 		}
-		model.mu.Lock()
-		model.eventStream = stream
-		model.mu.Unlock()
 		defer func() { _ = stream.Close() }()
 		for {
 			ev, err := stream.Recv()
-			if err != nil {
-				if streamCtx.Err() != nil {
-					return
-				}
+			if err != nil || streamCtx.Err() != nil {
 				return
 			}
 			if ev == nil {
 				continue
 			}
-			ring := model.eventRingBuf()
-			last := model.lastEventRevision
-			if ev.Revision > 0 && ev.Revision <= last {
-				continue
+			m.mu.Lock()
+			fresh := ev.Revision == 0 || ev.Revision > m.lastEventRevision
+			if ev.Revision > m.lastEventRevision {
+				m.lastEventRevision = ev.Revision
 			}
-			if ev.Revision > 0 {
-				model.lastEventRevision = ev.Revision
+			m.mu.Unlock()
+			if fresh {
+				ring.Add(*ev)
 			}
-			ring.Push(*ev)
 		}
 	}()
 }
 
-func startEventWatch(ctx context.Context, client sdk.Client, model *dashboardModel) {
-	startEventStream(ctx, client, model)
-}
-func startEventsStream(ctx context.Context, client sdk.Client, model *dashboardModel) {
-	startEventStream(ctx, client, model)
-}
-func startWatchStream(ctx context.Context, client sdk.Client, model *dashboardModel) {
-	startEventStream(ctx, client, model)
-}
-
-func stopEventStream(model *dashboardModel) {
-	if model == nil || model.eventCancel == nil {
+// stopEventStream cancels the watch feed and waits for its goroutine.
+func (m *dashboardModel) stopEventStream() {
+	if m == nil || m.eventCancel == nil {
 		return
 	}
-	model.eventCancel()
-	if model.eventDone != nil {
-		<-model.eventDone
+	m.eventCancel()
+	if m.eventDone != nil {
+		<-m.eventDone
 	}
-	model.eventCancel = nil
-	model.eventDone = nil
-	model.eventStream = nil
-	model.eventStreamCtx = nil
+	m.eventCancel = nil
+	m.eventDone = nil
 }
 
-func stopEventWatch(model *dashboardModel)   { stopEventStream(model) }
-func stopEventsStream(model *dashboardModel) { stopEventStream(model) }
-
-func startLogsStream(ctx context.Context, client sdk.Client, model *dashboardModel, sandboxID string) {
-	if model == nil || sandboxID == "" {
-		return
-	}
-	if model.logsCancel != nil {
+// startLogsStream tails the selected sandbox log over exec; a missing file
+// yields an empty stream rather than an error row flood.
+func (m *dashboardModel) startLogsStream(ctx context.Context, client sdk.Client, sandboxID string) {
+	if m == nil || sandboxID == "" || m.logsCancel != nil {
 		return
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	model.logsCancel = cancel
-	model.logsDone = done
-	model.logsStreamCtx = streamCtx
+	m.logsCancel = cancel
+	m.logsDone = done
+	ring := m.logLines()
 	go func() {
 		defer close(done)
-		ring := model.logRingBuf()
 		writer := &logRingWriter{ring: ring}
 		_, err := sdk.ExecService(client).Exec(streamCtx, sdk.ExecRequest{
 			SandboxID: sandboxID,
@@ -455,61 +277,45 @@ func startLogsStream(ctx context.Context, client sdk.Client, model *dashboardMod
 		})
 		writer.Flush()
 		if err != nil && streamCtx.Err() == nil {
-			ring.Push("logs: " + sanitizeTerminalText(err.Error()))
+			ring.Add("logs: " + sanitizeTerminalText(err.Error()))
 		}
 	}()
 }
 
-func startLogStream(ctx context.Context, client sdk.Client, model *dashboardModel, sandboxID string) {
-	startLogsStream(ctx, client, model, sandboxID)
-}
-func startLogsView(ctx context.Context, client sdk.Client, model *dashboardModel, sandboxID string) {
-	startLogsStream(ctx, client, model, sandboxID)
-}
-func startLogView(ctx context.Context, client sdk.Client, model *dashboardModel, sandboxID string) {
-	startLogsStream(ctx, client, model, sandboxID)
-}
-
-func stopLogsStream(model *dashboardModel) {
-	if model == nil || model.logsCancel == nil {
+func (m *dashboardModel) stopLogsStream() {
+	if m == nil || m.logsCancel == nil {
 		return
 	}
-	model.logsCancel()
-	if model.logsDone != nil {
-		<-model.logsDone
+	m.logsCancel()
+	if m.logsDone != nil {
+		<-m.logsDone
 	}
-	model.logsCancel = nil
-	model.logsDone = nil
-	model.logsStreamCtx = nil
+	m.logsCancel = nil
+	m.logsDone = nil
 }
 
-func stopLogStream(model *dashboardModel) { stopLogsStream(model) }
-func stopLogsView(model *dashboardModel)  { stopLogsStream(model) }
-
+// setPanel switches the rendered pane, stopping streams that left the screen.
 func (m *dashboardModel) setPanel(ctx context.Context, client sdk.Client, panel dashboardPanel) {
 	if m == nil {
 		return
 	}
 	if panel != dashboardPanelEvents {
-		stopEventStream(m)
+		m.stopEventStream()
 	}
 	if panel != dashboardPanelLogs {
-		stopLogsStream(m)
+		m.stopLogsStream()
 	}
 	m.panel = panel
-	m.view = panel
-	m.tab = panel
-	m.activePanel = panel
 	if panel == dashboardPanelEvents {
-		startEventStream(ctx, client, m)
+		m.startEventStream(ctx, client)
 	}
 	if panel == dashboardPanelLogs {
-		id := selectedSandboxID(m)
-		startLogsStream(ctx, client, m, id)
+		m.startLogsStream(ctx, client, m.selectedSandboxID())
 	}
 }
 
-func selectedSandboxID(m *dashboardModel) string {
+// selectedSandboxID resolves the highlighted list row to its sandbox ID.
+func (m *dashboardModel) selectedSandboxID() string {
 	if m == nil || len(m.items) == 0 {
 		return ""
 	}
@@ -521,27 +327,6 @@ func selectedSandboxID(m *dashboardModel) string {
 		return item.ID
 	}
 	return item.Name
-}
-
-func setDashboardPanel(ctx context.Context, client sdk.Client, model *dashboardModel, panel dashboardPanel) {
-	if model != nil {
-		model.setPanel(ctx, client, panel)
-	}
-}
-func switchDashboardPanel(ctx context.Context, client sdk.Client, model *dashboardModel, panel dashboardPanel) {
-	setDashboardPanel(ctx, client, model, panel)
-}
-func switchPanel(ctx context.Context, client sdk.Client, model *dashboardModel, panel dashboardPanel) {
-	setDashboardPanel(ctx, client, model, panel)
-}
-func changeDashboardPanel(ctx context.Context, client sdk.Client, model *dashboardModel, panel dashboardPanel) {
-	setDashboardPanel(ctx, client, model, panel)
-}
-func (m *dashboardModel) SwitchPanel(ctx context.Context, client sdk.Client, panel dashboardPanel) {
-	m.setPanel(ctx, client, panel)
-}
-func (m *dashboardModel) SetPanel(ctx context.Context, client sdk.Client, panel dashboardPanel) {
-	m.setPanel(ctx, client, panel)
 }
 
 func drawDashboardPanels(screen dashboardScreen, model *dashboardModel, width int, accent, muted tcell.Style, y int) {
@@ -561,29 +346,26 @@ func drawDashboardPanels(screen dashboardScreen, model *dashboardModel, width in
 			style = accent
 		}
 		text := fmt.Sprintf("[%s] %s", l.key, l.label)
+		if x+len(text) > width-2 {
+			break
+		}
 		drawText(screen, x, y, text, style, 24)
 		x += len(text) + 2
 	}
 }
 
 func drawEventPanel(screen dashboardScreen, model *dashboardModel, x, width, height int, primary, muted tcell.Style) {
-	ring := model.eventRingBuf()
-	events := ring.Snapshot()
-	rows := eventRowsFromEvents(events)
-	visible := height - 16
-	if visible < 1 {
-		visible = 1
+	if model == nil {
+		return
 	}
-	start := 0
-	if len(rows) > visible {
-		start = len(rows) - visible
+	ring := model.events()
+	rows := make([]eventRow, 0, ring.Len())
+	for _, event := range ring.Snapshot() {
+		rows = append(rows, eventRowFromEvent(event))
 	}
-	if model != nil && model.eventScroll > 0 {
-		start -= model.eventScroll
-		if start < 0 {
-			start = 0
-		}
-	}
+	visible := max(height-16, 1)
+	start := max(len(rows)-visible, 0)
+	start = max(start-model.eventScroll, 0)
 	for i := 0; i < visible && start+i < len(rows); i++ {
 		row := rows[start+i]
 		y := 13 + i
@@ -592,39 +374,31 @@ func drawEventPanel(screen dashboardScreen, model *dashboardModel, x, width, hei
 		}
 		line := fmt.Sprintf("%-6s %-8s %-14s %-18s %-10s %s",
 			clipCell(row.Time, 6), clipCell(row.Type, 8), clipCell(row.Sandbox, 14),
-			clipCell(row.Operation, 18), clipCell(row.State, 10), clipCell(row.Message, width-x-70))
+			clipCell(row.Operation, 18), clipCell(row.State, 10), clipCell(row.Message, max(width-x-70, 4)))
 		drawText(screen, x, y, sanitizeTerminalText(line), primary, width-x-2)
 	}
-	if model != nil && ring.Dropped() > 0 {
+	if ring.Dropped() > 0 {
 		drawText(screen, x, height-4, fmt.Sprintf("dropped %d events", ring.Dropped()), muted, width-x-2)
 	}
 }
 
 func drawLogPanel(screen dashboardScreen, model *dashboardModel, x, width, height int, primary, muted tcell.Style) {
-	ring := model.logRingBuf()
+	if model == nil {
+		return
+	}
+	ring := model.logLines()
 	lines := ring.Snapshot()
-	visible := height - 16
-	if visible < 1 {
-		visible = 1
-	}
-	start := 0
-	if len(lines) > visible {
-		start = len(lines) - visible
-	}
-	if model != nil && model.logScroll > 0 {
-		start -= model.logScroll
-		if start < 0 {
-			start = 0
-		}
-	}
+	visible := max(height-16, 1)
+	start := max(len(lines)-visible, 0)
+	start = max(start-model.logScroll, 0)
 	for i := 0; i < visible && start+i < len(lines); i++ {
 		y := 13 + i
 		if y >= height-4 {
 			break
 		}
-		drawText(screen, x, y, sanitizeTerminalText(clipCell(lines[start+i], width-x-2)), primary, width-x-2)
+		drawText(screen, x, y, sanitizeTerminalText(clipCell(lines[start+i], max(width-x-2, 4))), primary, width-x-2)
 	}
-	if model != nil && ring.Dropped() > 0 {
+	if ring.Dropped() > 0 {
 		drawText(screen, x, height-4, fmt.Sprintf("dropped %d lines", ring.Dropped()), muted, width-x-2)
 	}
 }

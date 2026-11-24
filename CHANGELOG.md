@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.71 — 2026-11-24
+
+### Added
+
+- `secret set-custom` now stores custom secrets through the daemon SDK, including
+  inline values, 1Password/AWS references and host commands, with approval
+  challenges, masked placeholders and global/sandbox scoping.
+- `secret ls` renders custom-secret rows with their masked placeholder.
+- `policy approval ls|inspect|respond` review and resolve pending approvals,
+  including provider-unavailable and deny paths.
+
 ## v0.0.70 — 2026-11-24
 
 ### Added

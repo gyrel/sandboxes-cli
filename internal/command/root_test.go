@@ -824,9 +824,17 @@ type fakeClient struct {
 	dockerPAT       sdk.DockerPATAccountService
 	accountStatuses sdk.AccountStatusService
 	versions        sdk.VersionService
+	kitPolicy       sdk.KitPolicyService
 }
 
 func (f fakeClient) VersionService() sdk.VersionService { return f.versions }
+
+func (f fakeClient) KitPolicyService() sdk.KitPolicyService {
+	if f.kitPolicy != nil {
+		return f.kitPolicy
+	}
+	return nil
+}
 
 func (f fakeClient) DockerPATAccountService() sdk.DockerPATAccountService {
 	if f.dockerPAT == nil {

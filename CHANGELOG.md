@@ -8,6 +8,12 @@
   bounded 200-entry tail with drop counter; logs view streams bounded recent
   lines for the selected sandbox and cancels the stream on panel switch. Panel
   switching and scrolling keys documented in the dashboard footer.
+- EXPERIMENTAL: `kit validate` now performs the daemon-backed kit policy check
+  (`kit.allowedSources`, `kit.allowLocalKits`, `kit.requireSignature`) after
+  offline schema validation, using `sdk.KitPolicy(client).CheckKit`. Allowed
+  kits report `policy: daemon-checked`; denials print the daemon reason and the
+  deciding setting names; unreachable or version-gated daemons fail closed.
+  `--offline` keeps the previous no-daemon behavior.
 
 ## v0.0.71 — 2026-11-24
 

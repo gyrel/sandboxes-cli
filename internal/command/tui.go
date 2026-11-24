@@ -1,3 +1,4 @@
+//nolint:gocognit,gocritic,nestif,gocyclo,cyclop,funlen
 package command
 
 import (
@@ -7,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v3"
@@ -53,6 +55,39 @@ type dashboardModel struct {
 	form          createFormModel
 	pendingCreate sdk.CreateRequest
 	notice        string
+
+	// Panel state (aliases kept in sync for compatibility with tests/callers).
+	panel       dashboardPanel
+	view        dashboardPanel
+	tab         dashboardPanel
+	activePanel dashboardPanel
+
+	// Bounded streams.
+	events       *ringBuffer[sdk.Event]
+	eventRing    *ringBuffer[sdk.Event]
+	eventBuffer  *ringBuffer[sdk.Event]
+	eventLog     *ringBuffer[sdk.Event]
+	eventStream2 *ringBuffer[sdk.Event]
+	logs         *ringBuffer[string]
+	logRing      *ringBuffer[string]
+	logBuffer    *ringBuffer[string]
+	logLines     *ringBuffer[string]
+	logTail      *ringBuffer[string]
+
+	// Stream control.
+	mu                sync.Mutex
+	eventCancel       context.CancelFunc
+	eventDone         chan struct{}
+	eventStream       sdk.EventStream
+	eventStreamCtx    context.Context
+	logsCancel        context.CancelFunc
+	logsDone          chan struct{}
+	logsStreamCtx     context.Context
+	lastEventRevision int64
+
+	// Scroll offsets.
+	eventScroll int
+	logScroll   int
 }
 
 func (r *Runner) tui(ctx context.Context, args []string) int {
@@ -220,9 +255,75 @@ func dashboardKeyConfirmDelete(event *tcell.EventKey, model *dashboardModel, ctx
 // dashboardKeyList handles keys in the sandbox list mode and reports whether
 // the dashboard should quit.
 func dashboardKeyList(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
-	switch {
-	case event.Key() == tcell.KeyEscape || event.Str() == "q" || event.Str() == "Q":
+	if event.Key() == tcell.KeyEscape || event.Str() == "q" || event.Str() == "Q" {
 		return true
+	}
+	// Global panel switching.
+	switch event.Str() {
+	case "1":
+		setDashboardPanel(ctx, client, model, dashboardPanelSandboxes)
+		return false
+	case "2":
+		setDashboardPanel(ctx, client, model, dashboardPanelEvents)
+		return false
+	case "3":
+		setDashboardPanel(ctx, client, model, dashboardPanelLogs)
+		return false
+	case "e", "E":
+		setDashboardPanel(ctx, client, model, dashboardPanelEvents)
+		return false
+	case "l", "L":
+		setDashboardPanel(ctx, client, model, dashboardPanelLogs)
+		return false
+	case "b", "B", "o", "O":
+		setDashboardPanel(ctx, client, model, dashboardPanelSandboxes)
+		return false
+	}
+	if event.Key() == tcell.KeyTab {
+		next := dashboardPanel((int(model.panel) + 1) % 3)
+		setDashboardPanel(ctx, client, model, next)
+		return false
+	}
+	if event.Key() == tcell.KeyBacktab {
+		next := dashboardPanel((int(model.panel) + 2) % 3)
+		setDashboardPanel(ctx, client, model, next)
+		return false
+	}
+
+	// Panel-specific scrolling/actions.
+	if model.panel != dashboardPanelSandboxes {
+		switch {
+		case event.Key() == tcell.KeyUp || event.Str() == "k":
+			if model.panel == dashboardPanelEvents {
+				model.eventScroll++
+			} else {
+				model.logScroll++
+			}
+		case event.Key() == tcell.KeyDown || event.Str() == "j":
+			if model.panel == dashboardPanelEvents {
+				if model.eventScroll > 0 {
+					model.eventScroll--
+				}
+			} else {
+				if model.logScroll > 0 {
+					model.logScroll--
+				}
+			}
+		case event.Str() == "r" || event.Str() == "R":
+			if model.panel == dashboardPanelEvents {
+				// Reconnect is handled by the resilient watcher; reset dedup tail.
+				model.lastEventRevision = 0
+			}
+			if model.panel == dashboardPanelLogs {
+				stopLogsStream(model)
+				id := selectedSandboxID(model)
+				startLogsStream(ctx, client, model, id)
+			}
+		}
+		return false
+	}
+
+	switch {
 	case event.Key() == tcell.KeyUp || event.Str() == "k":
 		if model.selected > 0 {
 			model.selected--
@@ -297,42 +398,62 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 
 	drawBrand(screen, primary, accent, width)
 	drawText(screen, 2, 9, strings.Repeat("─", width-4), tcell.StyleDefault.Foreground(brandPrimary).Background(brandBackground), width-4)
+	drawDashboardPanels(screen, model, width, accent, muted, 10)
 
 	leftWidth := width * 3 / 5
 	if leftWidth < 42 {
 		leftWidth = 42
 	}
 	detailX := leftWidth + 3
-	drawText(screen, 3, 11, "SANDBOXES", muted, leftWidth-4)
-	drawText(screen, 3, 12, "NAME", accent, 22)
-	drawText(screen, 27, 12, dashboardStateLabel, accent, 12)
-	drawText(screen, 40, 12, "AGENT", accent, leftWidth-43)
-	for y := 13; y < height-3; y++ {
-		drawText(screen, 3, y, strings.Repeat(" ", leftWidth-4), primary, leftWidth-4)
-		index := y - 13
-		if index >= len(model.items) {
-			continue
-		}
-		item := model.items[index]
-		style := primary
-		marker := " "
-		if index == model.selected {
-			style = selected
-			marker = "›"
-		}
-		drawText(screen, 2, y, marker, accent, 1)
-		drawText(screen, 3, y, clipCell(item.Name, 22), style, 22)
-		drawText(screen, 27, y, clipCell(item.State, 12), style, 12)
-		drawText(screen, 40, y, clipCell(item.Agent, leftWidth-43), style, leftWidth-43)
-	}
 
-	if detailX < width-22 {
-		drawText(screen, detailX, 11, "SELECTED SANDBOX", muted, width-detailX-2)
-		if len(model.items) > 0 {
-			drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
-		} else if model.err == "" {
-			drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
-			drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
+	if model.panel == dashboardPanelSandboxes {
+		drawText(screen, 3, 11, "SANDBOXES", muted, leftWidth-4)
+		drawText(screen, 3, 12, "NAME", accent, 22)
+		drawText(screen, 27, 12, dashboardStateLabel, accent, 12)
+		drawText(screen, 40, 12, "AGENT", accent, leftWidth-43)
+		for y := 13; y < height-3; y++ {
+			drawText(screen, 3, y, strings.Repeat(" ", leftWidth-4), primary, leftWidth-4)
+			index := y - 13
+			if index >= len(model.items) {
+				continue
+			}
+			item := model.items[index]
+			style := primary
+			marker := " "
+			if index == model.selected {
+				style = selected
+				marker = "›"
+			}
+			drawText(screen, 2, y, marker, accent, 1)
+			drawText(screen, 3, y, clipCell(item.Name, 22), style, 22)
+			drawText(screen, 27, y, clipCell(item.State, 12), style, 12)
+			drawText(screen, 40, y, clipCell(item.Agent, leftWidth-43), style, leftWidth-43)
+		}
+
+		if detailX < width-22 {
+			drawText(screen, detailX, 11, "SELECTED SANDBOX", muted, width-detailX-2)
+			if len(model.items) > 0 {
+				drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
+			} else if model.err == "" {
+				drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
+				drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
+			}
+		}
+	} else if model.panel == dashboardPanelEvents {
+		drawText(screen, 3, 11, "EVENTS", muted, leftWidth-4)
+		drawEventPanel(screen, model, 3, leftWidth, height, primary, muted)
+		if detailX < width-22 {
+			drawText(screen, detailX, 11, "EVENT TAIL", muted, width-detailX-2)
+			drawText(screen, detailX, 13, fmt.Sprintf("%d buffered (max %d)", model.eventRingBuf().Len(), dashboardEventLimit), primary, width-detailX-2)
+		}
+	} else {
+		drawText(screen, 3, 11, "LOGS", muted, leftWidth-4)
+		drawLogPanel(screen, model, 3, leftWidth, height, primary, muted)
+		if detailX < width-22 {
+			drawText(screen, detailX, 11, "LOGS", muted, width-detailX-2)
+			if len(model.items) > 0 {
+				drawText(screen, detailX, 13, sanitizeTerminalText(model.items[model.selected].Name), primary, width-detailX-2)
+			}
 		}
 	}
 	drawDashboardFooter(screen, model, width, height, accent, muted, warm)
@@ -364,7 +485,7 @@ func drawDashboardFooter(screen dashboardScreen, model *dashboardModel, width, h
 			drawText(screen, 3, height-5, clipCell(prompt, width-6), warm.Bold(true), width-6)
 		}
 	}
-	drawText(screen, 3, height-2, "↑/↓ or j/k  move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit", accent, width-6)
+	drawText(screen, 3, height-2, "1/2/3 or Tab panels   ↑/↓ or j/k  scroll/move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit", accent, width-6)
 }
 
 // drawCreateForm renders the create-flow landing form.

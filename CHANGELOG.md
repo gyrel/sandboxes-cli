@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.0.72 — unreleased (train)
+
+### Added
+
+- TUI: events panel subscribes to the resilient Watch stream and renders a
+  bounded 200-entry tail with drop counter; logs view streams bounded recent
+  lines for the selected sandbox and cancels the stream on panel switch. Panel
+  switching and scrolling keys documented in the dashboard footer.
+
 ## v0.0.71 — 2026-11-24
 
 ### Added

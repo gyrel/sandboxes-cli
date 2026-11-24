@@ -59,17 +59,28 @@ func (r *Runner) environmentCreate(ctx context.Context, args []string) int {
 }
 
 type environmentCreateOptions struct {
-	force     bool
-	name      string
-	paths     []string
-	arguments envfile.ArgumentOverrides
+	force            bool
+	skipHostCommands bool
+	pruneBindings    bool
+	name             string
+	paths            []string
+	arguments        envfile.ArgumentOverrides
 }
 
 func parseEnvironmentCreateOptions(r *Runner, args []string) (environmentCreateOptions, error) {
+	return parseEnvironmentCreateOptionsWithPrune(r, args, false)
+}
+
+func parseEnvironmentCreateOptionsWithPrune(r *Runner, args []string, allowPrune bool) (environmentCreateOptions, error) {
 	fs := r.newFlagSet("env create")
 	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "apply without prompting")
 	fs.BoolVar(force, "f", false, "apply without prompting")
+	skipHostCommands := fs.Bool(helpNameSkipHost, false, "skip host lifecycle commands and disable environment MCP commands until a later env run without this flag")
+	var pruneBindings *bool
+	if allowPrune {
+		pruneBindings = fs.Bool("prune-bindings", false, "also remove this environment's bindings from the global credentials.yaml")
+	}
 	name := fs.String("name", "", "override the environment sandbox name")
 	var envArguments, envArgumentFiles repeatedStringFlag
 	fs.Var(&envArguments, "env-arg", "value for a declared environment argument (repeatable)")
@@ -79,7 +90,11 @@ func parseEnvironmentCreateOptions(r *Runner, args []string) (environmentCreateO
 	if err := fs.Parse(reorderFlagArgs(args, valueFlags)); err != nil {
 		return environmentCreateOptions{}, err
 	}
-	return environmentCreateOptions{force: *force, name: *name, paths: fs.Args(), arguments: envfile.ArgumentOverrides{Files: envArgumentFiles, Values: envArguments}}, nil
+	prune := false
+	if pruneBindings != nil {
+		prune = *pruneBindings
+	}
+	return environmentCreateOptions{force: *force, skipHostCommands: *skipHostCommands, pruneBindings: prune, name: *name, paths: fs.Args(), arguments: envfile.ArgumentOverrides{Files: envArgumentFiles, Values: envArguments}}, nil
 }
 
 func loadEnvironmentCreatePlan(options environmentCreateOptions) (envfile.Plan, map[string]string, string, uint32, error) {
@@ -455,7 +470,7 @@ func (r *Runner) environmentRemove(ctx context.Context, args []string) int {
 	if slices.Contains(args, helpFlag) || slices.Contains(args, helpShort) {
 		return r.showCommandHelp(envRemoveHelp())
 	}
-	options, err := parseEnvironmentCreateOptions(r, args)
+	options, err := parseEnvironmentCreateOptionsWithPrune(r, args, true)
 	if err != nil {
 		return r.flagParseFailure("env rm", err)
 	}
@@ -496,17 +511,31 @@ func (r *Runner) environmentRemove(ctx context.Context, args []string) int {
 			return 0
 		}
 	}
-	op, err := client.Sandboxes().Delete(ctx, sandbox.ID, sdk.DeleteOptions{Force: options.force})
-	if err != nil {
+	if err := r.deleteEnvironmentSandbox(ctx, client, sandbox, options, plan); err != nil {
 		r.error(err)
 		return 1
 	}
-	if op != nil && op.State == sdk.StateFailed {
-		r.error(fmt.Errorf("remove environment sandbox %s failed: %s", plan.Name, op.Error))
-		return 1
-	}
+	// The sandbox is already gone; report that first even if pruning fails, so
+	// output never suggests the removal itself needs retrying.
 	_, _ = fmt.Fprintf(r.Out, "Removed environment sandbox %s\n", sanitizeTerminalText(plan.Name))
+	if options.pruneBindings {
+		if err := pruneEnvironmentBindings(plan); err != nil {
+			r.error(err)
+			return 1
+		}
+	}
 	return 0
+}
+
+func (r *Runner) deleteEnvironmentSandbox(ctx context.Context, client sdk.Client, sandbox *sdk.Sandbox, options environmentCreateOptions, plan envfile.Plan) error {
+	op, err := client.Sandboxes().Delete(ctx, sandbox.ID, sdk.DeleteOptions{Force: options.force})
+	if err != nil {
+		return err
+	}
+	if op != nil && op.State == sdk.StateFailed {
+		return fmt.Errorf("remove environment sandbox %s failed: %s", plan.Name, op.Error)
+	}
+	return nil
 }
 
 func findEnvironmentRemovalTarget(ctx context.Context, client sdk.Client, plan envfile.Plan, request *sdk.CreateRequest) (*sdk.Sandbox, bool, error) {

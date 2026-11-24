@@ -28,7 +28,7 @@ var completionTree = map[string][]string{
 	versionCommand:    {formatFlag, jsonFlag, debugShortFlag, debugFlag},
 	commandAgents:     {formatFlag, jsonFlag},
 	daemonCommand:     {jsonFlag, helpShort, helpFlag},
-	envCommand:        {nameFlag, envArgFlag, envArgsFileFlag, "-f", forceFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, envShort, envFlag, envFileFlag, "-i", interactiveFlag, "-t", ttyFlag, "-u", userFlag, "-w", workdirFlag, helpShort, helpFlag},
+	envCommand:        {nameFlag, envArgFlag, envArgsFileFlag, "-f", forceFlag, skipHostCommandsFlag, pruneBindingsFlag, detachShort, detachFlag, detachKeysFlag, privilegedFlag, envShort, envFlag, envFileFlag, "-i", interactiveFlag, "-t", ttyFlag, "-u", userFlag, "-w", workdirFlag, helpShort, helpFlag},
 	kitCommand:        {formatFlag, jsonFlag, kitArgFlag, kitArgsFileFlag, "--offline", kitOutputFlag, kitOutputShortFlag, helpShort, helpFlag},
 	"reset":           {"-f", forceFlag, formatFlag, jsonFlag, helpShort, helpFlag},
 	settingsCommand:   {formatFlag, jsonFlag, helpShort, helpFlag},

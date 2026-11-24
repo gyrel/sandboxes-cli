@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.0.70 — 2026-11-24
+
+### Added
+
+- EXPERIMENTAL: `kit validate REFERENCE [--offline] [--kit-arg NAME=VALUE]...
+  [--kit-args-file FILE]... [--format table|json|yaml]` checks a local kit
+  directory or ZIP file. A kit that declares required arguments is invalid
+  until they are supplied; violations are reported with paths relative to the
+  kit root. Without `--offline` the command fails closed, because the
+  daemon-backed kit policy (`kit.allowedSources`, `kit.allowLocalKits`,
+  `kit.requireSignature`) has no contract yet. Git references are refused.
+- EXPERIMENTAL: `kit pack DIRECTORY [--output PATH]` validates a kit directory
+  and writes a deterministic `.zip` containing `spec.yaml` and an optional
+  `files/` directory. Symbolic links, other root entries and oversized trees
+  are refused, the output must end in `.zip`, and an existing output is never
+  overwritten. ZIP entry-name grammar is covered by tests on every platform,
+  including Windows, where such names cannot be created on disk.
+- EXPERIMENTAL: `run` and `create` accept `--kit-arg NAME=VALUE` (or
+  `kit.NAME=VALUE`) and `--kit-args-file FILE` for the kit given with `--kit`.
+  Arguments that declare `env` are passed to the sandbox as environment
+  variables; required, enum and pattern rules match `kit validate`. Values
+  are never printed in errors. Arguments without `--kit`, a second `--kit`,
+  build arguments (`buildArg`, `buildSecret`) and v3 kits that need a kit
+  builder are refused rather than dropped.
+
 ## v0.0.69 — 2026-11-23
 
 ### Added
@@ -14,25 +39,6 @@
   added from a repository and reports `Updated` or `already up to date` per
   skill. A skill whose installed copy was edited locally is refused rather
   than overwritten.
-- EXPERIMENTAL: `kit validate REFERENCE [--offline] [--kit-arg NAME=VALUE]...
-  [--kit-args-file FILE]... [--format table|json|yaml]` checks a local kit
-  directory or ZIP file. A kit that declares required arguments is invalid
-  until they are supplied; violations are reported with paths relative to the
-  kit root. Without `--offline` the command fails closed, because the
-  daemon-backed kit policy (`kit.allowedSources`, `kit.allowLocalKits`,
-  `kit.requireSignature`) has no contract yet. Git references are refused.
-- EXPERIMENTAL: `kit pack DIRECTORY [--output PATH]` validates a kit directory
-  and writes a deterministic `.zip` containing `spec.yaml` and an optional
-  `files/` directory. Symbolic links, other root entries and oversized trees
-  are refused, the output must end in `.zip`, and an existing output is never
-  overwritten.
-- EXPERIMENTAL: `run` and `create` accept `--kit-arg NAME=VALUE` (or
-  `kit.NAME=VALUE`) and `--kit-args-file FILE` for the kit given with `--kit`.
-  Arguments that declare `env` are passed to the sandbox as environment
-  variables; required, enum and pattern rules match `kit validate`. Values
-  are never printed in errors. Arguments without `--kit`, a second `--kit`,
-  build arguments (`buildArg`, `buildSecret`) and v3 kits that need a kit
-  builder are refused rather than dropped.
 
 ### Changed
 

@@ -43,6 +43,10 @@ const (
 	helpJSONLowerDescription   = "output in JSON format"
 	helpEnvArgDescription      = "set a declared environment argument (repeatable)"
 	helpEnvFileDescription     = "read environment overrides from a file (repeatable)"
+	helpNameKitArg             = "kit-arg"
+	helpNameKitArgsFile        = "kit-args-file"
+	helpKitArgDescription      = "(Experimental) Value for an argument the kit declares, as name=value for every kit or kit.name=value for one (can be repeated)"
+	helpKitArgsFileDescription = "(Experimental) File of name=value kit arguments, one per line (can be repeated); --kit-arg overrides"
 	helpUserDescription        = "uid[:gid] or name[:group]"
 	helpApplyNoPrompt          = "apply without prompting"
 	helpEnvNameDescription     = "override the environment sandbox name"
@@ -97,6 +101,8 @@ func runHelp() commandHelp {
 			{Short: "h", Name: helpCommand, Description: "help for run"},
 			{Name: helpNameImage, Value: helpValueString, Description: "image reference override for a new sandbox"},
 			{Name: "kit", Value: helpValueString, Description: "apply a local kit definition"},
+			{Name: helpNameKitArg, Value: helpNameStringArray, Description: helpKitArgDescription},
+			{Name: helpNameKitArgsFile, Value: helpNameStringArray, Description: helpKitArgsFileDescription},
 			{Short: "m", Name: "memory", Value: helpValueString, Description: "memory limit for a new sandbox, such as 512m or 2g"},
 			{Name: helpNameName, Value: helpValueString, Description: "sandbox name; reuse and restart it when it already exists"},
 			{Name: "new", Description: "always create a new sandbox instead of reusing the named one"},
@@ -154,6 +160,8 @@ func createHelp() commandHelp {
 			{Name: "idempotency-key", Value: helpValueString, Description: "idempotency key"},
 			{Name: helpNameImage, Value: helpValueString, Description: "image reference"},
 			{Name: "kit", Value: helpValueString, Description: "apply a local kit definition"},
+			{Name: helpNameKitArg, Value: helpNameStringArray, Description: helpKitArgDescription},
+			{Name: helpNameKitArgsFile, Value: helpNameStringArray, Description: helpKitArgsFileDescription},
 			{Short: "m", Name: "memory", Value: helpValueString, Description: "memory limit such as 512m or 2g (empty selects the daemon default)"},
 			{Name: helpNameName, Value: helpValueString, Description: "sandbox name"},
 			{Name: "no-progress", Description: "suppress progress output"},
@@ -1489,8 +1497,8 @@ func kitValidateHelp() commandHelp {
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
 			{Short: "h", Name: helpCommand, Description: "help for validate"},
 			{Name: listFormatJSON, Description: helpJSONLowerDescription},
-			{Name: "kit-arg", Value: helpNameStringArray, Description: "(Experimental) Value for an argument the kit declares, as name=value for every kit or kit.name=value for one (can be repeated)"},
-			{Name: "kit-args-file", Value: helpNameStringArray, Description: "(Experimental) File of name=value kit arguments, one per line or a YAML/JSON map (can be repeated); --kit-arg overrides"},
+			{Name: helpNameKitArg, Value: helpNameStringArray, Description: helpKitArgDescription},
+			{Name: helpNameKitArgsFile, Value: helpNameStringArray, Description: "(Experimental) File of name=value kit arguments, one per line or a YAML/JSON map (can be repeated); --kit-arg overrides"},
 			{Name: "offline", Description: "Skip the daemon-backed kit policy check; local directory or ZIP references only"},
 		},
 	}

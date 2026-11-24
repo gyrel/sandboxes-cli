@@ -60,6 +60,8 @@ Flags:
       --image REF                 image reference override for a new sandbox
   -t, --template REF              container image for a new sandbox (alias for --image)
       --kit FILE                  apply a local kit definition
+      --kit-arg NAME=VALUE        (Experimental) value for an argument the kit declares (repeatable)
+      --kit-args-file FILE        (Experimental) file of name=value kit arguments (repeatable); --kit-arg overrides
       --deny-write PATH           keep selected workspaces and add PATH read-only (repeatable)
   -p, --publish PORT_SPEC         publish a guest TCP/UDP port on host loopback
                                   repeatable; accepts [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
@@ -191,6 +193,8 @@ type runOptions struct {
 	profile          string
 	privileged       bool
 	kit              string
+	kitArgs          []string
+	kitArgFiles      []string
 	denyWrite        []string
 	cpus             uint
 	memory           string
@@ -346,8 +350,13 @@ func prepareRunCloneSource(ctx context.Context, opts *runOptions, agent string, 
 }
 
 func prepareRunKitOptions(ctx context.Context, opts *runOptions, agent *string, workspacePaths []string, workspacesExplicit bool) ([]string, bool, error) {
+	arguments, err := kitArgumentsFromFlags(opts.kit, opts.kitArgs, opts.kitArgFiles)
+	if err != nil {
+		return nil, false, err
+	}
 	if opts.kit != "" {
-		if err := applyKit(ctx, opts.kit, agent, &opts.image, &opts.profile, &workspacePaths, &opts.env, &opts.oauthCredentials); err != nil {
+		inputs := kitInputs{arguments: arguments, envFiles: opts.envFiles}
+		if err := applyKit(ctx, opts.kit, agent, &opts.image, &opts.profile, &workspacePaths, &opts.env, &opts.oauthCredentials, inputs); err != nil {
 			return nil, false, err
 		}
 		workspacesExplicit = true
@@ -949,7 +958,7 @@ func parseRunValueFlag(r *Runner, args []string, index int, arg string, opts *ru
 	return parseRunValuedFlag(r, args, index, arg, opts)
 }
 
-//nolint:gocyclo,cyclop // one branch per documented value-taking flag.
+//nolint:gocyclo,cyclop,funlen // one branch per documented value-taking flag.
 func parseRunValuedFlag(r *Runner, args []string, index int, arg string, opts *runOptions) (int, bool, error) {
 	switch arg {
 	case socketFlag, socketShortFlag:
@@ -968,7 +977,13 @@ func parseRunValuedFlag(r *Runner, args []string, index int, arg string, opts *r
 		consumed, err := parseRunValue(args, index, templateFlag, &opts.image)
 		return consumed, true, err
 	case kitFlag:
-		consumed, err := parseRunValue(args, index, kitFlag, &opts.kit)
+		consumed, err := parseRunKitValue(args, index, opts)
+		return consumed, true, err
+	case kitArgFlag:
+		consumed, err := parseRunListValue(args, index, kitArgFlag, &opts.kitArgs)
+		return consumed, true, err
+	case kitArgsFileFlag:
+		consumed, err := parseRunListValue(args, index, kitArgsFileFlag, &opts.kitArgFiles)
 		return consumed, true, err
 	case denyWriteFlag:
 		consumed, err := parseRunListValue(args, index, denyWriteFlag, &opts.denyWrite)
@@ -1044,7 +1059,15 @@ func parseRunAssignmentFlag(r *Runner, arg string, opts *runOptions) (int, bool,
 		return consumed, true, err
 	}
 	if value, ok := strings.CutPrefix(arg, kitFlag+"="); ok {
-		consumed, err := setRunValue(kitFlag, value, &opts.kit)
+		consumed, err := appendRunKit(value, opts)
+		return consumed, true, err
+	}
+	if value, ok := strings.CutPrefix(arg, kitArgFlag+"="); ok {
+		consumed, err := appendRunListValue(kitArgFlag, value, &opts.kitArgs)
+		return consumed, true, err
+	}
+	if value, ok := strings.CutPrefix(arg, kitArgsFileFlag+"="); ok {
+		consumed, err := appendRunListValue(kitArgsFileFlag, value, &opts.kitArgFiles)
 		return consumed, true, err
 	}
 	if value, ok := strings.CutPrefix(arg, denyWriteFlag+"="); ok {
@@ -1129,6 +1152,25 @@ func appendRunListValue(name, value string, target *[]string) (int, error) {
 	}
 	*target = append(*target, value)
 	return 1, nil
+}
+
+// parseRunKitValue accepts one --kit; a second use is refused rather than
+// letting the later value silently replace the first.
+func parseRunKitValue(args []string, index int, opts *runOptions) (int, error) {
+	if index+1 >= len(args) {
+		return 0, fmt.Errorf("%s requires a non-empty value", kitFlag)
+	}
+	if _, err := appendRunKit(args[index+1], opts); err != nil {
+		return 0, err
+	}
+	return 2, nil
+}
+
+func appendRunKit(value string, opts *runOptions) (int, error) {
+	if opts.kit != "" {
+		return 0, fmt.Errorf("%s can be given only once; multiple kits are not supported", kitFlag)
+	}
+	return setRunValue(kitFlag, value, &opts.kit)
 }
 
 func parseRunValue(args []string, index int, name string, target *string) (int, error) {

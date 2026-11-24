@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v3"
@@ -53,6 +54,26 @@ type dashboardModel struct {
 	form          createFormModel
 	pendingCreate sdk.CreateRequest
 	notice        string
+
+	// Panel state.
+	panel dashboardPanel
+
+	// Bounded streams (lazily initialized via events()/logLines()).
+	eventsRing *ringBuffer[sdk.Event]
+	logsRing   *ringBuffer[string]
+
+	// Stream control. mu guards err and lastEventRevision across the
+	// dashboard tick and the stream goroutines.
+	mu                sync.Mutex
+	eventCancel       context.CancelFunc
+	eventDone         chan struct{}
+	logsCancel        context.CancelFunc
+	logsDone          chan struct{}
+	lastEventRevision int64
+
+	// Scroll offsets.
+	eventScroll int
+	logScroll   int
 }
 
 func (r *Runner) tui(ctx context.Context, args []string) int {
@@ -109,6 +130,10 @@ func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client
 	defer screen.Fini()
 	screen.SetTitle("RHEIC | Sandboxes")
 	model := &dashboardModel{}
+	defer func() {
+		model.stopEventStream()
+		model.stopLogsStream()
+	}()
 	refreshDashboard(ctx, client, model)
 	drawDashboard(screen, model)
 
@@ -220,9 +245,17 @@ func dashboardKeyConfirmDelete(event *tcell.EventKey, model *dashboardModel, ctx
 // dashboardKeyList handles keys in the sandbox list mode and reports whether
 // the dashboard should quit.
 func dashboardKeyList(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
-	switch {
-	case event.Key() == tcell.KeyEscape || event.Str() == "q" || event.Str() == "Q":
+	if event.Key() == tcell.KeyEscape || event.Str() == "q" || event.Str() == "Q" {
 		return true
+	}
+	if dashboardPanelSwitchKey(event, model, ctx, client) {
+		return false
+	}
+	if model.panel != dashboardPanelSandboxes {
+		dashboardAuxPanelKey(event, model, ctx, client)
+		return false
+	}
+	switch {
 	case event.Key() == tcell.KeyUp || event.Str() == "k":
 		if model.selected > 0 {
 			model.selected--
@@ -237,6 +270,63 @@ func dashboardKeyList(event *tcell.EventKey, model *dashboardModel, ctx context.
 		return dashboardKeyAction(event, model, ctx, client)
 	}
 	return false
+}
+
+// dashboardPanelSwitchKey handles global panel selection keys and reports
+// whether the event was consumed.
+func dashboardPanelSwitchKey(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
+	panel := dashboardPanelSandboxes
+	switch event.Str() {
+	case "1":
+	case "2", "e", "E":
+		panel = dashboardPanelEvents
+	case "3", "l", "L":
+		panel = dashboardPanelLogs
+	case "b", "B", "o", "O":
+	default:
+		switch event.Key() {
+		case tcell.KeyTab:
+			panel = dashboardPanel((int(model.panel) + 1) % 3)
+		case tcell.KeyBacktab:
+			panel = dashboardPanel((int(model.panel) + 2) % 3)
+		default:
+			return false
+		}
+	}
+	model.setPanel(ctx, client, panel)
+	return true
+}
+
+// dashboardAuxPanelKey handles scroll and reconnect inside the events and
+// logs panels.
+func dashboardAuxPanelKey(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) {
+	events := model.panel == dashboardPanelEvents
+	switch {
+	case event.Key() == tcell.KeyUp || event.Str() == "k":
+		model.scrollAuxPanel(1)
+	case event.Key() == tcell.KeyDown || event.Str() == "j":
+		model.scrollAuxPanel(-1)
+	case event.Str() == "r" || event.Str() == "R":
+		if events {
+			// Reconnect is handled by the resilient watcher; reset dedup tail.
+			model.mu.Lock()
+			model.lastEventRevision = 0
+			model.mu.Unlock()
+			return
+		}
+		model.stopLogsStream()
+		model.startLogsStream(ctx, client, model.selectedSandboxID())
+	}
+}
+
+// scrollAuxPanel moves the scroll offset of the active auxiliary panel by
+// delta, clamped at zero.
+func (m *dashboardModel) scrollAuxPanel(delta int) {
+	if m.panel == dashboardPanelEvents {
+		m.eventScroll = max(m.eventScroll+delta, 0)
+		return
+	}
+	m.logScroll = max(m.logScroll+delta, 0)
 }
 
 // dashboardKeyAction handles single-letter list actions (new, start, stop,
@@ -297,12 +387,40 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 
 	drawBrand(screen, primary, accent, width)
 	drawText(screen, 2, 9, strings.Repeat("─", width-4), tcell.StyleDefault.Foreground(brandPrimary).Background(brandBackground), width-4)
+	drawDashboardPanels(screen, model, width, accent, muted, 10)
 
 	leftWidth := width * 3 / 5
 	if leftWidth < 42 {
 		leftWidth = 42
 	}
 	detailX := leftWidth + 3
+
+	switch model.panel {
+	case dashboardPanelSandboxes:
+		drawSandboxPanel(screen, model, leftWidth, detailX, width, height, primary, accent, muted, warm, selected)
+	case dashboardPanelEvents:
+		drawText(screen, 3, 11, "EVENTS", muted, leftWidth-4)
+		drawEventPanel(screen, model, 3, leftWidth, height, primary, muted)
+		if detailX < width-22 {
+			drawText(screen, detailX, 11, "EVENT TAIL", muted, width-detailX-2)
+			drawText(screen, detailX, 13, fmt.Sprintf("%d buffered (max %d)", model.events().Len(), dashboardEventLimit), primary, width-detailX-2)
+		}
+	default:
+		drawText(screen, 3, 11, "LOGS", muted, leftWidth-4)
+		drawLogPanel(screen, model, 3, leftWidth, height, primary, muted)
+		if detailX < width-22 {
+			drawText(screen, detailX, 11, "LOGS", muted, width-detailX-2)
+			if len(model.items) > 0 {
+				drawText(screen, detailX, 13, sanitizeTerminalText(model.items[model.selected].Name), primary, width-detailX-2)
+			}
+		}
+	}
+	drawDashboardFooter(screen, model, width, height, accent, muted, warm)
+	screen.Show()
+}
+
+// drawSandboxPanel renders the sandbox list and its detail column.
+func drawSandboxPanel(screen dashboardScreen, model *dashboardModel, leftWidth, detailX, width, height int, primary, accent, muted, warm, selected tcell.Style) {
 	drawText(screen, 3, 11, "SANDBOXES", muted, leftWidth-4)
 	drawText(screen, 3, 12, "NAME", accent, 22)
 	drawText(screen, 27, 12, dashboardStateLabel, accent, 12)
@@ -325,18 +443,17 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 		drawText(screen, 27, y, clipCell(item.State, 12), style, 12)
 		drawText(screen, 40, y, clipCell(item.Agent, leftWidth-43), style, leftWidth-43)
 	}
-
-	if detailX < width-22 {
-		drawText(screen, detailX, 11, "SELECTED SANDBOX", muted, width-detailX-2)
-		if len(model.items) > 0 {
-			drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
-		} else if model.err == "" {
-			drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
-			drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
-		}
+	if detailX >= width-22 {
+		return
 	}
-	drawDashboardFooter(screen, model, width, height, accent, muted, warm)
-	screen.Show()
+	drawText(screen, detailX, 11, "SELECTED SANDBOX", muted, width-detailX-2)
+	switch {
+	case len(model.items) > 0:
+		drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
+	case model.err == "":
+		drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
+		drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
+	}
 }
 
 // drawDashboardFooter renders the status, notice, mode overlay and key hints.
@@ -364,7 +481,7 @@ func drawDashboardFooter(screen dashboardScreen, model *dashboardModel, width, h
 			drawText(screen, 3, height-5, clipCell(prompt, width-6), warm.Bold(true), width-6)
 		}
 	}
-	drawText(screen, 3, height-2, "↑/↓ or j/k  move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit", accent, width-6)
+	drawText(screen, 3, height-2, "1/2/3 or Tab panels   ↑/↓ or j/k  scroll/move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit", accent, width-6)
 }
 
 // drawCreateForm renders the create-flow landing form.

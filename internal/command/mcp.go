@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
 	"golang.org/x/term"
@@ -19,6 +20,13 @@ import (
 )
 
 type mcpArgsFlag []string
+type stringSliceFlag []string
+
+func (f *stringSliceFlag) String() string { return strings.Join(*f, ",") }
+func (f *stringSliceFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
 
 const mcpFormatYAML = "yaml"
 
@@ -51,6 +59,14 @@ func (r *Runner) mcp(ctx context.Context, args []string) int {
 		return r.mcpCall(ctx, args[1:])
 	case "rm":
 		return r.mcpRemove(ctx, args[1:])
+	case commandLoad:
+		return r.mcpLoad(ctx, args[1:])
+	case commandUnload:
+		return r.mcpUnload(ctx, args[1:])
+	case commandInspect:
+		return r.mcpInspect(ctx, args[1:])
+	case commandAuth:
+		return r.mcpAuth(ctx, args[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx mcp: unknown command %q\n", args[0])
 		return 2
@@ -139,18 +155,28 @@ func writeMCPList(out io.Writer, servers []sdk.MCPServer, format string, jsonOut
 	return nil
 }
 
+//nolint:gocyclo,cyclop // flag parsing and validation for the full MCP registration surface.
 func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 	var serverArgs, headerArgs, secretHeaderArgs mcpArgsFlag
+	var scopes stringSliceFlag
 	fs := r.newFlagSet("mcp add")
 	fs.SetOutput(io.Discard)
 	command := fs.String("command", "", "absolute or PATH-resolved local stdio executable")
 	directory := fs.String("dir", "", "working directory")
 	remoteURL := fs.String("url", "", "remote streamable-HTTPS MCP endpoint (mutually exclusive with --command)")
+	oauthAuthorizationServer := fs.String("oauth-authorization-server", "", "path or http(s) URL to an RFC 8414 oauth-authorization-server metadata JSON document")
+	clientID := fs.String("client-id", "", "OAuth client id for a pre-registered client")
+	resource := fs.String("resource", "", "RFC 8707 resource indicator")
+	callbackPort := fs.Int("callback-port", 0, "local port to bind the OAuth callback listener to")
+	disableHTTP2 := fs.Bool("disable-http2", false, "do not negotiate HTTP/2 for this remote server")
+	noScope := fs.Bool("no-scope", false, "request no scopes during add-time authorization")
+	skipAuth := fs.Bool("skip-auth", false, "register an OAuth server without starting the hosted OAuth flow")
 	fs.Var(&serverArgs, "args", "comma-separated MCP executable arguments (repeatable)")
 	fs.Var(&headerArgs, "header", "Docker-compatible alias for a host-vault remote header; values must contain ${placeholder}")
 	fs.Var(&secretHeaderArgs, "secret-header", "host-vault remote header as Name:Value with ${placeholder}")
+	fs.Var(&scopes, "scope", "default OAuth scope to request at consent time (repeatable)")
 	fs.Usage = func() { r.showCommandHelp(mcpAddHelp()) }
-	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{commandFlag: true, "--dir": true, mcpArgsFlagName: true, "--url": true, "--header": true, "--secret-header": true})); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{commandFlag: true, "--dir": true, mcpArgsFlagName: true, "--url": true, "--header": true, "--secret-header": true, "--oauth-authorization-server": true, "--client-id": true, resourceFlag: true, scopeFlag: true, "--callback-port": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -164,6 +190,14 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 		r.error(errors.New("MCP headers are supported only for remote servers"))
 		return 2
 	}
+	if len(scopes) > 0 && *noScope {
+		r.error(errors.New("MCP scopes and no scope are mutually exclusive"))
+		return 2
+	}
+	if *callbackPort < 0 || *callbackPort > 65535 {
+		r.error(errors.New("MCP callback port must be between 0 and 65535"))
+		return 2
+	}
 	if err := requireMCPApprovalTerminal(r.In); err != nil {
 		r.error(err)
 		return 1
@@ -175,18 +209,18 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 	}
 	defer func() { _ = client.Close() }()
 	if *remoteURL != "" {
-		return r.mcpAddRemote(ctx, client, fs.Arg(0), *remoteURL, headerArgs, secretHeaderArgs)
+		return r.mcpAddRemote(ctx, client, fs.Arg(0), *remoteURL, headerArgs, secretHeaderArgs, *oauthAuthorizationServer, *clientID, *resource, scopes, *noScope, *callbackPort, *disableHTTP2, *skipAuth)
 	}
 	return r.mcpAddStdio(ctx, client, fs.Arg(0), *command, *directory, serverArgs)
 }
 
-func (r *Runner) mcpAddRemote(ctx context.Context, client sdk.Client, name, rawURL string, headerArgs, secretHeaderArgs []string) int {
+func (r *Runner) mcpAddRemote(ctx context.Context, client sdk.Client, name, rawURL string, headerArgs, secretHeaderArgs []string, oauthAuthorizationServer, clientID, resource string, scopes []string, noScope bool, callbackPort int, disableHTTP2, skipAuth bool) int {
 	headers, secretHeaders, err := parseMCPRemoteHeaders(headerArgs, secretHeaderArgs)
 	if err != nil {
 		r.error(err)
 		return 2
 	}
-	if err := r.registerMCPRemoteServer(ctx, client, name, rawURL, headers, secretHeaders); err != nil {
+	if err := r.registerMCPRemoteServer(ctx, client, name, rawURL, headers, secretHeaders, oauthAuthorizationServer, clientID, resource, scopes, noScope, callbackPort, disableHTTP2, skipAuth); err != nil {
 		r.error(err)
 		return 1
 	}
@@ -289,9 +323,9 @@ func mcpHeaderPlaceholderNames(value string) ([]string, error) {
 	}
 }
 
-func (r *Runner) registerMCPRemoteServer(ctx context.Context, client sdk.Client, name, rawURL string, headers, secretHeaders map[string]string) error {
+func (r *Runner) registerMCPRemoteServer(ctx context.Context, client sdk.Client, name, rawURL string, headers, secretHeaders map[string]string, oauthAuthorizationServer, clientID, resource string, scopes []string, noScope bool, callbackPort int, disableHTTP2, skipAuth bool) error {
 	service := sdk.MCP(client)
-	registration, err := service.Register(ctx, sdk.MCPServerConfig{Name: name, URL: rawURL, Headers: headers, SecretHeaders: secretHeaders})
+	registration, err := service.Register(ctx, sdk.MCPServerConfig{Name: name, URL: rawURL, Headers: headers, SecretHeaders: secretHeaders, OAuthAuthorizationServer: oauthAuthorizationServer, ClientID: clientID, Resource: resource, Scopes: append([]string(nil), scopes...), NoScope: noScope, CallbackPort: callbackPort, DisableHTTP2: disableHTTP2, SkipAuth: skipAuth})
 	if err != nil {
 		return err
 	}
@@ -527,4 +561,453 @@ func mcpUsability(server sdk.MCPServer) string {
 		return "auth required"
 	}
 	return "usable"
+}
+
+const mcpLoadUsage = `usage: rsbx mcp load NAME --sandbox SANDBOX
+
+Attach a previously-registered MCP server to a sandbox's gateway.
+`
+
+const mcpUnloadUsage = `usage: rsbx mcp unload NAME --sandbox SANDBOX
+
+Detach an MCP server from a running sandbox's gateway.
+`
+
+const mcpInspectUsage = `usage: rsbx mcp inspect NAME [flags]
+
+Show MCP server details.
+`
+
+type mcpInspectOutput struct {
+	Name                string `json:"name" yaml:"name"`
+	SandboxID           string `json:"sandbox_id,omitempty" yaml:"sandbox_id,omitempty"`
+	IdentityDisplayName string `json:"identity_display_name,omitempty" yaml:"identity_display_name,omitempty"`
+	IdentityKind        string `json:"identity_kind,omitempty" yaml:"identity_kind,omitempty"`
+	IdentityIssuerHost  string `json:"identity_issuer_host,omitempty" yaml:"identity_issuer_host,omitempty"`
+	ToolsCount          int    `json:"tools_count,omitempty" yaml:"tools_count,omitempty"`
+	LastSyncAt          string `json:"last_sync_at,omitempty" yaml:"last_sync_at,omitempty"`
+	AuthStatus          string `json:"auth_status" yaml:"auth_status"`
+	GatewayState        string `json:"gateway_state" yaml:"gateway_state"`
+}
+
+type mcpAuthStatusOutput struct {
+	Name   string `json:"name" yaml:"name"`
+	Status string `json:"status" yaml:"status"`
+}
+
+//nolint:dupl // load and unload share the same gateway-attach grammar by design.
+func (r *Runner) mcpLoad(ctx context.Context, args []string) int {
+	fs := r.newFlagSet("mcp load")
+	fs.SetOutput(io.Discard)
+	sandbox := fs.String("sandbox", "", "Target sandbox name (required)")
+	fs.Usage = func() { r.showCommandHelp(mcpLoadHelp()) }
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{sandboxFlag: true})); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("mcp load", err)
+	}
+	if fs.NArg() != 1 || *sandbox == "" {
+		_, _ = fmt.Fprint(r.Err, mcpLoadUsage)
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	if err := sdk.MCPServerManagement(client).Load(ctx, fs.Arg(0), *sandbox); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+//nolint:dupl // load and unload share the same gateway-attach grammar by design.
+func (r *Runner) mcpUnload(ctx context.Context, args []string) int {
+	fs := r.newFlagSet("mcp unload")
+	fs.SetOutput(io.Discard)
+	sandbox := fs.String("sandbox", "", "Target sandbox name (required)")
+	fs.Usage = func() { r.showCommandHelp(mcpUnloadHelp()) }
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{sandboxFlag: true})); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("mcp unload", err)
+	}
+	if fs.NArg() != 1 || *sandbox == "" {
+		_, _ = fmt.Fprint(r.Err, mcpUnloadUsage)
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	if err := sdk.MCPServerManagement(client).Unload(ctx, fs.Arg(0), *sandbox); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) mcpInspect(ctx context.Context, args []string) int {
+	fs := r.newFlagSet("mcp inspect")
+	fs.SetOutput(io.Discard)
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	fs.Usage = func() { r.showCommandHelp(mcpInspectHelp()) }
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("mcp inspect", err)
+	}
+	if fs.NArg() != 1 {
+		_, _ = fmt.Fprint(r.Err, mcpInspectUsage)
+		return 2
+	}
+	selected, err := resolveOperationFormat(*format, *jsonOutput)
+	if err != nil {
+		r.error(err)
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	detail, err := sdk.MCPServerManagement(client).Inspect(ctx, fs.Arg(0), "")
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	out := mcpInspectOutput{
+		Name:                detail.Name,
+		SandboxID:           detail.SandboxID,
+		IdentityDisplayName: detail.IdentityDisplayName,
+		IdentityKind:        detail.IdentityKind,
+		IdentityIssuerHost:  detail.IdentityIssuerHost,
+		ToolsCount:          detail.ToolsCount,
+		AuthStatus:          mcpAuthStatusText(detail.AuthStatus),
+		GatewayState:        mcpGatewayStateText(detail.GatewayState),
+	}
+	if !detail.LastSyncAt.IsZero() {
+		out.LastSyncAt = detail.LastSyncAt.UTC().Format(time.RFC3339)
+	}
+	if err := r.renderMCPInspect(out, selected); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) renderMCPInspect(out mcpInspectOutput, format string) error {
+	switch format {
+	case listFormatJSON:
+		encoder := json.NewEncoder(r.Out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(out)
+	case listFormatYAML:
+		data, err := yaml.Marshal(out)
+		if err != nil {
+			return err
+		}
+		_, err = r.Out.Write(data)
+		return err
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "name: %s\n", out.Name)
+		if out.SandboxID != "" {
+			fmt.Fprintf(&b, "sandbox_id: %s\n", out.SandboxID)
+		}
+		if out.IdentityDisplayName != "" {
+			fmt.Fprintf(&b, "identity_display_name: %s\n", out.IdentityDisplayName)
+		}
+		if out.IdentityKind != "" {
+			fmt.Fprintf(&b, "identity_kind: %s\n", out.IdentityKind)
+		}
+		if out.IdentityIssuerHost != "" {
+			fmt.Fprintf(&b, "identity_issuer_host: %s\n", out.IdentityIssuerHost)
+		}
+		if out.ToolsCount != 0 {
+			fmt.Fprintf(&b, "tools_count: %d\n", out.ToolsCount)
+		}
+		if out.LastSyncAt != "" {
+			fmt.Fprintf(&b, "last_sync_at: %s\n", out.LastSyncAt)
+		}
+		fmt.Fprintf(&b, "auth_status: %s\n", out.AuthStatus)
+		fmt.Fprintf(&b, "gateway_state: %s\n", out.GatewayState)
+		_, err := io.WriteString(r.Out, b.String())
+		return err
+	}
+}
+
+func (r *Runner) mcpAuth(ctx context.Context, args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case daemonStatusCommand:
+			return r.mcpAuthStatus(ctx, args[1:])
+		case "rm":
+			return r.mcpAuthRm(ctx, args[1:])
+		}
+	}
+	return r.mcpAuthStart(ctx, args)
+}
+
+//nolint:gocognit,gocyclo,cyclop,funlen // auth status renders both text and JSON forms.
+func (r *Runner) mcpAuthStatus(ctx context.Context, args []string) int {
+	fs := r.newFlagSet("mcp auth status")
+	fs.SetOutput(io.Discard)
+	all := fs.Bool("all", false, "apply to all registered OAuth servers")
+	format := fs.String("format", listFormatTable, "output format: text or json")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	fs.Usage = func() { r.showCommandHelp(mcpAuthStatusHelp()) }
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("mcp auth status", err)
+	}
+	name := ""
+	if fs.NArg() > 1 {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth status [SERVER] [flags]")
+		return 2
+	}
+	if fs.NArg() == 1 {
+		name = fs.Arg(0)
+	}
+	if *all && name != "" {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth status [SERVER] [flags]")
+		return 2
+	}
+	selected := listFormatTable
+	if *format != "" {
+		switch *format {
+		case mcpAuthTextFormat, listFormatTable:
+			selected = listFormatTable
+		case listFormatJSON:
+			selected = listFormatJSON
+		default:
+			r.error(fmt.Errorf("invalid format %q; use text or json", *format))
+			return 2
+		}
+	}
+	if *jsonOutput {
+		if *format != "" && *format != mcpAuthTextFormat && *format != listFormatTable {
+			r.error(errors.New("--json cannot be combined with an explicit --format"))
+			return 2
+		}
+		selected = listFormatJSON
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	statuses, err := sdk.MCPServerManagement(client).AuthStatus(ctx, name, *all)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	rows := make([]mcpAuthStatusOutput, 0, len(statuses))
+	for _, s := range statuses {
+		rows = append(rows, mcpAuthStatusOutput{Name: s.Name, Status: mcpAuthStatusText(s.Status)})
+	}
+	if selected == listFormatJSON {
+		encoder := json.NewEncoder(r.Out)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(rows); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
+	}
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(r.Out, "%-24s %s\n", row.Name, row.Status)
+	}
+	return 0
+}
+
+//nolint:gocognit,gocyclo,cyclop,nestif,funlen // auth removal handles all/single and text/JSON forms.
+func (r *Runner) mcpAuthRm(ctx context.Context, args []string) int {
+	fs := r.newFlagSet("mcp auth rm")
+	fs.SetOutput(io.Discard)
+	all := fs.Bool("all", false, "apply to all registered OAuth servers")
+	force := fs.Bool("force", false, "skip confirmation prompts")
+	format := fs.String("format", listFormatTable, "output format: text or json")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	fs.Usage = func() { r.showCommandHelp(mcpAuthRmHelp()) }
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("mcp auth rm", err)
+	}
+	name := ""
+	if fs.NArg() > 1 {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth rm [SERVER] [flags]")
+		return 2
+	}
+	if fs.NArg() == 1 {
+		name = fs.Arg(0)
+	}
+	if *all && name != "" {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth rm [SERVER] [flags]")
+		return 2
+	}
+	if !*all && name == "" {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth rm [SERVER] [flags]")
+		return 2
+	}
+	if !*force {
+		target := name
+		if *all {
+			target = "all registered OAuth servers"
+		}
+		confirmed, err := r.confirmMCPApproval("Remove MCP OAuth credentials for " + target + "?")
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(r.Out, "MCP OAuth removal canceled")
+			return 0
+		}
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	if *all {
+		statuses, err := sdk.MCPServerManagement(client).AuthStatus(ctx, "", true)
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		for _, s := range statuses {
+			removed, err := sdk.MCPServerManagement(client).RemoveAuth(ctx, s.Name)
+			if err != nil {
+				r.error(err)
+				return 1
+			}
+			if !*jsonOutput && *format != listFormatJSON {
+				if removed {
+					_, _ = fmt.Fprintf(r.Out, "Removed MCP OAuth credentials for %s\n", s.Name)
+				} else {
+					_, _ = fmt.Fprintf(r.Out, "No MCP OAuth credentials stored for %s\n", s.Name)
+				}
+			}
+		}
+		return 0
+	}
+	removed, err := sdk.MCPServerManagement(client).RemoveAuth(ctx, name)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	jsonRequested := *jsonOutput
+	if *format == listFormatJSON {
+		jsonRequested = true
+	}
+	if *format != "" && *format != mcpAuthTextFormat && *format != listFormatTable && *format != listFormatJSON {
+		r.error(fmt.Errorf("invalid format %q; use text or json", *format))
+		return 2
+	}
+	if *jsonOutput && *format != "" && *format != mcpAuthTextFormat && *format != listFormatTable {
+		r.error(errors.New("--json cannot be combined with an explicit --format"))
+		return 2
+	}
+	if jsonRequested {
+		encoder := json.NewEncoder(r.Out)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(map[string]any{"removed": removed, "name": name}); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
+	}
+	if removed {
+		_, _ = fmt.Fprintf(r.Out, "Removed MCP OAuth credentials for %s\n", sanitizeTerminalText(name))
+	} else {
+		_, _ = fmt.Fprintf(r.Out, "No MCP OAuth credentials stored for %s\n", sanitizeTerminalText(name))
+	}
+	return 0
+}
+
+func (r *Runner) mcpAuthStart(ctx context.Context, args []string) int {
+	var scopes stringSliceFlag
+	fs := r.newFlagSet("mcp auth")
+	fs.SetOutput(io.Discard)
+	all := fs.Bool("all", false, "apply to all registered OAuth servers")
+	format := fs.String("format", listFormatTable, "output format: text or json")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	noScope := fs.Bool("no-scope", false, "request no scopes at all for this run")
+	verbose := fs.Bool("verbose", false, "print authorization polling progress")
+	fs.Var(&scopes, "scope", "OAuth scope to authorize for this run (repeatable)")
+	fs.Usage = func() { r.showCommandHelp(mcpAuthHelp()) }
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true, "--scope": true})); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("mcp auth", err)
+	}
+	if len(scopes) > 0 && *noScope {
+		r.error(errors.New("MCP scopes and no scope are mutually exclusive"))
+		return 2
+	}
+	name := ""
+	if fs.NArg() > 1 {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth [SERVER] [flags]")
+		return 2
+	}
+	if fs.NArg() == 1 {
+		name = fs.Arg(0)
+	}
+	if *all && name != "" {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp auth [SERVER] [flags]")
+		return 2
+	}
+	_ = verbose
+	_ = format
+	_ = jsonOutput
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	challenge, err := sdk.MCPServerManagement(client).StartAuth(ctx, sdk.MCPAuthStartRequest{Name: name, All: *all, Scopes: scopes, NoScope: *noScope})
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if challenge.ApprovalID != "" {
+		_, _ = fmt.Fprintf(r.Out, "Authorization started (%s)\n", sanitizeTerminalText(challenge.ApprovalID))
+	}
+	return 0
+}
+
+func mcpAuthStatusText(status sdk.MCPAuthStatus) string {
+	switch status {
+	case sdk.MCPAuthStatusUnspecified:
+		return debugUnknown
+	default:
+		return string(status)
+	}
+}
+
+func mcpGatewayStateText(state sdk.MCPGatewayState) string {
+	switch state {
+	case sdk.MCPGatewayStateUnspecified:
+		return debugUnknown
+	default:
+		return string(state)
+	}
 }

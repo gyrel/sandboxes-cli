@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.0.74 — 2026-11-24
+
+### Added
+
+- `rsbx mcp load NAME --sandbox SANDBOX` and `rsbx mcp unload NAME --sandbox SANDBOX`
+  attach and detach a registered MCP server from a sandbox gateway, surfacing
+  daemon NOT_FOUND/CONFLICT results.
+- `rsbx mcp inspect NAME [--sandbox …] [--format table|json|yaml]` renders
+  redacted server detail, including gateway/auth state and a non-zero tools
+  count.
+- `rsbx mcp auth status [NAME] [--all] [--json]` and `rsbx mcp auth rm NAME`
+  inspect or remove hosted OAuth credentials.
+- `rsbx mcp auth [NAME]` starts OAuth through the daemon and reports the
+  daemon's FAILED_PRECONDITION reason without simulating the flow.
+- `rsbx mcp add` accepts the captured OAuth flags (`--oauth-authorization-server`,
+  `--client-id`, `--resource`, repeatable `--scope`, `--no-scope`,
+  `--callback-port`, `--disable-http2`, `--skip-auth`) with client-side
+  validation and pass-through to registration.
+
 ## v0.0.72 — 2026-11-24
 
 ### Added

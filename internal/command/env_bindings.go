@@ -12,8 +12,9 @@ import (
 )
 
 // credentialsBindingsCandidates returns the global credentials.yaml locations
-// Rheic may share with the host. Only existing files are edited; no new
-// storage file is created.
+// owned by Rheic. Only existing files are edited; no new storage file is
+// created. Docker sbx directories are deliberately excluded: pruning must not
+// mutate another product's credential state (AGENTS repository-boundary rule).
 func credentialsBindingsCandidates() []string {
 	var candidates []string
 	add := func(dir string) {
@@ -26,14 +27,10 @@ func credentialsBindingsCandidates() []string {
 	}
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
 		add(filepath.Join(dir, "rheic"))
-		add(filepath.Join(dir, "sbx"))
 	}
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		add(filepath.Join(home, ".config", "rheic"))
-		add(filepath.Join(home, ".config", "sbx"))
 		add(filepath.Join(home, ".rheic"))
-		add(filepath.Join(home, ".sbx"))
 	}
 	return candidates
 }
@@ -71,6 +68,15 @@ func pruneEnvironmentBindings(plan envfile.Plan) error {
 }
 
 func pruneBindingsFile(path, name string) error {
+	// Reject symlinks before reading: rename would otherwise replace whatever
+	// the link points to outside the config directory.
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect credentials bindings %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("credentials bindings %s is not a regular file", path)
+	}
 	data, err := os.ReadFile(path) // #nosec G304 -- candidate credentials store path
 	if err != nil {
 		return fmt.Errorf("read credentials bindings %s: %w", path, err)

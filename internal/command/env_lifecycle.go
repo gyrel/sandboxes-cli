@@ -515,13 +515,15 @@ func (r *Runner) environmentRemove(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
+	// The sandbox is already gone; report that first even if pruning fails, so
+	// output never suggests the removal itself needs retrying.
+	_, _ = fmt.Fprintf(r.Out, "Removed environment sandbox %s\n", sanitizeTerminalText(plan.Name))
 	if options.pruneBindings {
 		if err := pruneEnvironmentBindings(plan); err != nil {
 			r.error(err)
 			return 1
 		}
 	}
-	_, _ = fmt.Fprintf(r.Out, "Removed environment sandbox %s\n", sanitizeTerminalText(plan.Name))
 	return 0
 }
 

@@ -4,10 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 const kitArtifactGoodSpec = "apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: good-kit\nspec:\n  agent: shell\n"
@@ -206,5 +209,106 @@ func TestKitHelpListsArtifactVerbs(t *testing.T) {
 	code, stdout, _ := runKitArtifact(t, "--help")
 	if code != 0 || !strings.Contains(stdout, "pack") || !strings.Contains(stdout, "validate") {
 		t.Fatalf("code=%d stdout=%q", code, stdout)
+	}
+}
+
+type kitGateVersionService struct{}
+
+func (kitGateVersionService) Get(context.Context) (sdk.VersionInfo, error) {
+	return sdk.VersionInfo{Version: "0.0.94", APIVersion: "0.0.37"}, nil
+}
+
+type stubKitPolicyService struct {
+	check sdk.KitCheck
+	err   error
+	last  sdk.KitCheckRequest
+}
+
+func (s *stubKitPolicyService) CheckKit(_ context.Context, req sdk.KitCheckRequest) (sdk.KitCheck, error) {
+	s.last = req
+	return s.check, s.err
+}
+
+func (s *stubKitPolicyService) GetKitPolicyConfig(context.Context) (sdk.KitPolicyConfig, error) {
+	return sdk.KitPolicyConfig{}, nil
+}
+
+func runKitValidateOnline(t *testing.T, reference string, policy sdk.KitPolicyService) (int, string, string, *stubKitPolicyService) {
+	t.Helper()
+	stub, ok := policy.(*stubKitPolicyService)
+	if !ok {
+		t.Fatal("unexpected policy stub")
+	}
+	var stdout, stderr bytes.Buffer
+	runner := &Runner{
+		Out: &stdout, Err: &stderr,
+		NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{versions: kitGateVersionService{}, kitPolicy: policy}, nil
+		},
+	}
+	code := runner.Run(context.Background(), []string{"kit", "validate", reference})
+	return code, stdout.String(), stderr.String(), stub
+}
+
+func TestKitValidateOnlinePolicyOutcomes(t *testing.T) {
+	good, _ := kitFixtures(t)
+	t.Run("allowed", func(t *testing.T) {
+		code, stdout, stderr, stub := runKitValidateOnline(t, good, &stubKitPolicyService{
+			check: sdk.KitCheck{Allowed: true, Reason: sdk.KitCheckReasonOK},
+		})
+		if code != 0 || !strings.Contains(stdout, "policy: daemon-checked") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+		if stub.last.SourceKind != sdk.KitSourceKindDirectory || stub.last.SourceRef != good {
+			t.Fatalf("request = %+v", stub.last)
+		}
+	})
+	t.Run("denied with settings hint", func(t *testing.T) {
+		code, _, stderr, _ := runKitValidateOnline(t, good, &stubKitPolicyService{
+			check: sdk.KitCheck{
+				Allowed: false,
+				Reason:  sdk.KitCheckReasonSourceNotAllowed,
+				Message: "kit source kind is not in the allowed sources list",
+				CheckedSettings: []string{
+					"kit.allowedSources",
+				},
+			},
+		})
+		if code != 1 || !strings.Contains(stderr, "kit source kind is not in the allowed sources list") {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+		if !strings.Contains(stderr, "kit.allowedSources") || strings.Contains(stderr, "Validated kit") {
+			t.Fatalf("hint or false-success wrong: %q", stderr)
+		}
+	})
+	t.Run("daemon error never falls back", func(t *testing.T) {
+		code, _, stderr, _ := runKitValidateOnline(t, good, &stubKitPolicyService{
+			err: errors.New("connection refused"),
+		})
+		if code != 1 || !strings.Contains(stderr, "policy could not be checked") {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+		if strings.Contains(stderr, "offline: daemon kit policy not checked") {
+			t.Fatalf("daemon error leaked offline success: %q", stderr)
+		}
+	})
+}
+
+func TestKitValidateOfflineNeverTouchesClient(t *testing.T) {
+	good, _ := kitFixtures(t)
+	touched := false
+	var stdout, stderr bytes.Buffer
+	runner := &Runner{
+		Out: &stdout, Err: &stderr,
+		NewClient: func(string) (sdk.Client, error) {
+			touched = true
+			return nil, errors.New("must not connect")
+		},
+	}
+	if code := runner.Run(context.Background(), []string{"kit", "validate", good, "--offline"}); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if touched {
+		t.Fatal("offline mode connected to the daemon")
 	}
 }

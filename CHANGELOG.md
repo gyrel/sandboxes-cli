@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.0.72 — unreleased (train)
+## v0.0.72 — 2026-11-24
 
 ### Added
 
@@ -8,12 +8,18 @@
   bounded 200-entry tail with drop counter; logs view streams bounded recent
   lines for the selected sandbox and cancels the stream on panel switch. Panel
   switching and scrolling keys documented in the dashboard footer.
+
+## v0.0.73 — 2026-11-24
+
+### Added
+
 - EXPERIMENTAL: `kit validate` now performs the daemon-backed kit policy check
   (`kit.allowedSources`, `kit.allowLocalKits`, `kit.requireSignature`) after
   offline schema validation, using `sdk.KitPolicy(client).CheckKit`. Allowed
   kits report `policy: daemon-checked`; denials print the daemon reason and the
   deciding setting names; unreachable or version-gated daemons fail closed.
-  `--offline` keeps the previous no-daemon behavior.
+  `--offline` keeps the previous no-daemon behavior. Live-verified against
+  daemon v0.0.94 both directions (deny reason/hint, allow policy-checked).
 
 ## v0.0.71 — 2026-11-24
 

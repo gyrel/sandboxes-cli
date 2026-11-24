@@ -825,6 +825,7 @@ type fakeClient struct {
 	accountStatuses sdk.AccountStatusService
 	versions        sdk.VersionService
 	kitPolicy       sdk.KitPolicyService
+	mcpManagement   sdk.MCPServerManagementService
 }
 
 func (f fakeClient) VersionService() sdk.VersionService { return f.versions }
@@ -832,6 +833,13 @@ func (f fakeClient) VersionService() sdk.VersionService { return f.versions }
 func (f fakeClient) KitPolicyService() sdk.KitPolicyService {
 	if f.kitPolicy != nil {
 		return f.kitPolicy
+	}
+	return nil
+}
+
+func (f fakeClient) MCPServerManagementService() sdk.MCPServerManagementService {
+	if f.mcpManagement != nil {
+		return f.mcpManagement
 	}
 	return nil
 }

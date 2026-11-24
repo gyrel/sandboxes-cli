@@ -40,6 +40,8 @@ const (
 
 	helpFormatDescription      = "Output format: table, json or yaml"
 	helpJSONDescription        = "Output in JSON format"
+	mcpAuthAllDescription      = "Apply to all registered OAuth servers"
+	mcpAuthFormatDescription   = "Output format: \"text\" or \"json\" (default \"text\")"
 	helpFormatLowerDescription = "output format: table, json or yaml"
 	helpJSONLowerDescription   = "output in JSON format"
 	helpEnvArgDescription      = "set a declared environment argument (repeatable)"
@@ -716,9 +718,13 @@ func mcpHelp() commandHelp {
 		Usage:       []string{"rsbx mcp COMMAND"},
 		AvailableCommands: []commandSummary{
 			{Name: helpNameAdd, Description: "Register an MCP server"},
+			{Name: commandAuth, Description: "Authorize MCP servers"},
 			{Name: helpNameCall, Description: "Call a tool on a registered MCP server"},
+			{Name: commandInspect, Description: "Show MCP server details"},
+			{Name: commandLoad, Description: "Load an already-registered MCP server into a sandbox"},
 			{Name: "ls", Description: "List MCP servers"},
 			{Name: "rm", Description: "Remove a registered MCP server"},
+			{Name: commandUnload, Description: "Unload an MCP server from a running sandbox"},
 		},
 		Flags:  []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for mcp"}},
 		Footer: "Use \"rsbx mcp COMMAND --help\" for more information about a command.",
@@ -754,11 +760,19 @@ func mcpAddHelp() commandHelp {
 		},
 		Flags: []commandFlagHelp{
 			{Name: "args", Value: helpNameStringArray, Description: "comma-separated MCP executable arguments (repeatable)"},
+			{Name: "callback-port", Value: helpNameInt, Description: "Local port to bind the OAuth callback listener to during add-time authorization (default: OS-assigned ephemeral port). Useful when the port must be pre-registered in an OAuth app's allowed redirect URIs. Applies to --url remote OAuth servers; ignored with a warning if the server turns out not to need OAuth."},
+			{Name: "client-id", Value: helpValueString, Description: "OAuth client id for a pre-registered client (with --url; may be used with or without --oauth-authorization-server). A confidential client's secret comes from 'sbx secret set mcp:<server>:client_secret'"},
 			{Name: commandName, Value: helpValueString, Description: "absolute or PATH-resolved local stdio executable"},
 			{Name: "dir", Value: helpValueString, Description: "working directory"},
+			{Name: "disable-http2", Description: "Do not negotiate HTTP/2 for this remote server, leaving HTTP/1.1. Applies to --url servers."},
 			{Name: "header", Value: helpNameStringArray, Description: "Docker-compatible alias for a host-vault remote header; values must contain ${placeholder}"},
 			{Short: "h", Name: helpCommand, Description: "help for mcp add"},
+			{Name: "no-scope", Description: "Request no scopes during add-time authorization, so the authorization server applies its own default grant. Suppresses required and OIDC fallback scopes; cannot be combined with --scope. Applies to --url remote OAuth servers."},
+			{Name: "oauth-authorization-server", Value: helpValueString, Description: "Path or http(s) URL to an RFC 8414 oauth-authorization-server metadata JSON document"},
+			{Name: "resource", Value: helpValueString, Description: "RFC 8707 resource indicator to send during OAuth: an absolute URI (scheme and host, no fragment) naming the server the token is for. Overrides the value the server publishes in its RFC 9728 metadata and the one derived from --url; set it only when that derived value is wrong. Not honored by the hosted gateway for a plain remote yet. Applies to --url remote OAuth servers."},
+			{Name: "scope", Value: helpNameStringArray, Description: "Default OAuth scope to request at consent time (repeatable; a scope the server's advertised metadata does not recognize prints a warning but is still requested, since advertising a scope never promised the server would grant it either). With no --scope, the scope set the resource itself requires is requested; with neither, whichever of openid, email, profile, and offline_access are advertised are requested; other advertised scopes are excluded from this fallback. Applies to --url remote OAuth servers."},
 			{Name: "secret-header", Value: helpNameStringArray, Description: "host-vault remote header as Name:Value with ${placeholder}"},
+			{Name: "skip-auth", Description: "Register an OAuth server without starting the hosted OAuth flow"},
 			{Name: "url", Value: helpValueString, Description: "remote streamable-HTTPS MCP endpoint (mutually exclusive with --command)"},
 		},
 	}
@@ -1798,6 +1812,87 @@ func versionHelp() commandHelp {
 		Flags: []commandFlagHelp{
 			{Name: helpNameFormat, Value: helpValueString, Description: "Output format: table, json or yaml"},
 			{Short: "h", Name: helpCommand, Description: "help for version"},
+			{Name: listFormatJSON, Description: helpJSONDescription},
+		},
+	}
+}
+
+func mcpLoadHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Attach a previously-registered MCP server to a sandbox's gateway."},
+		Usage:       []string{"rsbx mcp load NAME --sandbox SANDBOX [flags]"},
+		Flags: []commandFlagHelp{
+			{Short: "h", Name: helpCommand, Description: "help for load"},
+			{Name: helpNameSandbox, Value: helpValueString, Description: "Target sandbox name (required)"},
+		},
+	}
+}
+
+func mcpUnloadHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Detach an MCP server from a running sandbox's gateway."},
+		Usage:       []string{"rsbx mcp unload NAME --sandbox SANDBOX [flags]"},
+		Flags: []commandFlagHelp{
+			{Short: "h", Name: helpCommand, Description: "help for unload"},
+			{Name: helpNameSandbox, Value: helpValueString, Description: "Target sandbox name (required)"},
+		},
+	}
+}
+
+func mcpInspectHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Show MCP server details."},
+		Usage:       []string{"rsbx mcp inspect NAME [flags]"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameFormat, Value: helpValueString, Description: "Output format: table, json or yaml"},
+			{Short: "h", Name: helpCommand, Description: "help for inspect"},
+			{Name: listFormatJSON, Description: helpJSONDescription},
+		},
+	}
+}
+
+func mcpAuthHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Authorize registered remote MCP servers through the hosted MCP control plane."},
+		Usage:       []string{"rsbx mcp auth [SERVER] [flags]", "rsbx mcp auth COMMAND"},
+		AvailableCommands: []commandSummary{
+			{Name: "rm", Description: "Remove MCP server OAuth credentials"},
+			{Name: daemonStatusCommand, Description: "Show MCP server OAuth status"},
+		},
+		Flags: []commandFlagHelp{
+			{Name: helpNameAll, Description: mcpAuthAllDescription},
+			{Name: helpNameFormat, Value: helpValueString, Description: mcpAuthFormatDescription},
+			{Short: "h", Name: helpCommand, Description: "help for auth"},
+			{Name: listFormatJSON, Description: helpJSONDescription},
+			{Name: "no-scope", Description: "Request no scopes at all for this run, so the authorization server applies its own default grant. Suppresses recorded, required, and OIDC fallback scopes; cannot be combined with --scope"},
+			{Name: "scope", Value: helpNameStringArray, Description: "OAuth scope to authorize for this run (repeatable; overrides the recorded default; unrecognized scopes warn but are still requested). With no --scope and no recorded default, the scope set the resource itself requires is requested; with none of those, whichever of openid, email, profile, and offline_access are advertised are requested; other advertised scopes are excluded from this fallback"},
+			{Name: "verbose", Description: "Print authorization polling progress"},
+		},
+	}
+}
+
+func mcpAuthStatusHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Show hosted OAuth credential status for registered MCP servers."},
+		Usage:       []string{"rsbx mcp auth status [SERVER] [flags]"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameAll, Description: mcpAuthAllDescription},
+			{Name: helpNameFormat, Value: helpValueString, Description: mcpAuthFormatDescription},
+			{Short: "h", Name: helpCommand, Description: "help for status"},
+			{Name: listFormatJSON, Description: helpJSONDescription},
+		},
+	}
+}
+
+func mcpAuthRmHelp() commandHelp {
+	return commandHelp{
+		Description: []string{"Remove hosted OAuth credentials for registered MCP servers."},
+		Usage:       []string{"rsbx mcp auth rm [SERVER] [flags]"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameAll, Description: mcpAuthAllDescription},
+			{Short: "f", Name: helpNameForce, Description: "Skip confirmation prompts"},
+			{Name: helpNameFormat, Value: helpValueString, Description: mcpAuthFormatDescription},
+			{Short: "h", Name: helpCommand, Description: "help for rm"},
 			{Name: listFormatJSON, Description: helpJSONDescription},
 		},
 	}

@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.0.71 — unreleased (train)
+## v0.0.71 — 2026-11-24
 
 ### Added
 

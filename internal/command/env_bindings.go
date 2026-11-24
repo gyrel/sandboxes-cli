@@ -42,7 +42,7 @@ func pruneEnvironmentBindings(plan envfile.Plan) error {
 	}
 	var firstErr error
 	for _, path := range credentialsBindingsCandidates() {
-		info, err := os.Stat(path)
+		info, err := os.Stat(path) // #nosec G304,G703 -- path is one of the fixed Rheic config-dir candidates, never derived from user input beyond $HOME/$XDG_CONFIG_HOME
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
@@ -70,14 +70,14 @@ func pruneEnvironmentBindings(plan envfile.Plan) error {
 func pruneBindingsFile(path, name string) error {
 	// Reject symlinks before reading: rename would otherwise replace whatever
 	// the link points to outside the config directory.
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G304,G703 -- fixed Rheic candidate path; symlink targets are refused below
 	if err != nil {
 		return fmt.Errorf("inspect credentials bindings %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("credentials bindings %s is not a regular file", path)
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- candidate credentials store path
+	data, err := os.ReadFile(path) // #nosec G304,G703 -- fixed Rheic candidate store path after regular-file check
 	if err != nil {
 		return fmt.Errorf("read credentials bindings %s: %w", path, err)
 	}
@@ -96,7 +96,7 @@ func pruneBindingsFile(path, name string) error {
 	if err != nil {
 		return fmt.Errorf("marshal credentials bindings %s: %w", path, err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*")
+	temp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*") // #nosec G304,G703 -- directory of a validated fixed candidate path
 	if err != nil {
 		return fmt.Errorf("create credentials bindings temp file %s: %w", path, err)
 	}
@@ -117,7 +117,7 @@ func pruneBindingsFile(path, name string) error {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close credentials bindings %s: %w", path, err)
 	}
-	if err := os.Rename(tempName, path); err != nil {
+	if err := os.Rename(tempName, path); err != nil { // #nosec G304,G703 -- atomic replace of the validated regular candidate file
 		return fmt.Errorf("replace credentials bindings %s: %w", path, err)
 	}
 	return nil

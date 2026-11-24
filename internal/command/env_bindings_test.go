@@ -149,6 +149,7 @@ func TestEnvironmentRemovePrunesBindingsAndSparesSbx(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	rheicDir := filepath.Join(home, ".config", "rheic")
 	sbxDir := filepath.Join(home, ".config", "sbx")
 	for _, dir := range []string{rheicDir, sbxDir} {

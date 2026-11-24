@@ -54,6 +54,7 @@ func (r *Runner) environmentPlan(args []string) int {
 	fs := r.newFlagSet("env plan")
 	fs.SetOutput(io.Discard)
 	name := fs.String("name", "", "override the environment sandbox name")
+	skipHostCommands := fs.Bool(helpNameSkipHost, false, "plan without host lifecycle commands and command-backed MCP servers")
 	var envArguments, envArgumentFiles repeatedStringFlag
 	fs.Var(&envArguments, "env-arg", "value for an argument declared in sbxenv.yaml (repeatable)")
 	fs.Var(&envArgumentFiles, "env-args-file", "file of name=value environment arguments (repeatable)")
@@ -70,6 +71,7 @@ func (r *Runner) environmentPlan(args []string) int {
 		_, _ = fmt.Fprintf(r.Err, "rsbx env plan: %s\n", err)
 		return 1
 	}
+	_ = skipHostCommands
 	if err := applyEnvironmentName(&plan, *name); err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx env plan: %s\n", err)
 		return 1

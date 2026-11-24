@@ -14,6 +14,7 @@ const (
 	helpNameQuiet       = "quiet"
 	helpNameMethod      = "method"
 	helpNameSandbox     = "sandbox"
+	helpNameSkipHost    = "skip-host-commands"
 	helpNameStringArray = "stringArray"
 	helpNameWrite       = "write"
 	helpNameRegistry    = "registry"
@@ -583,6 +584,7 @@ func envPlanHelp() commandHelp {
 			{Name: helpNameEnvArgsFile, Value: helpNameStringArray, Description: helpEnvArgsFileDescription},
 			{Short: "h", Name: helpCommand, Description: "help for env plan"},
 			{Name: helpNameName, Value: helpValueString, Description: "override the sandbox name"},
+			{Name: helpNameSkipHost, Description: "plan without host lifecycle commands and command-backed MCP servers"},
 		},
 	}
 }
@@ -600,6 +602,7 @@ func envCreateHelp() commandHelp {
 			{Short: "f", Name: helpNameForce, Description: helpApplyNoPrompt},
 			{Short: "h", Name: helpCommand, Description: "help for env create"},
 			{Name: helpNameName, Value: helpValueString, Description: helpEnvNameDescription},
+			{Name: helpNameSkipHost, Description: "skip host lifecycle commands and disable environment MCP commands until a later env run without this flag"},
 		},
 	}
 }
@@ -648,6 +651,7 @@ func envRunHelp() commandHelp {
 			{Short: "f", Name: helpNameForce, Description: helpApplyNoPrompt},
 			{Short: "h", Name: helpCommand, Description: "help for env run"},
 			{Name: helpNameName, Value: helpValueString, Description: helpEnvNameDescription},
+			{Name: helpNameSkipHost, Description: "skip host lifecycle commands and disable environment MCP commands until a later env run without this flag"},
 		},
 	}
 }
@@ -662,9 +666,11 @@ func envRemoveHelp() commandHelp {
 		Flags: []commandFlagHelp{
 			{Name: helpNameEnvArg, Value: helpNameStringArray, Description: helpEnvArgDescription},
 			{Name: helpNameEnvArgsFile, Value: helpNameStringArray, Description: helpEnvArgsFileDescription},
-			{Short: "f", Name: helpNameForce, Description: helpApplyNoPrompt},
+			{Short: "f", Name: helpNameForce, Description: "skip confirmation prompts and delete even if in use (e.g. an open SSH connection)"},
 			{Short: "h", Name: helpCommand, Description: "help for env rm"},
 			{Name: helpNameName, Value: helpValueString, Description: helpEnvNameDescription},
+			{Name: "prune-bindings", Description: "also remove this environment's bindings from the global credentials.yaml"},
+			{Name: helpNameSkipHost, Description: "skip host preRemove commands and disable owned host MCP commands; successful environment removal deletes their registrations"},
 		},
 	}
 }

@@ -231,7 +231,18 @@ func TestDiagnoseBundleCleanArchive(t *testing.T) {
 			normalized = entry.Value == "~/workspaces"
 		}
 	}
-	if !normalized {
+	if runtime.GOOS == "windows" {
+		// Documented fail-closed stance (settings_windows_test.go): Load
+		// refuses all files on Windows until ACL validation lands, so the
+		// config member must be empty with an explicit limit instead of
+		// containing normalized settings.
+		if len(config.Settings) != 0 {
+			t.Errorf("windows config settings must be empty under the fail-closed stance: %+v", config.Settings)
+		}
+		if !strings.Contains(strings.Join(manifest.Limits, "\n"), "config: settings unavailable") {
+			t.Errorf("missing settings limit under windows stance: %v", manifest.Limits)
+		}
+	} else if !normalized {
 		t.Errorf("home path not normalized: %+v", config.Settings)
 	}
 	if strings.Contains(string(members[bundleMemberConfig]), "/Users/testuser") {

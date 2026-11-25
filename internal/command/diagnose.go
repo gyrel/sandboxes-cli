@@ -27,16 +27,27 @@ const (
 	diagnoseWarn  = "warn"
 	diagnoseSkip  = "skip"
 	diagnoseUsage = `usage: rsbx diagnose [--format table|json|yaml|github-issue] [--json]
+       rsbx diagnose --bundle [--out PATH] [--sandbox NAME] [--since TIME]
+                     [--paranoid]
 
 Diagnose host installation, platform, storage and daemon connection checks.
 JSON and YAML use sbx's flat report schema: version, checks[] with name, status,
 message, detail and hint, plus a summary. github-issue emits a Markdown issue
 body with the JSON report embedded.
 
+Without --bundle the host report is printed. With --bundle, rsbx collects the
+same state plus bounded daemon data into a redacted .tar.gz archive instead.
+Secret values, workspace host paths and network rule targets are never written,
+and the finished archive is scanned with the redaction guard before it is
+published: any hit deletes the temporary archive and exits 1 without creating
+the output file. An existing --out target is never overwritten.
+
 Exit 0 when every check passes, warns or is skipped; unconfigured optional
 state such as a signed-out daemon is a warning. Exit 1 only when a check fails,
 for example when the daemon cannot be reached or the state directory is not
-writable.`
+writable. In bundle mode, exit 1 means the bundle was refused and no archive
+was written; the stderr lines name the rule, member, line and offset of each
+redaction hit without the matched data.`
 
 	diagnoseFormatGitHubIssue = "github-issue"
 	diagnoseReportVersion     = "1.0"
@@ -88,15 +99,44 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	fs.SetOutput(io.Discard)
 	jsonOutput := fs.Bool(listFormatJSON, false, "output in JSON format")
 	format := fs.String("format", listFormatTable, "output format: table, json, yaml or github-issue")
+	verify := fs.String("verify", "", "verify a diagnostic archive")
+	bundle := fs.Bool("bundle", false, "write a redacted diagnostic bundle archive instead of the host report")
+	out := fs.String("out", "", "bundle target path (default ./rheic-diagnose-<UTC timestamp>.tar.gz)")
+	sandbox := fs.String("sandbox", "", "limit the bundle to one sandbox name or id")
+	since := fs.String("since", "", "bundle daemon log tail cutoff: RFC 3339 time or positive duration")
+	paranoid := fs.Bool("paranoid", false, "hash sandbox and image names in the bundle")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return r.showCommandHelp(diagnoseHelp())
 		}
 		return r.flagParseFailure("diagnose", err)
 	}
+	if *verify != "" {
+		if fs.NArg() != 0 || *jsonOutput || *format != listFormatTable {
+			_, _ = fmt.Fprintln(r.Err, "error: --verify cannot be combined with report options")
+			return 2
+		}
+		if *bundle || diagnoseFlagsSet(fs, "out", "sandbox", "since", "paranoid") {
+			_, _ = fmt.Fprintln(r.Err, "error: --verify cannot be combined with bundle options")
+			return 2
+		}
+		return r.verifyDiagnoseBundle(*verify)
+	}
 	if fs.NArg() != 0 {
 		_, _ = fmt.Fprintln(r.Err, diagnoseUsage)
 		return 1
+	}
+	if *bundle {
+		return r.diagnoseBundle(ctx, fs, diagnoseBundleFlagInput{
+			outPath:  *out,
+			sandbox:  *sandbox,
+			since:    *since,
+			paranoid: *paranoid,
+		})
+	}
+	if diagnoseFlagsSet(fs, "out", "sandbox", "since", "paranoid") {
+		_, _ = fmt.Fprintln(r.Err, "error: --out, --sandbox, --since and --paranoid require --bundle")
+		return 2
 	}
 	selected, err := resolveDiagnoseFormat(fs, *format, *jsonOutput)
 	if err != nil {
@@ -109,6 +149,50 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 		return 1
 	}
 	return diagnoseExitCode(report)
+}
+
+type diagnoseBundleFlagInput struct {
+	outPath  string
+	sandbox  string
+	since    string
+	paranoid bool
+}
+
+func (r *Runner) diagnoseBundle(ctx context.Context, fs *flag.FlagSet, input diagnoseBundleFlagInput) int {
+	if diagnoseFlagsSet(fs, listFormatJSON, "format") {
+		_, _ = fmt.Fprintln(r.Err, "error: --bundle cannot be combined with --json or --format")
+		return 2
+	}
+	cutoff, err := parseDiagnoseSince(input.since, time.Now().UTC())
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	target, err := r.buildDiagnoseBundle(ctx, diagnoseBundleOptions{
+		outPath:  input.outPath,
+		sandbox:  input.sandbox,
+		since:    cutoff,
+		paranoid: input.paranoid,
+	})
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(r.Out, "bundle: %s\n", target)
+	return 0
+}
+
+// diagnoseFlagsSet reports whether any named flag was explicitly provided.
+func diagnoseFlagsSet(fs *flag.FlagSet, names ...string) bool {
+	var set bool
+	fs.Visit(func(f *flag.Flag) {
+		for _, name := range names {
+			if f.Name == name {
+				set = true
+			}
+		}
+	})
+	return set
 }
 
 func resolveDiagnoseFormat(fs *flag.FlagSet, format string, jsonOutput bool) (string, error) {

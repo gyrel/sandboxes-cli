@@ -66,23 +66,23 @@ func TestEventRowFromEventRendersAndSanitizes(t *testing.T) {
 	if row.Revision != 7 {
 		t.Fatalf("revision=%d", row.Revision)
 	}
-	if strings.ContainsRune(row.Type, 0x1b) {
-		t.Fatalf("type not sanitized: %q", row.Type)
+	if strings.ContainsRune(row.Event, 0x1b) {
+		t.Fatalf("event not sanitized: %q", row.Event)
 	}
-	if row.Sandbox != "dev" || row.State != "running" {
+	if row.Sandbox != "dev" || row.Correlation != "op-1" {
 		t.Fatalf("identity cells = %+v", row)
 	}
-	if !strings.Contains(row.Message, "pulling 3/7") {
-		t.Fatalf("message=%q", row.Message)
+	if row.Reason != "running" {
+		t.Fatalf("reason = %q", row.Reason)
 	}
-	for _, cell := range []string{row.Time, row.Type, row.Sandbox, row.Operation, row.State, row.Message} {
+	for _, cell := range []string{row.Time, row.Event, row.Correlation, row.Reason, row.Sandbox} {
 		if strings.Contains(cell, "/secret/path") {
 			t.Fatalf("host path leaked: %q", cell)
 		}
 	}
 	errEvent := sdk.Event{Type: "operation", Revision: 8, Operation: &sdk.Operation{ID: "op-2", Kind: "pull", Error: "boom"}}
-	if msg := eventRowFromEvent(errEvent).Message; !strings.Contains(msg, "boom") {
-		t.Fatalf("error message = %q", msg)
+	if reason := eventRowFromEvent(errEvent).Reason; !strings.Contains(reason, "boom") {
+		t.Fatalf("error reason = %q", reason)
 	}
 }
 

@@ -17,6 +17,7 @@ const (
 	modeList dashboardMode = iota
 	modeCreate
 	modeConfirmDelete
+	modeEventFilter
 )
 
 var createFormFields = []string{"NAME", "AGENT", "IMAGE", "POLICY PROFILE", "WORKSPACE"}

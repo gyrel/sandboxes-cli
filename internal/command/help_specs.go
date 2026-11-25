@@ -1642,6 +1642,18 @@ func tuiHelp() commandHelp {
 			{Short: "h", Name: helpCommand, Description: "help for tui"},
 			{Name: helpNameRefresh, Value: "duration", Description: "dashboard refresh interval (default 5s)"},
 		},
+		Footer: `Keys:
+  1/2/3 or Tab       switch panels (sandboxes, events, logs)
+  ↑/↓ or j/k         scroll the active panel or move the selection
+  n                  new sandbox
+  s / x              start / stop the selected sandbox
+  d                  remove the selected sandbox (list) or write a
+                     redacted diagnose bundle (events panel)
+  a                  attach hint
+  f                  filter events by correlation prefix (op_/req_) or
+                     any substring; Esc clears
+  r                  refresh the list or reconnect the active stream
+  q                  quit`,
 	}
 }
 

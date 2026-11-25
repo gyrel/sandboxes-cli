@@ -88,61 +88,107 @@ func (r *ringBuffer[T]) Dropped() int {
 // eventRow is one rendered dashboard event line. Every field is already
 // sanitized; raw payloads never reach the struct.
 type eventRow struct {
-	Time      string
-	Type      string
-	Sandbox   string
-	Operation string
-	State     string
-	Message   string
-	Revision  int64
+	Time        string
+	Event       string
+	Correlation string
+	Reason      string
+	Sandbox     string
+	Revision    int64
 }
 
 func eventRowFromEvent(event sdk.Event) eventRow {
 	row := eventRow{
 		Revision: event.Revision,
-		Type:     sanitizeTerminalText(event.Type),
 		Time:     fmt.Sprintf("rev %d", event.Revision),
-	}
-	if row.Type == "" {
-		row.Type = "event"
+		Event:    catalogEventName(event.Type),
 	}
 	if event.Sandbox != nil {
-		name := sanitizeTerminalText(event.Sandbox.Name)
-		if name == "" {
-			name = sanitizeTerminalText(event.Sandbox.ID)
-		}
-		row.Sandbox = name
-		row.State = sanitizeTerminalText(event.Sandbox.State)
+		row.Sandbox = sandboxLabel(event.Sandbox)
 	}
 	if event.Operation != nil {
-		applyOperationToRow(&row, event.Operation)
+		row.Correlation = sanitizeTerminalText(event.Operation.ID)
 	}
+	row.Reason = catalogEventReason(event)
 	return row
 }
 
-// applyOperationToRow fills the operation-derived cells with sanitized text.
-func applyOperationToRow(row *eventRow, op *sdk.Operation) {
-	label := sanitizeTerminalText(op.Kind)
-	if label == "" {
-		label = "operation"
+// catalogEventName normalizes a structured daemon catalog event type (rheic.*)
+// into a compact display name. Legacy type strings pass through unchanged and
+// an empty type renders as "event".
+func catalogEventName(eventType string) string {
+	name := sanitizeTerminalText(strings.TrimSpace(eventType))
+	switch {
+	case name == "":
+		return "event"
+	case strings.HasPrefix(name, "rheic."):
+		return strings.TrimPrefix(name, "rheic.")
+	default:
+		return name
 	}
-	if id := sanitizeTerminalText(op.ID); id != "" {
-		label += " " + id
+}
+
+// sandboxLabel returns the sandbox display name, falling back to its id.
+func sandboxLabel(sandbox *sdk.Sandbox) string {
+	if sandbox == nil {
+		return ""
 	}
-	row.Operation = strings.TrimSpace(label)
-	if row.State == "" {
-		row.State = sanitizeTerminalText(op.State)
+	name := sanitizeTerminalText(sandbox.Name)
+	if name == "" {
+		name = sanitizeTerminalText(sandbox.ID)
 	}
-	if op.Progress != nil {
-		p := op.Progress
-		row.Message = sanitizeTerminalText(fmt.Sprintf("%s %d/%d", p.Phase, p.Completed, p.Total))
-	}
-	if op.Error != "" {
-		if row.Message != "" {
-			row.Message += " "
+	return name
+}
+
+// catalogEventReason extracts the structured reason for an event: an operation
+// error, then an operation or sandbox state, and finally the advisory progress
+// message ("msg") as a fallback when no structured reason field is present.
+func catalogEventReason(event sdk.Event) string {
+	if event.Operation != nil {
+		if reason := sanitizeTerminalText(event.Operation.Error); reason != "" {
+			return reason
 		}
-		row.Message += sanitizeTerminalText(op.Error)
+		if state := sanitizeTerminalText(event.Operation.State); state != "" {
+			return state
+		}
 	}
+	if event.Sandbox != nil {
+		if state := sanitizeTerminalText(event.Sandbox.State); state != "" {
+			return state
+		}
+	}
+	return eventMessage(event)
+}
+
+// eventMessage composes the advisory progress/error message for an event.
+func eventMessage(event sdk.Event) string {
+	if event.Operation == nil {
+		return ""
+	}
+	message := ""
+	if event.Operation.Progress != nil {
+		p := event.Operation.Progress
+		message = sanitizeTerminalText(fmt.Sprintf("%s %d/%d", p.Phase, p.Completed, p.Total))
+	}
+	if event.Operation.Error != "" {
+		if message != "" {
+			message += " "
+		}
+		message += sanitizeTerminalText(event.Operation.Error)
+	}
+	return message
+}
+
+// eventRowMatches reports whether the row matches the live filter. The filter
+// is pure display: it matches any substring of the rendered cells and is never
+// a security boundary.
+func eventRowMatches(row eventRow, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	haystack := strings.Join([]string{
+		row.Time, row.Event, row.Correlation, row.Reason, row.Sandbox,
+	}, " ")
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(filter))
 }
 
 // logRingWriter splits an exec stream into sanitized ring lines, flushing an
@@ -363,6 +409,7 @@ func drawEventPanel(screen dashboardScreen, model *dashboardModel, x, width, hei
 	for _, event := range ring.Snapshot() {
 		rows = append(rows, eventRowFromEvent(event))
 	}
+	rows = filterEventRows(rows, model.eventFilter)
 	visible := max(height-16, 1)
 	start := max(len(rows)-visible, 0)
 	start = max(start-model.eventScroll, 0)
@@ -372,14 +419,28 @@ func drawEventPanel(screen dashboardScreen, model *dashboardModel, x, width, hei
 		if y >= height-4 {
 			break
 		}
-		line := fmt.Sprintf("%-6s %-8s %-14s %-18s %-10s %s",
-			clipCell(row.Time, 6), clipCell(row.Type, 8), clipCell(row.Sandbox, 14),
-			clipCell(row.Operation, 18), clipCell(row.State, 10), clipCell(row.Message, max(width-x-70, 4)))
+		line := fmt.Sprintf("%-6s %-18s %-12s %-14s %s",
+			clipCell(row.Time, 6), clipCell(row.Event, 18), clipCell(row.Correlation, 12),
+			clipCell(row.Sandbox, 14), clipCell(row.Reason, max(width-x-58, 4)))
 		drawText(screen, x, y, sanitizeTerminalText(line), primary, width-x-2)
 	}
 	if ring.Dropped() > 0 {
 		drawText(screen, x, height-4, fmt.Sprintf("dropped %d events", ring.Dropped()), muted, width-x-2)
 	}
+}
+
+// filterEventRows applies the live display filter to rendered event rows.
+func filterEventRows(rows []eventRow, filter string) []eventRow {
+	if filter == "" {
+		return rows
+	}
+	filtered := make([]eventRow, 0, len(rows))
+	for _, row := range rows {
+		if eventRowMatches(row, filter) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
 }
 
 func drawLogPanel(screen dashboardScreen, model *dashboardModel, x, width, height int, primary, muted tcell.Style) {

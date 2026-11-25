@@ -74,6 +74,19 @@ type dashboardModel struct {
 	// Scroll offsets.
 	eventScroll int
 	logScroll   int
+
+	// Events panel live display filter (f key). It is pure display: it never
+	// gates data access and is never a security boundary.
+	eventFilter string
+
+	// pendingApprovals is the count of pending host approvals shown in the
+	// footer. -1 means the count is unknown (the approvals call errored) and
+	// the indicator is hidden silently.
+	pendingApprovals int
+
+	// diagnoseBundle runs the redacted diagnostic bundle in-process for the
+	// d hotkey. It is injected by the Runner in production and faked in tests.
+	diagnoseBundle diagnoseRunFunc
 }
 
 func (r *Runner) tui(ctx context.Context, args []string) int {
@@ -104,7 +117,7 @@ func (r *Runner) tui(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(r.Err, "rsbx tui: terminal initialization failed: %v\n", err)
 		return 1
 	}
-	return runDashboard(ctx, screen, client, refreshEvery)
+	return runDashboard(ctx, screen, client, refreshEvery, r)
 }
 
 func (r *Runner) parseTUIOptions(args []string) (time.Duration, bool, error) {
@@ -126,10 +139,13 @@ func (r *Runner) parseTUIOptions(args []string) (time.Duration, bool, error) {
 	return *refresh, false, nil
 }
 
-func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client, refreshEvery time.Duration) int {
+func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client, refreshEvery time.Duration, runner *Runner) int {
 	defer screen.Fini()
 	screen.SetTitle("RHEIC | Sandboxes")
 	model := &dashboardModel{}
+	if runner != nil {
+		model.diagnoseBundle = runner.diagnoseRun
+	}
 	defer func() {
 		model.stopEventStream()
 		model.stopLogsStream()
@@ -224,8 +240,44 @@ func dashboardKey(event *tcell.EventKey, model *dashboardModel, ctx context.Cont
 		return false
 	case modeConfirmDelete:
 		return dashboardKeyConfirmDelete(event, model, ctx, client)
+	case modeEventFilter:
+		dashboardKeyEventFilter(event, model)
+		return false
 	}
 	return dashboardKeyList(event, model, ctx, client)
+}
+
+// dashboardKeyEventFilter handles the live events filter input. Esc clears the
+// filter, Enter keeps it and returns to the panel, and backspace edits it.
+func dashboardKeyEventFilter(event *tcell.EventKey, model *dashboardModel) {
+	switch {
+	case event.Key() == tcell.KeyEscape:
+		model.eventFilter = ""
+		model.mode = modeList
+	case event.Key() == tcell.KeyEnter:
+		model.mode = modeList
+	case event.Key() == tcell.KeyBackspace || event.Key() == tcell.KeyBackspace2:
+		model.filterBackspace()
+	case event.Key() == tcell.KeyRune:
+		model.filterInsert(event.Str())
+	}
+}
+
+// filterInsert appends sanitized text to the live filter, capped for display.
+func (m *dashboardModel) filterInsert(text string) {
+	if m == nil || text == "" || len(m.eventFilter)+len(text) > 64 {
+		return
+	}
+	m.eventFilter += sanitizeTerminalText(text)
+}
+
+// filterBackspace removes the last rune of the live filter.
+func (m *dashboardModel) filterBackspace() {
+	if m == nil || m.eventFilter == "" {
+		return
+	}
+	runes := []rune(m.eventFilter)
+	m.eventFilter = string(runes[:len(runes)-1])
 }
 
 // dashboardKeyConfirmDelete handles the delete confirmation prompt.
@@ -297,8 +349,8 @@ func dashboardPanelSwitchKey(event *tcell.EventKey, model *dashboardModel, ctx c
 	return true
 }
 
-// dashboardAuxPanelKey handles scroll and reconnect inside the events and
-// logs panels.
+// dashboardAuxPanelKey handles scroll, reconnect and the events-panel filter
+// and diagnose-bundle hotkeys inside the events and logs panels.
 func dashboardAuxPanelKey(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) {
 	events := model.panel == dashboardPanelEvents
 	switch {
@@ -316,6 +368,11 @@ func dashboardAuxPanelKey(event *tcell.EventKey, model *dashboardModel, ctx cont
 		}
 		model.stopLogsStream()
 		model.startLogsStream(ctx, client, model.selectedSandboxID())
+	case events && (event.Str() == "f" || event.Str() == "F"):
+		model.mode = modeEventFilter
+		model.eventFilter = ""
+	case events && (event.Str() == "d" || event.Str() == "D"):
+		model.runDiagnoseBundle(ctx)
 	}
 }
 
@@ -366,6 +423,25 @@ func refreshDashboard(ctx context.Context, client sdk.Client, model *dashboardMo
 	if model.selected >= len(items) {
 		model.selected = max(0, len(items)-1)
 	}
+	model.refreshPendingApprovals(callCtx, client)
+}
+
+// refreshPendingApprovals updates the pending approvals count, hiding the
+// indicator silently when the approvals list call errors. The count is the
+// only value surfaced; approval ids and boundaries are never rendered.
+func (m *dashboardModel) refreshPendingApprovals(ctx context.Context, client sdk.Client) {
+	if m == nil {
+		return
+	}
+	m.pendingApprovals = -1
+	if client == nil {
+		return
+	}
+	items, err := sdk.Approvals(client).ListApprovals(ctx, "")
+	if err != nil {
+		return
+	}
+	m.pendingApprovals = len(items)
 }
 
 func drawDashboard(screen dashboardScreen, model *dashboardModel) {
@@ -404,6 +480,10 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 		if detailX < width-22 {
 			drawText(screen, detailX, 11, "EVENT TAIL", muted, width-detailX-2)
 			drawText(screen, detailX, 13, fmt.Sprintf("%d buffered (max %d)", model.events().Len(), dashboardEventLimit), primary, width-detailX-2)
+			drawText(screen, detailX, 15, "f filter · d diagnose bundle", muted, width-detailX-2)
+			if model.eventFilter != "" {
+				drawText(screen, detailX, 17, "filter: "+sanitizeTerminalText(model.eventFilter), accent, width-detailX-2)
+			}
 		}
 	default:
 		drawText(screen, 3, 11, "LOGS", muted, leftWidth-4)
@@ -462,6 +542,9 @@ func drawDashboardFooter(screen dashboardScreen, model *dashboardModel, width, h
 		drawText(screen, 3, height-3, "DAEMON  "+clipCell(model.err, width-13), warm, width-6)
 	} else {
 		status := fmt.Sprintf("%d SANDBOXES", len(model.items))
+		if model.pendingApprovals >= 0 {
+			status += fmt.Sprintf("   %d PENDING APPROVALS", model.pendingApprovals)
+		}
 		if !model.updated.IsZero() {
 			status += "   UPDATED " + model.updated.Format("15:04:05")
 		}
@@ -480,8 +563,23 @@ func drawDashboardFooter(screen dashboardScreen, model *dashboardModel, width, h
 			prompt := "Remove " + model.items[model.selected].Name + "? Sandbox files on the host are kept. [y/N]"
 			drawText(screen, 3, height-5, clipCell(prompt, width-6), warm.Bold(true), width-6)
 		}
+	case modeEventFilter:
+		prompt := "filter: " + model.eventFilter
+		drawText(screen, 3, height-5, clipCell(prompt, width-6), accent.Bold(true), width-6)
 	}
-	drawText(screen, 3, height-2, "1/2/3 or Tab panels   ↑/↓ or j/k  scroll/move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit", accent, width-6)
+	drawText(screen, 3, height-2, dashboardKeyHints(model.panel), accent, width-6)
+}
+
+// dashboardKeyHints returns the footer key hint line for the active panel.
+func dashboardKeyHints(panel dashboardPanel) string {
+	switch panel {
+	case dashboardPanelEvents:
+		return "1/2/3 or Tab panels   ↑/↓ or j/k  scroll   f  filter   d  diagnose bundle   r  reconnect   q  quit"
+	case dashboardPanelLogs:
+		return "1/2/3 or Tab panels   ↑/↓ or j/k  scroll   r  reconnect   q  quit"
+	default:
+		return "1/2/3 or Tab panels   ↑/↓ or j/k  scroll/move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit"
+	}
 }
 
 // drawCreateForm renders the create-flow landing form.

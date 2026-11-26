@@ -2,6 +2,7 @@ package kit
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -179,6 +180,20 @@ func writeZipMember(archive *zip.Writer, member Entry) error {
 	if err != nil {
 		return fmt.Errorf("add kit file: %w", err)
 	}
+	if member.Name == kitSpecFile {
+		data, err := io.ReadAll(io.LimitReader(source, maxArtifactFileBytes+1))
+		if err != nil {
+			return fmt.Errorf("read kit file: %w", err)
+		}
+		if len(data) > maxArtifactFileBytes {
+			return fmt.Errorf("file exceeds %d MiB", maxArtifactFileBytes>>20)
+		}
+		data = normalizeSpecAPIVersion(data)
+		if _, err := writer.Write(data); err != nil {
+			return fmt.Errorf("write kit file: %w", err)
+		}
+		return nil
+	}
 	written, err := io.Copy(writer, io.LimitReader(source, maxArtifactFileBytes+1))
 	if err != nil {
 		return fmt.Errorf("read kit file: %w", err)
@@ -187,6 +202,13 @@ func writeZipMember(archive *zip.Writer, member Entry) error {
 		return fmt.Errorf("file exceeds %d MiB", maxArtifactFileBytes>>20)
 	}
 	return nil
+}
+
+// normalizeSpecAPIVersion rewrites a legacy apiVersion so every packed archive
+// ships gyrel.dev/v1alpha1. It only touches the deprecated value; a canonical
+// spec passes through unchanged.
+func normalizeSpecAPIVersion(data []byte) []byte {
+	return bytes.ReplaceAll(data, []byte(APIVersionLegacy), []byte(APIVersion))
 }
 
 // verifyUnchanged refuses to pack a file that was swapped after the scan, for

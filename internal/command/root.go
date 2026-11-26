@@ -142,6 +142,7 @@ func (r *Runner) Run(ctx context.Context, args []string) (code int) {
 	// Debug is invocation-scoped output selection, not sticky Runner state.
 	// Reset it so a reused Runner cannot carry -D into an unrelated command.
 	r.beginDebug()
+	kit.ResetDeprecations()
 	command := ""
 	started := time.Now()
 	defer func() {
@@ -150,6 +151,11 @@ func (r *Runner) Run(ctx context.Context, args []string) (code int) {
 				debugCommandField(command),
 				debugNumber("exit_code", code),
 				debugDuration("duration_ms", time.Since(started)))
+		}
+	}()
+	defer func() {
+		if warning := kit.ConsumeDeprecations(); warning != "" {
+			_, _ = fmt.Fprintf(r.Err, "warning: %s\n", warning)
 		}
 	}()
 

@@ -391,7 +391,11 @@ special files fail closed.
 checks. `--json`/`--format json|yaml` emit sbx's flat `version`, `checks[]`
 (`name`, `status`, `message`, `detail`, `hint`) and `summary` schema, and
 `--format github-issue` prints a Markdown issue body with the JSON report
-embedded. Warnings and skipped checks exit 0; a signed-out daemon is a warning
+embedded. `--bundle` writes a redacted archive; in its daemon log tail,
+absolute paths with three or more segments are hashed as
+`path_sha256:<12 hex>` so the same path stays comparable across logs without
+revealing user topology (short paths and `scheme://` URLs are not rewritten).
+Warnings and skipped checks exit 0; a signed-out daemon is a warning
 because the installation is unconfigured rather than broken. Only failed
 checks, such as an unreachable daemon or an unwritable state directory, exit 1.
 `rsbx stop`, `rm` and `prune` accept `--format table|json|yaml` and

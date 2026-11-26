@@ -37,10 +37,13 @@ body with the JSON report embedded.
 
 Without --bundle the host report is printed. With --bundle, rsbx collects the
 same state plus bounded daemon data into a redacted .tar.gz archive instead.
-Secret values, workspace host paths and network rule targets are never written,
-and the finished archive is scanned with the redaction guard before it is
-published: any hit deletes the temporary archive and exits 1 without creating
-the output file. An existing --out target is never overwritten.
+Secret values, workspace host paths and network rule targets are never written.
+Absolute paths with three or more segments in the daemon log tail are hashed as
+path_sha256:<12 hex> so logs stay comparable without revealing user topology;
+short paths and scheme:// URLs are not rewritten. The finished archive is
+scanned with the redaction guard before it is published: any hit deletes the
+temporary archive and exits 1 without creating the output file. An existing
+--out target is never overwritten.
 
 Exit 0 when every check passes, warns or is skipped; unconfigured optional
 state such as a signed-out daemon is a warning. Exit 1 only when a check fails,

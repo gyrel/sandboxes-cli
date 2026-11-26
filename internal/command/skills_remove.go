@@ -11,8 +11,8 @@ import (
 
 const skillsRemoveUsage = `usage: rsbx skills rm [--force] NAME
 
-Remove one skill that Rheic imported. Directories in the skills store that are
-not recorded in Rheic's registry are never removed. Without --force, an
+Remove one skill that Gyrel imported. Directories in the skills store that are
+not recorded in Gyrel's registry are never removed. Without --force, an
 interactive terminal confirmation is required.
 `
 
@@ -51,7 +51,7 @@ func (r *Runner) removeManagedSkill(ctx context.Context, name string, force bool
 	}
 	root, err := openSkillsRoot(paths, false)
 	if errors.Is(err, errSkillsRootMissing) {
-		_, _ = fmt.Fprintf(r.Err, "skills rm: skill %q is not managed by Rheic\n", sanitizeSkillErrorText(name))
+		_, _ = fmt.Fprintf(r.Err, "skills rm: skill %q is not managed by Gyrel\n", sanitizeSkillErrorText(name))
 		return 1
 	}
 	if err != nil {
@@ -71,7 +71,7 @@ func (r *Runner) removeManagedSkill(ctx context.Context, name string, force bool
 		return 1
 	}
 	if _, managed := registryEntry(registry, name); !managed {
-		_, _ = fmt.Fprintf(r.Err, "skills rm: skill %q is not managed by Rheic; refusing to remove it\n", sanitizeSkillErrorText(name))
+		_, _ = fmt.Fprintf(r.Err, "skills rm: skill %q is not managed by Gyrel; refusing to remove it\n", sanitizeSkillErrorText(name))
 		return 1
 	}
 	store, err := openSkillsStore(root)

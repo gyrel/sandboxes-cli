@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const argKitSpec = `schemaVersion: "3"
@@ -191,7 +191,7 @@ func TestCreateKitArgumentsRefuseBuilderOnlyKits(t *testing.T) {
 }
 
 func TestCreateKitArgumentsRejectedForV2Kit(t *testing.T) {
-	dir := writeArgKit(t, "apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata: {name: argkit}\nspec:\n  agent: shell\n")
+	dir := writeArgKit(t, "apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata: {name: argkit}\nspec:\n  agent: shell\n")
 	code, _, output := runCreateWithKit(t, "shell", t.TempDir(), "--kit", dir, "--kit-arg", "region=eu")
 	if code == 0 || !strings.Contains(output, `kit argument "region" is not declared by this kit`) {
 		t.Fatalf("exit=%d output=%q", code, output)

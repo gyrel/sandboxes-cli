@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/rheic/sandboxes-cli/internal/envfile"
+	"github.com/gyrel/sandboxes-cli/internal/envfile"
 )
 
 const previewDefault = "default"

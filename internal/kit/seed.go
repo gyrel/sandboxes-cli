@@ -13,15 +13,18 @@ import (
 )
 
 // SeedCacheRoot returns the host cache for kit workspace seeds.
+//
+// legacy-compat: the "rheic" cache directory is retained (not renamed to
+// "gyrel") so existing kit seed caches stay valid without a re-clone.
 func SeedCacheRoot() string {
 	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
-		return filepath.Join(dir, "rheic", "kits")
+		return filepath.Join(dir, "rheic", "kits") // legacy-compat dir name
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".cache", "rheic", "kits")
+	return filepath.Join(home, ".cache", "rheic", "kits") // legacy-compat dir name
 }
 
 // ResolveSeed clones seed once into a deterministic host cache and returns the

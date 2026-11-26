@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
-const kitArtifactGoodSpec = "apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: good-kit\nspec:\n  agent: shell\n"
+const kitArtifactGoodSpec = "apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: good-kit\nspec:\n  agent: shell\n"
 
 const kitArtifactArgsSpec = "# syntax=docker/sandbox-kit:3\nschemaVersion: \"3\"\nkind: mixin\nargs:\n  region:\n    required: true\n    enum: [eu, us]\n"
 

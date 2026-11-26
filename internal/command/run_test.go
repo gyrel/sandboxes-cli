@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 type runClient struct {
@@ -281,7 +281,7 @@ func TestRunCloneRefreshesEndpointAfterStartBeforeAttaching(t *testing.T) {
 		t.Fatalf("stop reconciliation failed: %v", err)
 	}
 	if got := gitConfigValues(t, configPath, "remote.sandbox-dev.url"); len(got) != 1 || got[0] != values[0] {
-		t.Fatalf("stop removed or changed the Rheic-owned remote: %#v", got)
+		t.Fatalf("stop removed or changed the Gyrel-owned remote: %#v", got)
 	}
 }
 
@@ -318,7 +318,7 @@ func TestRunCloneUnreachableEndpointLeavesGitConfigUntouched(t *testing.T) {
 
 func TestRunKitRequestsHostOpenAIOAuthAndAddsProxyReference(t *testing.T) {
 	kitPath := filepath.Join(t.TempDir(), "codex-oauth.yaml")
-	kitBody := `apiVersion: rheic.dev/v1alpha1
+	kitBody := `apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: codex-oauth}
 spec:
@@ -345,7 +345,7 @@ spec:
 	if len(sandboxes.created.OAuthCredentials) != 0 {
 		t.Fatalf("fixed OpenAI provider config must stay daemon-managed: %#v", sandboxes.created.OAuthCredentials)
 	}
-	if !reflect.DeepEqual(sessions.req.Env, []string{"OPENAI_API_KEY=${oauth:openai}", "CODEX_API_KEY=rheic-proxy-placeholder"}) {
+	if !reflect.DeepEqual(sessions.req.Env, []string{"OPENAI_API_KEY=${oauth:openai}", "CODEX_API_KEY=gyrel-proxy-placeholder"}) {
 		t.Fatalf("agent env=%q", sessions.req.Env)
 	}
 	if len(sessions.req.Argv) < 3 || sessions.req.Argv[0] != "codex" || sessions.req.Argv[1] != "-c" || sessions.req.Argv[2] != "openai_base_url=http://127.0.0.1:3128/backend-api/codex" {
@@ -424,28 +424,28 @@ func TestAgentSpecificProviderSecretsActivateOnlyFixedProxyRoutes(t *testing.T) 
 			name: "copilot", service: githubService,
 			want: map[string]string{
 				"GH_TOKEN":                       "${proxy:github}",
-				"RHEIC_PROXY_GITHUB_WEB":         "${proxy:github-web}",
-				"RHEIC_PROXY_GITHUB_RAW":         "${proxy:github-raw}",
-				"RHEIC_PROXY_GITHUB_GIST":        "${proxy:github-gist}",
-				"RHEIC_PROXY_GITHUB_COPILOT":     "${proxy:github-copilot}",
-				"RHEIC_PROXY_GITHUB_COPILOT_API": "${proxy:github-copilot-api}",
+				"GYREL_PROXY_GITHUB_WEB":         "${proxy:github-web}",
+				"GYREL_PROXY_GITHUB_RAW":         "${proxy:github-raw}",
+				"GYREL_PROXY_GITHUB_GIST":        "${proxy:github-gist}",
+				"GYREL_PROXY_GITHUB_COPILOT":     "${proxy:github-copilot}",
+				"GYREL_PROXY_GITHUB_COPILOT_API": "${proxy:github-copilot-api}",
 			},
 		},
 		{
 			name: "cursor", service: cursorService,
 			want: map[string]string{
 				"CURSOR_API_KEY":            "${proxy:cursor}",
-				"RHEIC_PROXY_CURSOR_API3":   "${proxy:cursor-api3}",
-				"RHEIC_PROXY_CURSOR_REPO42": "${proxy:cursor-repo42}",
-				"RHEIC_PROXY_CURSOR_WEB":    "${proxy:cursor-web}",
+				"GYREL_PROXY_CURSOR_API3":   "${proxy:cursor-api3}",
+				"GYREL_PROXY_CURSOR_REPO42": "${proxy:cursor-repo42}",
+				"GYREL_PROXY_CURSOR_WEB":    "${proxy:cursor-web}",
 			},
 		},
 		{
 			name: "droid", service: droidService,
 			want: map[string]string{
 				"FACTORY_API_KEY":         "${proxy:droid}",
-				"RHEIC_PROXY_DROID_APP":   "${proxy:droid-app}",
-				"RHEIC_PROXY_DROID_RELAY": "${proxy:droid-relay}",
+				"GYREL_PROXY_DROID_APP":   "${proxy:droid-app}",
+				"GYREL_PROXY_DROID_RELAY": "${proxy:droid-relay}",
 			},
 		},
 	}

@@ -1,4 +1,4 @@
-//go:build darwin && arm64 && rheic_p04_cli_live
+//go:build darwin && arm64 && gyrel_p04_cli_live
 
 package command
 
@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const p04CLISyntheticSecret = "rheic-p04-cli-synthetic-credential"
+const p04CLISyntheticSecret = "gyrel-p04-cli-synthetic-credential"
 
 func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	inputs := getP04CLIInputs(t)
@@ -183,7 +183,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 		_, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "run", "--detach", "--name", name, "--image", inputs.image, "--env", "OPENAI_API_KEY=${proxy:openai}", "shell", workspace)
 		return err
 	}
-	checkEnv := `test "$OPENAI_API_KEY" = rheic-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
+	checkEnv := `test "$OPENAI_API_KEY" = gyrel-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
 	execWithProxyEnv := func() (string, error) {
 		return runP04CLI(ctx, cliPath, cliSocket, cliEnv, "exec", "--env", "OPENAI_API_KEY=${proxy:openai}", name, "/bin/sh", "-c", checkEnv)
 	}
@@ -368,16 +368,16 @@ func getP04CLIInputs(t *testing.T) p04CLIInputs {
 		}
 		return value
 	}
-	image := os.Getenv("RHEIC_P04_IMAGE")
+	image := os.Getenv("GYREL_P04_IMAGE")
 	if image == "" {
 		image = "docker.io/library/alpine:3.22"
 	}
 	return p04CLIInputs{
-		containerd: get("RHEIC_P04_CONTAINERD"), ctr: get("RHEIC_P04_CTR"),
-		shim: get("RHEIC_P04_SHIM"), kernel: get("RHEIC_P04_KERNEL"),
-		rootfs: get("RHEIC_P04_ROOTFS"), helper: get("RHEIC_P04_HELPER"),
-		libkrun: get("RHEIC_P04_LIBKRUN"), gvproxy: get("RHEIC_P04_GVPROXY"),
-		daemon: get("RHEIC_P04_DAEMON"), image: image,
+		containerd: get("GYREL_P04_CONTAINERD"), ctr: get("GYREL_P04_CTR"),
+		shim: get("GYREL_P04_SHIM"), kernel: get("GYREL_P04_KERNEL"),
+		rootfs: get("GYREL_P04_ROOTFS"), helper: get("GYREL_P04_HELPER"),
+		libkrun: get("GYREL_P04_LIBKRUN"), gvproxy: get("GYREL_P04_GVPROXY"),
+		daemon: get("GYREL_P04_DAEMON"), image: image,
 	}
 }
 
@@ -474,11 +474,11 @@ func execP04CLIInGuest(ctx context.Context, ctrPath, containerdSocket, fifoDir, 
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return "", err
 	}
-	execID := "rheic-p04-probe-" + hex.EncodeToString(nonce[:])
+	execID := "gyrel-p04-probe-" + hex.EncodeToString(nonce[:])
 	args := make([]string, 0, 11+len(argv))
 	args = append(args,
-		"--address", containerdSocket, "--namespace", "rheic", "tasks", "exec",
-		"--exec-id", execID, "--fifo-dir", fifoDir, "rheic-"+sandboxName,
+		"--address", containerdSocket, "--namespace", "gyrel", "tasks", "exec",
+		"--exec-id", execID, "--fifo-dir", fifoDir, "gyrel-"+sandboxName,
 	)
 	args = append(args, argv...)
 	cmd := exec.CommandContext(ctx, ctrPath, args...)
@@ -499,7 +499,7 @@ func requestP04CLIBrokerToken(ctx context.Context, socket string) error {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker/__rheic/proxy/token", http.NoBody)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker/__gyrel/proxy/token", http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -526,7 +526,7 @@ func removeP04CLISecret(ctx context.Context, binary, socket string, env []string
 		return nil
 	}
 	account := "openai/sandbox/" + sandboxName
-	security := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", "com.rheic.service-secrets.v1", "-a", account)
+	security := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", "com.gyrel.service-secrets.v1", "-a", account)
 	if output, fallbackErr := security.CombinedOutput(); fallbackErr != nil {
 		return fmt.Errorf("daemon cleanup failed: %w; keychain cleanup failed: %w: %s", err, fallbackErr, output)
 	}
@@ -556,8 +556,8 @@ func cleanupP04CLIResources(ctx context.Context, binary, socket string, env []st
 }
 
 func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sandboxName string) error {
-	containerID := "rheic-" + sandboxName
-	containers, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "rheic", "containers", "list", "-q").Output()
+	containerID := "gyrel-" + sandboxName
+	containers, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "gyrel", "containers", "list", "-q").Output()
 	if err != nil {
 		return fmt.Errorf("list owned containerd containers: %w", err)
 	}
@@ -571,7 +571,7 @@ func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sand
 	if !found {
 		return nil
 	}
-	tasks, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "rheic", "tasks", "list", "-q").Output()
+	tasks, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "gyrel", "tasks", "list", "-q").Output()
 	if err != nil {
 		return fmt.Errorf("list owned containerd tasks: %w", err)
 	}
@@ -579,17 +579,17 @@ func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sand
 		if id != containerID {
 			continue
 		}
-		kill := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "rheic", "tasks", "kill", "--signal", "SIGKILL", containerID)
+		kill := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "gyrel", "tasks", "kill", "--signal", "SIGKILL", containerID)
 		if output, err := kill.CombinedOutput(); err != nil {
 			return fmt.Errorf("kill owned task: %w: %s", err, output)
 		}
-		removeTask := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "rheic", "tasks", "delete", containerID)
+		removeTask := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "gyrel", "tasks", "delete", containerID)
 		if output, err := removeTask.CombinedOutput(); err != nil {
 			return fmt.Errorf("delete owned task: %w: %s", err, output)
 		}
 		break
 	}
-	removeContainer := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "rheic", "containers", "delete", containerID)
+	removeContainer := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "gyrel", "containers", "delete", containerID)
 	if output, err := removeContainer.CombinedOutput(); err != nil {
 		return fmt.Errorf("delete owned container: %w: %s", err, output)
 	}

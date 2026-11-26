@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/gdamore/tcell/v3"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const (
@@ -112,7 +112,7 @@ func eventRowFromEvent(event sdk.Event) eventRow {
 	return row
 }
 
-// catalogEventName normalizes a structured daemon catalog event type (rheic.*)
+// catalogEventName normalizes a structured daemon catalog event type (gyrel.*)
 // into a compact display name. Legacy type strings pass through unchanged and
 // an empty type renders as "event".
 func catalogEventName(eventType string) string {
@@ -120,8 +120,8 @@ func catalogEventName(eventType string) string {
 	switch {
 	case name == "":
 		return "event"
-	case strings.HasPrefix(name, "rheic."):
-		return strings.TrimPrefix(name, "rheic.")
+	case strings.HasPrefix(name, "gyrel."):
+		return strings.TrimPrefix(name, "gyrel.")
 	default:
 		return name
 	}

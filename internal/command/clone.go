@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const (
@@ -397,6 +397,17 @@ func cloneConfigKey(remote, key string) string {
 	return "remote." + remote + "." + key
 }
 
+// cloneManagedByKey and cloneLastURLKey are the git config keys the CLI writes
+// into a cloned repository's .git/config to track which sandbox manages it.
+//
+// legacy-compat: the "rheic-" prefix is retained (not renamed to "gyrel-") so
+// existing cloned repositories keep their management/cleanup bookkeeping
+// without a rewrite of every user's git config.
+const (
+	cloneManagedByKey = "rheic-managed-by"
+	cloneLastURLKey   = "rheic-last-url"
+)
+
 // cloneSandboxName derives the sandbox name from its managed remote name. The
 // remote name is always "sandbox-<name>", which is also the namespace Docker
 // sbx v0.50.1 uses for the fetched-branch mirror.
@@ -470,10 +481,10 @@ func gitRemoteExists(ctx context.Context, configPath, remote string, run gitConf
 			ownedFetch[refspec] = true
 		}
 		allowed := map[string]bool{
-			cloneConfigKey(remote, "url"):              true,
-			cloneConfigKey(remote, "rheic-managed-by"): true,
-			cloneConfigKey(remote, "rheic-last-url"):   true,
-			fetchKey:                                   true,
+			cloneConfigKey(remote, "url"):             true,
+			cloneConfigKey(remote, cloneManagedByKey): true,
+			cloneConfigKey(remote, cloneLastURLKey):   true,
+			fetchKey:                                  true,
 		}
 		for _, line := range strings.Split(output, "\n") {
 			fields := strings.Fields(line)
@@ -529,10 +540,10 @@ func reconcileCloneRemoteLocked(ctx context.Context, configPath, remote, sandbox
 }
 
 func createCloneRemote(ctx context.Context, configPath, remote, sandboxID, url string, run gitConfigCommand) error {
-	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-managed-by"), sandboxID, run); err != nil {
+	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, cloneManagedByKey), sandboxID, run); err != nil {
 		return err
 	}
-	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-last-url"), url, run); err != nil {
+	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, cloneLastURLKey), url, run); err != nil {
 		return err
 	}
 	if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "url"), url, run); err != nil {
@@ -553,7 +564,7 @@ func updateCloneRemote(ctx context.Context, configPath, remote, sandboxID, url s
 		if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "url"), url, run); err != nil {
 			return err
 		}
-		if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-last-url"), url, run); err != nil {
+		if err := setGitConfig(ctx, configPath, cloneConfigKey(remote, cloneLastURLKey), url, run); err != nil {
 			return err
 		}
 	}
@@ -617,7 +628,7 @@ func removeCloneRemoteLocked(ctx context.Context, configPath, remote, sandboxID 
 		}
 	}
 	if ownership.hasLastURL {
-		if err := unsetGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-last-url"), run); err != nil {
+		if err := unsetGitConfig(ctx, configPath, cloneConfigKey(remote, cloneLastURLKey), run); err != nil {
 			return err
 		}
 	}
@@ -625,7 +636,7 @@ func removeCloneRemoteLocked(ctx context.Context, configPath, remote, sandboxID 
 	if err := unsetCloneFetchRefspecs(ctx, configPath, fetchKey, run); err != nil {
 		return err
 	}
-	return unsetGitConfig(ctx, configPath, cloneConfigKey(remote, "rheic-managed-by"), run)
+	return unsetGitConfig(ctx, configPath, cloneConfigKey(remote, cloneManagedByKey), run)
 }
 
 func unsetCloneFetchRefspecs(ctx context.Context, configPath, fetchKey string, run gitConfigCommand) error {
@@ -645,11 +656,11 @@ type cloneRemoteOwnership struct {
 }
 
 func loadCloneRemoteOwnership(ctx context.Context, configPath, remote string, run gitConfigCommand) (cloneRemoteOwnership, error) {
-	owner, hasOwner, err := gitConfigGet(ctx, configPath, cloneConfigKey(remote, "rheic-managed-by"), run)
+	owner, hasOwner, err := gitConfigGet(ctx, configPath, cloneConfigKey(remote, cloneManagedByKey), run)
 	if err != nil {
 		return cloneRemoteOwnership{}, err
 	}
-	lastURL, hasLastURL, err := gitConfigGet(ctx, configPath, cloneConfigKey(remote, "rheic-last-url"), run)
+	lastURL, hasLastURL, err := gitConfigGet(ctx, configPath, cloneConfigKey(remote, cloneLastURLKey), run)
 	if err != nil {
 		return cloneRemoteOwnership{}, err
 	}
@@ -801,7 +812,7 @@ func readRootGitConfig(root *os.Root, name string) ([]byte, error) {
 }
 
 func createTemporaryGitConfig(directory string, contents []byte) (string, func(), error) {
-	temporary, err := os.CreateTemp(directory, ".rheic-config-*")
+	temporary, err := os.CreateTemp(directory, ".gyrel-config-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temporary Git config: %w", err)
 	}

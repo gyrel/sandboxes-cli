@@ -13,10 +13,10 @@ import (
 	"sort"
 	"strings"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 	"golang.org/x/term"
 
-	"github.com/rheic/sandboxes-cli/internal/envfile"
+	"github.com/gyrel/sandboxes-cli/internal/envfile"
 )
 
 func (r *Runner) environmentCreate(ctx context.Context, args []string) int {

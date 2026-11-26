@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const orgPolicyPipePrefix = `\\.\pipe\rheic-sandboxesd-`
+const orgPolicyPipePrefix = `\\.\pipe\gyrel-sandboxesd-`
 
 // orgPolicyEndpoint mirrors the SDK's local pipe derivation so the direct
 // org-policy client reaches the same access-controlled daemon pipe.

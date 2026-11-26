@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const execUsage = `usage: rsbx exec [-i] [-t] [-w DIR] [-e KEY=VALUE] [--env-file FILE] [-u uid[:gid]] SANDBOX COMMAND [ARG...]

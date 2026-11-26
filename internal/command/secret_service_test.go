@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 type fakeServiceSecrets struct {
@@ -317,7 +317,7 @@ func TestSecretRemoveAllClearsSupportedScopesAndAccounts(t *testing.T) {
 	if len(secrets.removed) != 2 || len(registry.requests) != 2 {
 		t.Fatalf("removed service/registry entries=%d/%d output=%q", len(secrets.removed), len(registry.requests), out.String())
 	}
-	if !strings.Contains(out.String(), "Removed 6 inventoried Rheic-managed host credentials") {
+	if !strings.Contains(out.String(), "Removed 6 inventoried Gyrel-managed host credentials") {
 		t.Fatalf("unexpected output=%q", out.String())
 	}
 	if !strings.Contains(out.String(), "Custom-secret storage is unavailable") {

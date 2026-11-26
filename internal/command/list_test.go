@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 type twoSandbox struct{ fakeSandbox }

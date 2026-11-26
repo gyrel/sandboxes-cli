@@ -14,14 +14,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/kit"
+	"github.com/gyrel/sandboxes-cli/internal/kit"
 )
 
 const kitUsage = `Usage: rsbx kit COMMAND
 
-Manage local Rheic kits, the supported Docker Kits v2 sandbox subset and
+Manage local Gyrel kits, the supported Docker Kits v2 sandbox subset and
 Docker kit v3 descriptors (offline inspection only; no kit builder is
 implemented). Kits are unsigned local inputs; remote OCI kits, mixins,
 signatures and MCP allowlists are not implemented yet.

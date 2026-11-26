@@ -9,10 +9,10 @@ import (
 	"io"
 	"text/tabwriter"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 	"gopkg.in/yaml.v3"
 
-	"github.com/rheic/sandboxes-cli/internal/daemonctl"
+	"github.com/gyrel/sandboxes-cli/internal/daemonctl"
 )
 
 const (

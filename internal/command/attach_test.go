@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func TestLocalAttachStartsStoppedSandboxAndUsesAgent(t *testing.T) {

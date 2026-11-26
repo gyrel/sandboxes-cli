@@ -29,9 +29,9 @@ func countHostProcesses() (daemons, shims int, err error) {
 		}
 		return len(lines)
 	}
-	return count("rheicd"), count("containerd-shim-nerdbox-v1"), nil
+	return count("gyreld"), count("containerd-shim-nerdbox-v1"), nil
 }
 
-func containsRheicSSHConfig(data string) bool {
+func containsGyrelSSHConfig(data string) bool {
 	return strings.Contains(data, "rsbx") || strings.Contains(data, "sandboxesd")
 }

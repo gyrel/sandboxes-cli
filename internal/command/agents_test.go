@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func TestKimiAgentSpec(t *testing.T) {
@@ -215,16 +215,16 @@ func TestCustomAgentResolvesInCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents.yaml")
 	if err := os.WriteFile(path, []byte(`agents:
   - name: hermes
-    image: rheic/hermes-sandbox:local
+    image: gyrel/hermes-sandbox:local
     command: ["hermes", "chat"]
     status: preview
     default_ports: ["8080/tcp4"]
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("RHEIC_AGENTS_FILE", path)
+	t.Setenv("GYREL_AGENTS_FILE", path)
 
-	if got := agentImage("hermes"); got != "rheic/hermes-sandbox:local" {
+	if got := agentImage("hermes"); got != "gyrel/hermes-sandbox:local" {
 		t.Fatalf("agentImage = %q", got)
 	}
 	if got := agentCommandArgs("hermes"); len(got) != 2 || got[0] != "hermes" || got[1] != "chat" {

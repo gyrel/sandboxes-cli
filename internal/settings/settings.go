@@ -1,4 +1,4 @@
-// Package settings reads and writes the host-side Rheic settings file.
+// Package settings reads and writes the host-side Gyrel settings file.
 package settings
 
 import (
@@ -36,15 +36,20 @@ type Values struct {
 }
 
 // DefaultPath returns ~/.config/rheic/settings.toml, honoring XDG_CONFIG_HOME.
+//
+// legacy-compat: the "rheic" config directory is retained (not renamed to
+// "gyrel") so existing installs keep reading their current settings file
+// without a data migration. Renaming the on-disk directory would orphan user
+// configuration.
 func DefaultPath() string {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "rheic", "settings.toml")
+		return filepath.Join(dir, "rheic", "settings.toml") // legacy-compat dir name
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".config", "rheic", "settings.toml")
+	return filepath.Join(home, ".config", "rheic", "settings.toml") // legacy-compat dir name
 }
 
 // Load reads the optional settings file. A missing file is not an error.
@@ -196,7 +201,7 @@ func Save(path string, values Values) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create settings directory: %w", err)
 	}
-	body := "# Rheic host settings. Managed by rsbx settings; do not put secrets here.\n"
+	body := "# Gyrel host settings. Managed by rsbx settings; do not put secrets here.\n"
 	if entries := settingsEntries(values); len(entries) > 0 {
 		body += strings.Join(entries, "\n") + "\n"
 	}

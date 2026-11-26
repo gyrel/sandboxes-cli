@@ -66,7 +66,7 @@ jobs:
             arch=${target#*/}
             out="dist/rsbx-${os}-${arch}"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags="-s -w -X github.com/rheic/sandboxes-cli/internal/version.Version=$VERSION" -o "$out" ./cmd/rsbx
+              -ldflags="-s -w -X github.com/gyrel/sandboxes-cli/internal/version.Version=$VERSION" -o "$out" ./cmd/rsbx
             (cd dist && sha256sum "${out#dist/}") > "$out.sha256"
           done
           actual=$(dist/rsbx-linux-amd64 version)

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 var (
@@ -96,7 +96,7 @@ func contractListSandboxes(t *testing.T) []sdk.Sandbox {
 		{
 			ID: "40e3fd21-352c-46a0-9a09-c062c73c54cf", Name: "matrix-20261115-1025", Agent: "codex",
 			State: sdk.StateRunning, LastUsedAt: mustContractTime(t, "2026-11-15T06:21:26.307931Z"),
-			Workspaces: []sdk.Workspace{{Path: "/private/tmp/rheic-sbx-matrix-20261115/repo"}},
+			Workspaces: []sdk.Workspace{{Path: "/private/tmp/gyrel-sbx-matrix-20261115/repo"}},
 			CreatedAt:  mustContractTime(t, "2026-11-15T06:21:23Z"),
 		},
 		{
@@ -114,12 +114,12 @@ func contractPruneSandboxes(t *testing.T) []sdk.Sandbox {
 		{
 			ID: "sb-contract-1", Name: "matrix-20261115-1025", Agent: "codex", State: sdk.StateStopped,
 			StoppedAt:  mustContractTime(t, "2026-11-15T06:22:40Z"),
-			Workspaces: []sdk.Workspace{{Path: "/private/tmp/rheic-sbx-matrix-20261115/repo"}},
+			Workspaces: []sdk.Workspace{{Path: "/private/tmp/gyrel-sbx-matrix-20261115/repo"}},
 		},
 		{
 			ID: "sb-contract-2", Name: "matrix-20261115-1035-prune", Agent: "codex", State: sdk.StateStopped,
 			StoppedAt:  mustContractTime(t, "2026-11-15T06:25:08Z"),
-			Workspaces: []sdk.Workspace{{Path: "/private/tmp/rheic-sbx-matrix-20261115/repo"}},
+			Workspaces: []sdk.Workspace{{Path: "/private/tmp/gyrel-sbx-matrix-20261115/repo"}},
 		},
 		{
 			ID: "sb-contract-3", Name: "my-sandbox", Agent: "codex", State: sdk.StateStopped,

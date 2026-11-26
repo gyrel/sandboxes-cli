@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 // Template management commands (ADR-0008): save/load/rm/export against the

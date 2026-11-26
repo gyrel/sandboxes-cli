@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 // documentedHelpPaths lists every command and subcommand that exposes help.
@@ -150,7 +150,7 @@ func TestInterspersedOptionsParseLikeLeadingOptions(t *testing.T) {
 	})
 
 	settingsFile := filepath.Join(t.TempDir(), "settings.toml")
-	t.Setenv("RHEIC_SETTINGS_FILE", settingsFile)
+	t.Setenv("GYREL_SETTINGS_FILE", settingsFile)
 
 	kitDir := t.TempDir()
 	kitPath := filepath.Join(kitDir, "spec.yaml")

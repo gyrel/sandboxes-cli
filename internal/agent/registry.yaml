@@ -9,7 +9,7 @@ agents:
     auth: No agent is preinstalled; provider credential handoff is not implemented for this image.
     notes: Docker sandbox-templates shell-docker image, pinned to its multi-platform manifest digest.
   - name: kimi
-    image: ghcr.io/rheic/sandbox-kimi@sha256:b81684d2216bfa6b5a99872ee3917cf6e25e039bf5a61d47171ebcaaf0a46203
+    image: ghcr.io/gyrel/sandbox-kimi@sha256:b81684d2216bfa6b5a99872ee3917cf6e25e039bf5a61d47171ebcaaf0a46203
     command: ["kimi"]
     status: available
     notes: public pinned image; live-tested on the released CLI
@@ -35,11 +35,11 @@ agents:
     auth: Stored OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, and xAI API keys are exposed through host proxy references; provider setup and runtime acceptance are pending.
     notes: Docker sandbox-templates opencode-docker image, pinned to its multi-platform manifest digest.
   - name: dsh
-    image: ghcr.io/rheic/sandbox-dsh-preview@sha256:f37c7065aca89c14b0b45418c68cda74b451047688a34df6364694381d97d772
+    image: ghcr.io/gyrel/sandbox-dsh-preview@sha256:f37c7065aca89c14b0b45418c68cda74b451047688a34df6364694381d97d772
     command: ["dsh", "web"]
     status: preview
     default_ports: ["8080/tcp4"]
-    detach_command: ["/bin/sh", "-c", "nohup /usr/local/bin/rheic-dsh-entrypoint >/tmp/rheic-dsh.log 2>&1 &"]
+    detach_command: ["/bin/sh", "-c", "nohup /usr/local/bin/gyrel-dsh-entrypoint >/tmp/gyrel-dsh.log 2>&1 &"]
     notes: DeepSeek Harness web UI on guest port 8080, published on 127.0.0.1 by default
   - name: claude
     image: docker.io/docker/sandbox-templates@sha256:4a94d9144a70df744fd9247e0c365a14cfb97024afab8db7597c8ba3e0637642

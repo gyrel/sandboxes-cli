@@ -3,7 +3,7 @@ package command
 import (
 	"fmt"
 
-	"github.com/rheic/sandboxes-cli/internal/agent"
+	"github.com/gyrel/sandboxes-cli/internal/agent"
 )
 
 func agentRegistry() (*agent.Registry, error) {

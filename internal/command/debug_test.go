@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 )
 
 func TestDebugFlagAcceptedBeforeAndAfterVersion(t *testing.T) {

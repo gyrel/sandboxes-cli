@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func tarEntries(t *testing.T, data []byte) map[string]string {

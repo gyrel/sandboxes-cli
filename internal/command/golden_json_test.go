@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 var updateGoldenJSON = flag.Bool("update", false, "rewrite testdata golden JSON files")
@@ -82,7 +82,7 @@ func TestGoldenSettingsListJSON(t *testing.T) {
 		t.Skip("Windows ACL validation is not implemented; Load remains fail closed")
 	}
 	path := filepath.Join(t.TempDir(), "settings.toml")
-	t.Setenv("RHEIC_SETTINGS_FILE", path)
+	t.Setenv("GYREL_SETTINGS_FILE", path)
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out}
 	if code := runner.Run(context.Background(), []string{"settings", "ls", "--json"}); code != 0 {

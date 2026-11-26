@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Rename the project from Rheic to Gyrel. The Go module path is now
+  `github.com/gyrel/sandboxes-cli` (previously `github.com/rheic/sandboxes-cli`),
+  all imports and dependencies move to the `github.com/gyrel/` namespace, and
+  gRPC metadata keys and daemon event names follow the `gyrel-`/`gyrel.*`
+  spelling. The `RHEIC_STATE_DIR` environment variable is replaced by
+  `GYREL_STATE_DIR` (the old spelling is still honored with a one-time
+  deprecation note). On-disk data paths that embed the old brand
+  (`~/.config/rheic/`, `~/.cache/rheic/`, `~/.rheic`) are retained for
+  data-migration safety.
+
 ## v0.0.74 — 2026-11-24
 
 ### Added

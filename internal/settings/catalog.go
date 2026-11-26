@@ -65,7 +65,7 @@ var dockerCatalog = []Entry{
 	{Key: "tls.allowNegativeSerial", Type: "bool", Default: "false", EnvVar: "DOCKER_SANDBOXES_TLS_ALLOW_NEGATIVE_SERIAL", Restart: true, Description: "Accept server certificates with a negative serial number (needed by some TLS-inspecting proxies)."},
 }
 
-// extensionKeys are Rheic-only settings consumed by the local runtime. They
+// extensionKeys are Gyrel-only settings consumed by the local runtime. They
 // sit beside the Docker matrix and use the same override file.
 var extensionKeys = []Entry{
 	{Key: "dns.upstream", Type: "string", Restart: true, Description: "DNS upstream used by sandbox gateways (HOST:PORT)"},

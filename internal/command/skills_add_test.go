@@ -24,8 +24,8 @@ func runFixtureGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(safeGitEnvironment(),
-		"GIT_AUTHOR_NAME=Rheic Test", "GIT_AUTHOR_EMAIL=test@example.invalid",
-		"GIT_COMMITTER_NAME=Rheic Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		"GIT_AUTHOR_NAME=Gyrel Test", "GIT_AUTHOR_EMAIL=test@example.invalid",
+		"GIT_COMMITTER_NAME=Gyrel Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, output)
@@ -302,7 +302,7 @@ func TestSkillsUpdateRejectsLocalImportsAndUnknownNames(t *testing.T) {
 		want string
 	}{
 		{name: "local import", args: []string{"update", "gamma"}, want: "must be added from a repository"},
-		{name: "unknown name", args: []string{"update", "nope"}, want: "not managed by Rheic"},
+		{name: "unknown name", args: []string{"update", "nope"}, want: "not managed by Gyrel"},
 		{name: "invalid name", args: []string{"update", "bad/name"}, want: "invalid skill name"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

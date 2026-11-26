@@ -1,6 +1,6 @@
 // Docker Sandboxes kit v3 descriptor parsing (static offline subset).
 //
-// The grammar is the public docker/sandbox-kit-spec SPEC-v3. Rheic only
+// The grammar is the public docker/sandbox-kit-spec SPEC-v3. Gyrel only
 // reads descriptors: strict decoding and validation for offline inspection.
 // Building or running a v3 kit needs a kit builder and runtime capability
 // support, which are not implemented, so loaded descriptors never turn into

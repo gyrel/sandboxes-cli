@@ -95,7 +95,7 @@ func selectUpdateEntries(registry skillsRegistry, names []string) ([]skillsRegis
 		}
 		entry, managed := registryEntry(registry, name)
 		if !managed {
-			return nil, fmt.Errorf("skills update: skill %q is not managed by Rheic", name)
+			return nil, fmt.Errorf("skills update: skill %q is not managed by Gyrel", name)
 		}
 		if entry.Repository == "" {
 			return nil, fmt.Errorf("skills update: skill %q was not added from a repository; skills installed with 'rsbx skills import' must be added from a repository before they can be updated", name)

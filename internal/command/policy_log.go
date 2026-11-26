@@ -16,7 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 // egressDecision mirrors the gateway audit record (gvproxy-egress-policy-v2

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func runSecretParityCommand(t *testing.T, client sdk.Client, input string, args ...string) (int, string) {

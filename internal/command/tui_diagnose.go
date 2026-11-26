@@ -102,7 +102,7 @@ func (m *dashboardModel) runDiagnoseBundle(ctx context.Context) {
 		m.notice = "diagnose bundle unavailable"
 		return
 	}
-	dir, err := os.MkdirTemp("", "rheic-tui-bundle-*")
+	dir, err := os.MkdirTemp("", "gyrel-tui-bundle-*")
 	if err != nil {
 		m.notice = "diagnose bundle: " + err.Error()
 		return

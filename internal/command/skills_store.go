@@ -75,20 +75,22 @@ func resolveSkillsPaths() (skillsPaths, error) {
 }
 
 func skillsBaseDirectory() (string, error) {
+	// legacy-compat: the "rheic" config directory is retained so existing
+	// skills stores keep loading without a data migration.
 	if configured := os.Getenv("XDG_CONFIG_HOME"); configured != "" {
 		if !filepath.IsAbs(configured) {
 			return "", errors.New("skills: XDG_CONFIG_HOME must be an absolute path")
 		}
-		return filepath.Join(configured, "rheic"), nil
+		return filepath.Join(configured, "rheic"), nil // legacy-compat dir name
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" || !filepath.IsAbs(home) {
 		return "", errors.New("skills: home directory is unavailable")
 	}
-	return filepath.Join(home, ".config", "rheic"), nil
+	return filepath.Join(home, ".config", "rheic"), nil // legacy-compat dir name
 }
 
-// openSkillsRoot anchors all store operations under the Rheic config
+// openSkillsRoot anchors all store operations under the Gyrel config
 // directory. It rejects a symlinked root instead of following it.
 func openSkillsRoot(paths skillsPaths, create bool) (*os.Root, error) {
 	info, err := os.Lstat(paths.base)

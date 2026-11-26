@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v3"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const (
@@ -141,7 +141,7 @@ func (r *Runner) parseTUIOptions(args []string) (time.Duration, bool, error) {
 
 func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client, refreshEvery time.Duration, runner *Runner) int {
 	defer screen.Fini()
-	screen.SetTitle("RHEIC | Sandboxes")
+	screen.SetTitle("GYREL | Sandboxes")
 	model := &dashboardModel{}
 	if runner != nil {
 		model.diagnoseBundle = runner.diagnoseRun
@@ -455,7 +455,7 @@ func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 	screen.SetStyle(background)
 	screen.Clear()
 	if width < dashboardMinWidth || height < dashboardMinHeight {
-		drawText(screen, 2, 1, "RHEIC", accent, width-4)
+		drawText(screen, 2, 1, "GYREL", accent, width-4)
 		drawText(screen, 2, 3, "Resize terminal to at least 64 x 20", muted, width-4)
 		screen.Show()
 		return
@@ -644,7 +644,7 @@ func drawBrand(screen dashboardScreen, primary, accent tcell.Style, width int) {
 			screen.PutStrStyled(2+x, y/2, string(glyph), logoStyle)
 		}
 	}
-	drawText(screen, 38, 1, "RHEIC", primary.Bold(true), width-40)
+	drawText(screen, 38, 1, "GYREL", primary.Bold(true), width-40)
 	drawText(screen, 38, 3, "LOCAL SANDBOXES", accent, width-40)
 }
 

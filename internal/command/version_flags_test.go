@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 )
 
 type versionCallCounter struct{ calls int }
@@ -258,7 +258,7 @@ func TestVersionHelpPrecedesPositionalAndGroupErrors(t *testing.T) {
 		if code := runner.Run(context.Background(), args); code != 0 {
 			t.Fatalf("%v: exit=%d output=%q", args, code, out.String())
 		}
-		if !strings.Contains(out.String(), "Show Rheic Sandboxes version information") || !strings.Contains(out.String(), "--format string") {
+		if !strings.Contains(out.String(), "Show Gyrel Sandboxes version information") || !strings.Contains(out.String(), "--format string") {
 			t.Fatalf("%v: help=%q", args, out.String())
 		}
 	}

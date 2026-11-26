@@ -1,4 +1,4 @@
-// Package kit parses local Rheic kit files.
+// Package kit parses local Gyrel kit files.
 package kit
 
 import (
@@ -162,7 +162,7 @@ func v3NeedsBuild(doc *V3Descriptor, directory string) bool {
 
 func findKitSpec(directory string) (string, error) {
 	stem := filepath.Base(directory)
-	// Docker kit v3 sources use <kit>/<kit>.yaml; v2 and Rheic kits use
+	// Docker kit v3 sources use <kit>/<kit>.yaml; v2 and Gyrel kits use
 	// spec.yaml. Prefer the stem-named descriptor when it exists.
 	for _, name := range kitSpecNames(stem) {
 		candidate := filepath.Join(directory, name)
@@ -230,13 +230,13 @@ func decodeDockerV2(data []byte) (Kit, error) {
 	if source.Kind != v3KindSandbox {
 		return Kit{}, fmt.Errorf("unsupported Docker v2 kit kind %q", source.Kind)
 	}
-	return Kit{APIVersion: "rheic.dev/v1alpha1", Kind: "Kit", Metadata: Metadata{Name: source.Name},
+	return Kit{APIVersion: "gyrel.dev/v1alpha1", Kind: "Kit", Metadata: Metadata{Name: source.Name},
 		Spec: Spec{Image: source.Sandbox.Image, Credentials: source.Credentials}}, nil
 }
 
 // Validate checks the stable local subset.
 func (k Kit) Validate() error {
-	if k.APIVersion != "rheic.dev/v1alpha1" {
+	if k.APIVersion != "gyrel.dev/v1alpha1" {
 		return fmt.Errorf("unsupported kit apiVersion %q", k.APIVersion)
 	}
 	if k.Kind != "Kit" {

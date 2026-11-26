@@ -11,7 +11,7 @@ import (
 )
 
 func TestDecodeLocalKit(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: codex-go}
 spec:
@@ -29,7 +29,7 @@ spec:
 }
 
 func TestDecodeOpenAIOAuthCredential(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: codex-oauth}
 spec:
@@ -46,19 +46,19 @@ spec:
 		t.Fatalf("OAuth environment=%q", got)
 	}
 	for _, hosts := range []string{"[attacker.invalid]", "[api.openai.com, chatgpt.com]"} {
-		body := "apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata: {name: invalid}\nspec:\n  agent: codex\n  credentials:\n    - service: openai\n      oauth:\n        resourceHosts: " + hosts + "\n"
+		body := "apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata: {name: invalid}\nspec:\n  agent: codex\n  credentials:\n    - service: openai\n      oauth:\n        resourceHosts: " + hosts + "\n"
 		if _, err := Decode(strings.NewReader(body)); err == nil {
 			t.Errorf("accepted untrusted OAuth resources %s", hosts)
 		}
 	}
-	if _, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	if _, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: openai-default-host}
 spec: {agent: codex, credentials: [{service: openai, oauth: {}}]}
 `)); err != nil {
 		t.Fatalf("omitted Docker-optional resourceHosts rejected: %v", err)
 	}
-	custom := `apiVersion: rheic.dev/v1alpha1
+	custom := `apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: invalid}
 spec: {agent: codex, credentials: [{service: openai, oauth: {resourceHosts: [api.openai.com], tokenEndpoint: {host: auth.example.test, path: /token}}}]}
@@ -69,7 +69,7 @@ spec: {agent: codex, credentials: [{service: openai, oauth: {resourceHosts: [api
 }
 
 func TestDecodeGenericOAuthKitDeclaration(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: fixture-oauth}
 spec:
@@ -99,13 +99,13 @@ spec:
 	for _, invalid := range []string{
 		"tokenEndpoint: {host: auth.example.test, path: /../token}",
 	} {
-		body := strings.Replace(`apiVersion: rheic.dev/v1alpha1
+		body := strings.Replace(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: fixture-oauth}
 spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /oauth/token}, resourceHosts: [api.example.test], sentinels: {accessToken: ACCESS_SENTINEL, refreshToken: REFRESH_SENTINEL}}}]}
 `, "refreshTokenSentinel: REFRESH_SENTINEL", "refreshTokenSentinel: REFRESH_SENTINEL, "+invalid, 1)
 		if invalid == "tokenEndpoint: {host: auth.example.test, path: /../token}" {
-			body = `apiVersion: rheic.dev/v1alpha1
+			body = `apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: fixture-oauth}
 spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /../token}, sentinels: {accessToken: A, refreshToken: B}}}]}
@@ -118,7 +118,7 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {ho
 }
 
 func TestDecodePassthroughOAuthLeavesSentinelsAbsent(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: passthrough}
 spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /token}, passthrough: true}}]}
@@ -133,7 +133,7 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {ho
 }
 
 func TestDecodeRejectsEmptyOAuthCredentialFile(t *testing.T) {
-	_, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	_, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: empty-credential-file}
 spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /token}, passthrough: true, credentialFile: {}}}]}
@@ -144,7 +144,7 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {ho
 }
 
 func TestDecodeRejectsEmptyOAuthTokenEndpoint(t *testing.T) {
-	_, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	_, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: empty-token-endpoint}
 spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {}, passthrough: true}}]}
@@ -155,7 +155,7 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {},
 }
 
 func TestDecodePreservesEmptyPassthroughOAuthMessages(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: empty-passthrough-messages}
 spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /token}, passthrough: true, sentinels: {}, responseFields: {}}}]}
@@ -267,7 +267,7 @@ func TestOAuthHostSchemaAcceptanceMatchesDockerSubset(t *testing.T) {
 }
 
 func FuzzDecode(f *testing.F) {
-	f.Add(`apiVersion: rheic.dev/v1alpha1
+	f.Add(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: fuzz-seed}
 spec: {agent: shell}
@@ -289,8 +289,8 @@ credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test
 
 func TestDecodeRejectsUnsupportedAndUnknown(t *testing.T) {
 	for _, body := range []string{
-		"apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, mcp: {allow: [github]}}\n",
-		"apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, unknown: true}\n",
+		"apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, mcp: {allow: [github]}}\n",
+		"apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, unknown: true}\n",
 		"apiVersion: v1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex}\n",
 	} {
 		if _, err := Decode(strings.NewReader(body)); err == nil {
@@ -319,7 +319,7 @@ func TestSeedValidation(t *testing.T) {
 }
 
 func TestDecodeSeedKit(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: gyrel.dev/v1alpha1
 kind: Kit
 metadata: {name: seeded}
 spec:

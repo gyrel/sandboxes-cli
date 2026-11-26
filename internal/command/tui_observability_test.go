@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v3"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func TestCatalogEventName(t *testing.T) {
 	for _, tt := range []struct{ in, want string }{
-		{"rheic.sandbox.created", "sandbox.created"},
-		{"rheic.operation.failed", "operation.failed"},
+		{"gyrel.sandbox.created", "sandbox.created"},
+		{"gyrel.operation.failed", "operation.failed"},
 		{"sandbox", "sandbox"},
 		{"operation", "operation"},
 		{"", "event"},

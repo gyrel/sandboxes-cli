@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 )
 
 type diagnoseVersionService struct{ err error }
@@ -231,7 +231,7 @@ func TestDiagnoseUsesInjectableProcessCount(t *testing.T) {
 	t.Cleanup(func() { hostProcessCount = original })
 	hostProcessCount = func() (int, int, error) { return 2, 1, nil }
 	check := checkHostProcesses()
-	if check.Status != diagnosePass || check.Detail != "2 rheicd, 1 containerd-shim-nerdbox-v1" {
+	if check.Status != diagnosePass || check.Detail != "2 gyreld, 1 containerd-shim-nerdbox-v1" {
 		t.Fatalf("check = %#v", check)
 	}
 	hostProcessCount = func() (int, int, error) { return 0, 0, errors.New("pgrep missing") }

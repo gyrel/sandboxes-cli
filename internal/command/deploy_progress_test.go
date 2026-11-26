@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func newTestProgress(width int) (*deployProgress, *bytes.Buffer) {
@@ -45,11 +45,11 @@ func TestDeployProgressNilSafe(t *testing.T) {
 
 func TestDeployProgressSbxStageGrammar(t *testing.T) {
 	p, buf := newTestProgress(80)
-	p.summary("rheic-demo", "shell", "/tmp/ws", false, "docker/sandbox-templates@sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d")
+	p.summary("gyrel-demo", "shell", "/tmp/ws", false, "docker/sandbox-templates@sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d")
 	p.begin("sandbox — creating…")
 	p.next("sandbox — ready")
-	p.notice("Created sandbox rheic-demo")
-	p.notice("sandbox rheic-demo — running detached")
+	p.notice("Created sandbox gyrel-demo")
+	p.notice("sandbox gyrel-demo — running detached")
 	p.sub("workspace /tmp/ws")
 	visible := stripANSI(buf.String())
 	lines := strings.Split(strings.TrimRight(visible, "\n"), "\n")
@@ -67,10 +67,10 @@ func TestDeployProgressSbxStageGrammar(t *testing.T) {
 	if !strings.Contains(visible, "\r    ✓ sandbox — ready\n") {
 		t.Fatalf("stage commit must sit at the four-space indent: %q", visible)
 	}
-	if !strings.Contains(visible, "\n\n    ✓ Created sandbox rheic-demo\n") {
+	if !strings.Contains(visible, "\n\n    ✓ Created sandbox gyrel-demo\n") {
 		t.Fatalf("notices must be blank-line separated (sbx layout): %q", visible)
 	}
-	if !strings.Contains(visible, "\n\n    ✓ sandbox rheic-demo — running detached\n") {
+	if !strings.Contains(visible, "\n\n    ✓ sandbox gyrel-demo — running detached\n") {
 		t.Fatalf("detached notice must follow the sbx layout: %q", visible)
 	}
 	if !strings.Contains(visible, "\n        workspace /tmp/ws\n") {

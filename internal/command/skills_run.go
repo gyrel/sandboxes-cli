@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/settings"
+	"github.com/gyrel/sandboxes-cli/internal/settings"
 )
 
 // skillsDefaultModeKey is the settings entry consulted when --skills is
@@ -18,8 +18,9 @@ const skillsDefaultModeKey = "skills.defaultMode"
 // resolveSkillsMode picks the effective skills mode for a create: an explicit
 // --skills flag wins; an omitted flag falls back to the skills.defaultMode
 // setting; an unset setting falls back to the catalog default (readonly). The
-// fallback stays security-neutral: readonly links the Rheic-owned store
-// (~/.config/rheic/skills), which is empty until the user imports skills; it
+// fallback stays security-neutral: readonly links the Gyrel-owned store
+// (~/.config/rheic/skills; legacy-compat dir retained so existing stores keep
+// loading), which is empty until the user imports skills; it
 // never exposes agent host directories, and readwrite keeps failing closed
 // downstream. An unreadable or malformed settings file fails the create path
 // instead of guessing a mount mode.

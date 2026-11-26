@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const goodSpec = "apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: good-kit\nspec:\n  agent: shell\n"
+const goodSpec = "apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: good-kit\nspec:\n  agent: shell\n"
 
 const argsSpec = `# syntax=docker/sandbox-kit:3
 schemaVersion: "3"
@@ -129,7 +129,7 @@ func TestValidateDirectoryAcceptsGoodKit(t *testing.T) {
 
 func TestValidateDirectoryReportsRelativePaths(t *testing.T) {
 	root := newKitDir(t, "bad-kit", map[string]string{
-		"spec.yaml": "apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: \"\"\nspec:\n  agent: shell\n",
+		"spec.yaml": "apiVersion: gyrel.dev/v1alpha1\nkind: Kit\nmetadata:\n  name: \"\"\nspec:\n  agent: shell\n",
 	})
 	result, err := Validate(root, nil)
 	if err != nil {

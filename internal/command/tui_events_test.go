@@ -233,6 +233,49 @@ func TestSelectedSandboxID(t *testing.T) {
 	}
 }
 
+func TestDashboardErrorConcurrentWithDraw(t *testing.T) {
+	model := &dashboardModel{}
+	screen := newDashboardTestScreen(100, 24)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			model.setError("stream\x1b[31m failure")
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		drawDashboard(screen, model)
+	}
+	wg.Wait()
+	if got := model.errorText(); strings.Contains(got, "\x1b") {
+		t.Fatalf("error text not sanitized: %q", got)
+	}
+}
+
+func TestSanitizeTerminalTextIdempotent(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"plain text", "daemon offline"},
+		{"escape sequence", "stream\x1b[31m failure"},
+		{"control characters", "line\x07\nbreak\t"},
+		{"direction override", "safe\u202eevil"},
+		{"already sanitized", "already \ufffd sanitized"},
+		{"empty", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			once := sanitizeTerminalText(tc.input)
+			twice := sanitizeTerminalText(once)
+			if once != twice {
+				t.Fatalf("not idempotent: first=%q second=%q", once, twice)
+			}
+		})
+	}
+}
+
 func TestDrawDashboardEventsPanelSmoke(t *testing.T) {
 	screen := newDashboardTestScreen(100, 24)
 	model := &dashboardModel{panel: dashboardPanelEvents, items: []sdk.Sandbox{{Name: "dev", State: "running"}}}

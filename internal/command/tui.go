@@ -409,16 +409,31 @@ func dashboardKeyAction(event *tcell.EventKey, model *dashboardModel, ctx contex
 	return false
 }
 
+// setError stores a sanitized dashboard error for display. It is the only
+// writer of model.err so the stream goroutines and draw paths share the mutex.
+func (m *dashboardModel) setError(message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.err = sanitizeTerminalText(message)
+}
+
+// errorText returns the current dashboard error under the same mutex.
+func (m *dashboardModel) errorText() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.err
+}
+
 func refreshDashboard(ctx context.Context, client sdk.Client, model *dashboardModel) {
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	items, err := collectSandboxes(callCtx, client, dashboardPageSize, 0)
 	if err != nil {
-		model.err = err.Error()
+		model.setError(err.Error())
 		return
 	}
 	model.items = items
-	model.err = ""
+	model.setError("")
 	model.updated = time.Now()
 	if model.selected >= len(items) {
 		model.selected = max(0, len(items)-1)
@@ -530,7 +545,7 @@ func drawSandboxPanel(screen dashboardScreen, model *dashboardModel, leftWidth, 
 	switch {
 	case len(model.items) > 0:
 		drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
-	case model.err == "":
+	case model.errorText() == "":
 		drawText(screen, detailX, 13, "No sandboxes yet", primary, width-detailX-2)
 		drawText(screen, detailX, 15, "Start one with rsbx run", muted, width-detailX-2)
 	}
@@ -538,8 +553,9 @@ func drawSandboxPanel(screen dashboardScreen, model *dashboardModel, leftWidth, 
 
 // drawDashboardFooter renders the status, notice, mode overlay and key hints.
 func drawDashboardFooter(screen dashboardScreen, model *dashboardModel, width, height int, accent, muted, warm tcell.Style) {
-	if model.err != "" {
-		drawText(screen, 3, height-3, "DAEMON  "+clipCell(model.err, width-13), warm, width-6)
+	modelErr := model.errorText()
+	if modelErr != "" {
+		drawText(screen, 3, height-3, "DAEMON  "+clipCell(modelErr, width-13), warm, width-6)
 	} else {
 		status := fmt.Sprintf("%d SANDBOXES", len(model.items))
 		if model.pendingApprovals >= 0 {

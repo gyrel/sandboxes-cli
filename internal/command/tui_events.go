@@ -261,9 +261,7 @@ func (m *dashboardModel) startEventStream(ctx context.Context, client sdk.Client
 		defer close(done)
 		stream, err := sdk.WatchResilient(streamCtx, client, sdk.WatchOptions{})
 		if err != nil {
-			m.mu.Lock()
-			m.err = sanitizeTerminalText(err.Error())
-			m.mu.Unlock()
+			m.setError(err.Error())
 			return
 		}
 		defer func() { _ = stream.Close() }()

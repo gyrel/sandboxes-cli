@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.78 — 2026-11-26
+
+### Fixed
+
+- Carry forward Gyrel module naming and support for the legacy kit apiVersion.
+
 ## Unreleased
 
 ### Changed

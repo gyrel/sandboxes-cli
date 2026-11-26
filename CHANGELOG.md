@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.0.80 — 2026-11-26
+
+### Fixed
+
+- Guard the TUI dashboard error field against the event-stream race: all writes
+  go through a mutex-guarded setter that sanitizes inside the lock, and draw
+  paths read it under the same lock.
+
+## v0.0.79 — 2026-11-26
+
+### Fixed
+
+- Scrub absolute paths in the diagnose bundle log tail (replaced with
+  `path_sha256:` tokens) so the user's own state paths no longer trigger the
+  high-entropy guard, while genuine canary secrets still refuse the bundle.
+
+### Changed
+
+- Restored per-tag release-note sections so the bundle release workflow can
+  extract notes for each tag.
+
 ## v0.0.78 — 2026-11-26
 
 ### Fixed

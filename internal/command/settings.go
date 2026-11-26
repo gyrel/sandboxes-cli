@@ -52,9 +52,10 @@ YAML records use sbx's field names and keep booleans and integers typed.
 Print one setting value or its full catalog record. --json and --format json
 emit the same typed record as settings ls; without them the scalar is printed.
 `
-	settingsSetUsage = `usage: rsbx settings set KEY VALUE
+	settingsSetUsage = `usage: rsbx settings set KEY VALUE [--json] [--format table|json|yaml]
 
-Set a validated setting override in the host settings file.
+Set a validated setting override in the host settings file. A note is printed
+to stderr when the key requires a daemon restart.
 `
 	settingsUnsetUsage = `usage: rsbx settings unset KEY
 
@@ -354,8 +355,26 @@ func (r *Runner) settingsSet(args []string) int {
 	if hasFlag(args, helpFlag) || hasFlag(args, helpShort) {
 		return r.showCommandHelp(settingsSetHelp())
 	}
-	if len(args) != 2 {
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
+	fs := r.newFlagSet("settings set")
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() { r.showCommandHelp(settingsSetHelp()) }
+	jsonOutput := fs.Bool("json", false, "print the setting record as JSON")
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("settings set", err)
+	}
+	if fs.NArg() != 2 {
 		_, _ = fmt.Fprint(r.Err, settingsSetUsage)
+		return 2
+	}
+	key, value := fs.Arg(0), fs.Arg(1)
+	selected, err := resolveOperationFormat(*format, *jsonOutput)
+	if err != nil {
+		r.error(err)
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -363,7 +382,7 @@ func (r *Runner) settingsSet(args []string) int {
 		r.error(err)
 		return 1
 	}
-	if err := applySetting(&values, args[0], args[1]); err != nil {
+	if err := applySetting(&values, key, value); err != nil {
 		r.error(err)
 		return 2
 	}
@@ -371,9 +390,22 @@ func (r *Runner) settingsSet(args []string) int {
 		r.error(err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(r.Out, "set %s\n", args[0])
-	if restart := settingRestart(args[0]); restart {
-		_, _ = fmt.Fprintf(r.Out, "restart gyreld to apply %s\n", args[0])
+	row, found := findSettingRow(settingRows(values), key)
+	if !found {
+		r.error(fmt.Errorf("unknown setting %q", key))
+		return 2
+	}
+	restart := settingRestart(key)
+	if selected == listFormatTable {
+		_, _ = fmt.Fprintf(r.Out, "set %s\n", key)
+		if restart {
+			_, _ = fmt.Fprintf(r.Out, "restart gyreld to apply %s\n", key)
+		}
+	} else if code := r.printSettingRecord(row, selected); code != 0 {
+		return code
+	}
+	if restart {
+		_, _ = fmt.Fprintf(r.Err, "note: %s takes effect after the daemon restarts\n", key)
 	}
 	return 0
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.81 — 2026-11-26
+
+### Changed
+
+- `settings set` now prints an explicit restart note for keys that require a
+  daemon restart, and accepts `--json` / `--format table|json|yaml`; the
+  structured result carries `requires_restart`.
+
 ## v0.0.80 — 2026-11-26
 
 ### Fixed

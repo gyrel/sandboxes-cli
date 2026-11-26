@@ -1427,7 +1427,8 @@ func settingsHelp() commandHelp {
 			"",
 			"Machine output uses the sbx settings record: key, value, type, source, default,",
 			"env_var (only when sbx defines the variable) and requires_restart (only when a",
-			"daemon restart is needed). Unknown keys are rejected.",
+			"daemon restart is needed). settings set prints a restart note to stderr for keys",
+			"that require a daemon restart. Unknown keys are rejected.",
 		},
 		Usage: []string{"rsbx settings COMMAND"},
 		AvailableCommands: []commandSummary{
@@ -1473,9 +1474,16 @@ func settingsGetHelp() commandHelp {
 
 func settingsSetHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"Set a validated setting override in the host settings file."},
-		Usage:       []string{"rsbx settings set KEY VALUE"},
-		Flags:       []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for settings set"}},
+		Description: []string{
+			"Set a validated setting override in the host settings file.",
+			"A note is printed to stderr when the key requires a daemon restart; the daemon is not restarted.",
+		},
+		Usage: []string{"rsbx settings set KEY VALUE [flags]"},
+		Flags: []commandFlagHelp{
+			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
+			{Short: "h", Name: helpCommand, Description: "help for settings set"},
+			{Name: listFormatJSON, Description: "print the setting record as JSON"},
+		},
 	}
 }
 

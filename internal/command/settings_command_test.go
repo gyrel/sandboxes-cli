@@ -16,14 +16,21 @@ import (
 
 func runSettings(t *testing.T, envPath string, args ...string) (*bytes.Buffer, int) {
 	t.Helper()
+	out, errOut, code := runSettingsSplit(t, envPath, args...)
+	out.Write(errOut.Bytes())
+	return out, code
+}
+
+func runSettingsSplit(t *testing.T, envPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, int) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows ACL validation is not implemented; Load remains fail closed")
 	}
-	var out bytes.Buffer
-	runner := &Runner{Out: &out, Err: &out, Socket: filepath.Join(t.TempDir(), "sandboxesd.sock"),
+	var out, errOut bytes.Buffer
+	runner := &Runner{Out: &out, Err: &errOut, Socket: filepath.Join(t.TempDir(), "sandboxesd.sock"),
 		NewClient: func(string) (sdk.Client, error) { return nil, errors.New("settings does not need a daemon") }}
 	t.Setenv("GYREL_SETTINGS_FILE", envPath)
-	return &out, runner.Run(context.Background(), append([]string{"settings"}, args...))
+	return &out, &errOut, runner.Run(context.Background(), append([]string{"settings"}, args...))
 }
 
 func TestSettingsListsFullCatalogWithDefaults(t *testing.T) {
@@ -136,5 +143,94 @@ func TestSettingsMarksRestartRequiredKeys(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "restart gyreld to apply proxy.daemon") {
 		t.Fatalf("restart notice missing: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "note: proxy.daemon takes effect after the daemon restarts") {
+		t.Fatalf("restart stderr note missing: %q", out.String())
+	}
+}
+
+func TestSettingsSetRestartKeyPrintsStderrNote(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	out, errOut, code := runSettingsSplit(t, path, "set", "daemon.log.maxSizeMB", "100")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	want := "note: daemon.log.maxSizeMB takes effect after the daemon restarts"
+	if !strings.Contains(errOut.String(), want) {
+		t.Fatalf("stderr note missing: %q", errOut.String())
+	}
+	if strings.Contains(out.String(), "note:") {
+		t.Fatalf("restart note must go to stderr only: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "set daemon.log.maxSizeMB") {
+		t.Fatalf("confirmation missing: %q", out.String())
+	}
+	out, code = runSettings(t, path, "get", "daemon.log.maxSizeMB")
+	if code != 0 || strings.TrimSpace(out.String()) != "100" {
+		t.Fatalf("get exit=%d output=%q", code, out.String())
+	}
+}
+
+func TestSettingsSetNonRestartKeyPrintsNoNote(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	out, errOut, code := runSettingsSplit(t, path, "set", "kit.requireSignature", "true")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if strings.Contains(errOut.String(), "note:") {
+		t.Fatalf("unexpected restart note: %q", errOut.String())
+	}
+	if strings.Contains(out.String(), "restart gyreld") {
+		t.Fatalf("unexpected restart confirmation: %q", out.String())
+	}
+}
+
+func TestSettingsSetJSONRequiresRestartField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	out, errOut, code := runSettingsSplit(t, path, "set", "daemon.log.maxSizeMB", "75", "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	var record map[string]any
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+		t.Fatalf("json: %v output=%q", err, out.String())
+	}
+	if restart, ok := record["requires_restart"].(bool); !ok || !restart {
+		t.Fatalf("requires_restart = %v, want true", record["requires_restart"])
+	}
+	if value, ok := record["value"].(float64); !ok || value != 75 {
+		t.Fatalf("value = %v, want 75", record["value"])
+	}
+	if !strings.Contains(errOut.String(), "note: daemon.log.maxSizeMB takes effect after the daemon restarts") {
+		t.Fatalf("stderr note missing: %q", errOut.String())
+	}
+
+	out, errOut, code = runSettingsSplit(t, path, "set", "kit.requireSignature", "true", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	record = nil
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+		t.Fatalf("json: %v output=%q", err, out.String())
+	}
+	if _, ok := record["requires_restart"]; ok {
+		t.Fatalf("false requires_restart must be omitted: %v", record)
+	}
+}
+
+func TestSettingsSetNonCatalogKeyKeepsCurrentOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	out, errOut, code := runSettingsSplit(t, path, "set", "no.such.key", "x")
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2 (stdout=%q stderr=%q)", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), `error: unknown setting "no.such.key"`) {
+		t.Fatalf("unknown setting error missing: %q", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "note:") {
+		t.Fatalf("unexpected restart note: %q", errOut.String())
 	}
 }

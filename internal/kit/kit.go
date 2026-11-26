@@ -200,6 +200,10 @@ func Decode(r io.Reader) (Kit, error) {
 		if err := doc.Validate(); err != nil {
 			return Kit{}, err
 		}
+		if doc.APIVersion == APIVersionLegacy {
+			doc.APIVersion = APIVersion
+			markLegacyAPIVersion()
+		}
 	}
 	return doc, nil
 }
@@ -230,13 +234,15 @@ func decodeDockerV2(data []byte) (Kit, error) {
 	if source.Kind != v3KindSandbox {
 		return Kit{}, fmt.Errorf("unsupported Docker v2 kit kind %q", source.Kind)
 	}
-	return Kit{APIVersion: "gyrel.dev/v1alpha1", Kind: "Kit", Metadata: Metadata{Name: source.Name},
+	return Kit{APIVersion: APIVersion, Kind: "Kit", Metadata: Metadata{Name: source.Name},
 		Spec: Spec{Image: source.Sandbox.Image, Credentials: source.Credentials}}, nil
 }
 
-// Validate checks the stable local subset.
+// Validate checks the stable local subset. The pre-rename
+// rheic.dev/v1alpha1 apiVersion is accepted for alpha continuity; it is
+// normalized to gyrel.dev/v1alpha1 on decode.
 func (k Kit) Validate() error {
-	if k.APIVersion != "gyrel.dev/v1alpha1" {
+	if !validAPIVersion(k.APIVersion) {
 		return fmt.Errorf("unsupported kit apiVersion %q", k.APIVersion)
 	}
 	if k.Kind != "Kit" {

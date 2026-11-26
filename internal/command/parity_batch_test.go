@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 // TestLsUnknownFlagUsesSharedErrorContract covers PARITY P-34.

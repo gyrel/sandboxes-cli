@@ -8,7 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 type secretRemovalChoice struct {

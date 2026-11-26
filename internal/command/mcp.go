@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )

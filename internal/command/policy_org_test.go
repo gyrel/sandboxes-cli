@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	localv1 "github.com/rheic/sandboxes-api/gen/go/sandboxes/local/v1"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	localv1 "github.com/gyrel/sandboxes-api/gen/go/sandboxes/local/v1"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

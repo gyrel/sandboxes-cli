@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func parseNetworkRule(value string) (sdk.NetworkRule, error) {

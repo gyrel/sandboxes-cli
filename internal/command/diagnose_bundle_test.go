@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rheic/sandboxes-core/ids"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	"github.com/gyrel/sandboxes-core/ids"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/settings"
+	"github.com/gyrel/sandboxes-cli/internal/settings"
 )
 
 type bundleApprovalService struct {
@@ -75,7 +75,7 @@ func bundleFixtures(t *testing.T, logLines ...string) string {
 	if err := os.WriteFile(settingsFile, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("RHEIC_SETTINGS_FILE", settingsFile)
+	t.Setenv("GYREL_SETTINGS_FILE", settingsFile)
 	return socket
 }
 

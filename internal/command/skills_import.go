@@ -21,7 +21,7 @@ const skillsImportUsage = `usage: rsbx skills import [--force] [PATH]
        rsbx skills import --dry-run
 
 Without PATH, import skills from supported host directories in priority order.
-Import a local skill directory into Rheic's host-side skills store. PATH must
+Import a local skill directory into Gyrel's host-side skills store. PATH must
 be a real directory with a SKILL.md file. SKILL.md requires YAML frontmatter:
 
   ---
@@ -33,7 +33,7 @@ An explicitly approved top-level link may be imported with --allow-link
 NAME=ABSOLUTE_TARGET. Other symlinks, special files, oversized files and
 oversized trees are rejected.
 Identical re-imports are no-ops. Use --force only to replace skill content that
-Rheic already imported; unmanaged directories are never overwritten.
+Gyrel already imported; unmanaged directories are never overwritten.
 `
 
 type sourceSkill struct {
@@ -52,11 +52,11 @@ type skillManifest struct {
 func (r *Runner) importSkills(ctx context.Context, args []string) int {
 	fs := r.newFlagSet("skills import")
 	fs.SetOutput(io.Discard)
-	force := fs.Bool("force", false, "replace skill content previously imported by Rheic")
+	force := fs.Bool("force", false, "replace skill content previously imported by Gyrel")
 	dryRun := fs.Bool(dryRunName, false, "preview skills from supported host directories")
 	var allowedLinks repeatedStringFlag
 	fs.Var(&allowedLinks, "allow-link", "approve one exact skill link as NAME=ABSOLUTE_TARGET")
-	fs.BoolVar(force, "f", false, "replace skill content previously imported by Rheic")
+	fs.BoolVar(force, "f", false, "replace skill content previously imported by Gyrel")
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{forceFlag: false, "-f": false, dryRunFlag: false, "--allow-link": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return r.showCommandHelp(skillsImportHelp())
@@ -374,7 +374,7 @@ func inspectSkillImportDecision(store *os.Root, registry skillsRegistry, name, d
 	}
 	entry, managed := registryEntry(registry, name)
 	if !managed {
-		return 0, fmt.Errorf("skills import: %q already exists but was not imported by Rheic; refusing to overwrite it", name)
+		return 0, fmt.Errorf("skills import: %q already exists but was not imported by Gyrel; refusing to overwrite it", name)
 	}
 	installed, err := installedSkillDigest(store, name)
 	if err != nil {

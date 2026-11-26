@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func newFamilyPolicyCheckRunner(sandbox sdk.SandboxService) (*Runner, *bytes.Buffer, *bytes.Buffer, *policyCheckNetworkRecorder) {

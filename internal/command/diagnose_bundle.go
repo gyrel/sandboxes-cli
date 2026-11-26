@@ -17,14 +17,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/rheic/sandboxes-core/ids"
-	sdk "github.com/rheic/sandboxes-go-sdk"
-	"github.com/rheic/slogx/redact"
+	"github.com/gyrel/sandboxes-core/ids"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
+	"github.com/gyrel/slogx/redact"
 
-	"github.com/rheic/sandboxes-cli/internal/settings"
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/settings"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 )
 
 // The diagnose bundle builder collects host and daemon state, redacts it,
@@ -37,13 +38,13 @@ import (
 // structured sink; the manifest.json records the build instead.
 //
 // D11: the bundle operation id is the canonical core/ids ULID operation
-// identifier (github.com/rheic/sandboxes-core/ids); it is correlation-only
+// identifier (github.com/gyrel/sandboxes-core/ids); it is correlation-only
 // and never identity or authorization material.
 
 const (
 	diagnoseBundleSchemaVersion   = 1
 	diagnoseBundleContractVersion = 1
-	diagnoseBundlePrefix          = "rheic-diagnose-"
+	diagnoseBundlePrefix          = "gyrel-diagnose-"
 	diagnoseBundleSuffix          = ".tar.gz"
 	diagnoseBundleTimeLayout      = "20060102T150405Z"
 
@@ -831,9 +832,30 @@ func (r *Runner) resolveDiagnoseBundleTarget(name string) (string, error) {
 	return abs, nil
 }
 
+// diagnoseStateDirEnvWarned ensures the legacy-env deprecation note is emitted
+// at most once per process, no matter how many collectors read the state dir.
+var diagnoseStateDirEnvWarned sync.Once
+
+// diagnoseStateDirEnv returns the daemon state directory override from the
+// environment. GYREL_STATE_DIR is the primary name. The pre-rename
+// RHEIC_STATE_DIR spelling is still honored as a legacy-compat fallback for
+// existing deployments, and reading it prints a one-time deprecation note.
+func (r *Runner) diagnoseStateDirEnv() string {
+	if dir := strings.TrimSpace(os.Getenv("GYREL_STATE_DIR")); dir != "" {
+		return dir
+	}
+	if dir := strings.TrimSpace(os.Getenv("RHEIC_STATE_DIR")); dir != "" { // legacy-compat: pre-rename env spelling, kept for data-migration safety
+		diagnoseStateDirEnvWarned.Do(func() {
+			_, _ = fmt.Fprintf(r.Err, "warning: RHEIC_STATE_DIR is deprecated; use GYREL_STATE_DIR\n")
+		})
+		return dir
+	}
+	return ""
+}
+
 func (r *Runner) diagnoseBundleProtectedDirs() []string {
 	dirs := make([]string, 0, 2)
-	if dir := strings.TrimSpace(os.Getenv("RHEIC_STATE_DIR")); dir != "" {
+	if dir := r.diagnoseStateDirEnv(); dir != "" {
 		dirs = append(dirs, dir)
 	}
 	if dir := diagnoseStateDir(r.Socket); dir != "" {
@@ -949,7 +971,7 @@ func (r *Runner) buildDiagnoseBundle(ctx context.Context, opts diagnoseBundleOpt
 	return target, nil
 }
 
-const diagnoseBundleReadme = `RHEIC diagnose bundle
+const diagnoseBundleReadme = `GYREL diagnose bundle
 =====================
 
 This archive was produced by "rsbx diagnose --bundle". It is a redacted
@@ -989,6 +1011,6 @@ Paranoid mode
 
 Sharing
   Verify the archive first: rsbx diagnose --verify FILE. Then attach the
-  .tar.gz file to a GitHub issue on the rheic/sandboxes-cli repository. The
+  .tar.gz file to a GitHub issue on the gyrel/sandboxes-cli repository. The
   scan is heuristic: a clean scan does not prove the bundle is safe to share.
 `

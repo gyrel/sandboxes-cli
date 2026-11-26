@@ -12,7 +12,7 @@ func TestRoundTrip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows ACL validation is not implemented; Load remains fail closed")
 	}
-	path := filepath.Join(t.TempDir(), "rheic", "settings.toml")
+	path := filepath.Join(t.TempDir(), "rheic", "settings.toml") // legacy-compat dir name under test
 	want := Values{DNSUpstream: "1.1.1.1:53", DefaultPolicyProfile: "balanced", DefaultCPUs: 4, DefaultMemoryMiB: 2048, DockerVolumeSize: "20g"}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestLoadRejectsUnknownAndUnsafe(t *testing.T) {
 
 func TestCatalogCoversDockerMatrixAndValidatesTypes(t *testing.T) {
 	if got := len(Catalog()); got != 54 {
-		t.Fatalf("catalog entries = %d, want 54 (49 Docker keys + 5 Rheic extensions)", got)
+		t.Fatalf("catalog entries = %d, want 54 (49 Docker keys + 5 Gyrel extensions)", got)
 	}
 	entry, found := Find("proxy.daemon")
 	if !found || entry.Type != "string" || !entry.Restart {

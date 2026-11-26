@@ -17,19 +17,23 @@ const maxCustomAgentsFile = 1 << 20
 var customAgentName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 // CustomPath returns the host-owned custom agent registry path.
-// RHEIC_AGENTS_FILE overrides the default; XDG_CONFIG_HOME is honored.
+// GYREL_AGENTS_FILE overrides the default; XDG_CONFIG_HOME is honored.
+//
+// legacy-compat: the "rheic" config directory is retained (not renamed to
+// "gyrel") so existing custom-agent registries keep loading without a data
+// migration.
 func CustomPath() string {
-	if path := strings.TrimSpace(os.Getenv("RHEIC_AGENTS_FILE")); path != "" {
+	if path := strings.TrimSpace(os.Getenv("GYREL_AGENTS_FILE")); path != "" {
 		return path
 	}
 	if dir := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); dir != "" {
-		return filepath.Join(dir, "rheic", "agents.yaml")
+		return filepath.Join(dir, "rheic", "agents.yaml") // legacy-compat dir name
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".config", "rheic", "agents.yaml")
+	return filepath.Join(home, ".config", "rheic", "agents.yaml") // legacy-compat dir name
 }
 
 // LoadWithCustom merges the built-in registry with host-configured custom

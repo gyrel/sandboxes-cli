@@ -8,7 +8,7 @@ import (
 	"unicode"
 
 	"github.com/gdamore/tcell/v3"
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 type dashboardMode int

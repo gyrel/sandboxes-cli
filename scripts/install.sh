@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install rsbx from a signed Rheic GitHub release without manual approval.
+# Install rsbx from a signed Gyrel GitHub release without manual approval.
 #
 # The binary is checked against SHA256SUMS, its SLSA provenance is verified
 # when the GitHub CLI is available, it is ad-hoc signed on macOS and the
@@ -7,7 +7,7 @@
 # Terminal-launched CLI. Set RSBX_NO_VERIFY=1 with --file only for offline testing.
 set -euo pipefail
 
-repo="rheic/sandboxes-cli"
+repo="gyrel/sandboxes-cli"
 version="${RSBX_VERSION:-}"
 dir="${RSBX_INSTALL_DIR:-$HOME/.local/bin}"
 file=""

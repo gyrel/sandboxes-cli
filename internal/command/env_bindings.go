@@ -8,11 +8,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/rheic/sandboxes-cli/internal/envfile"
+	"github.com/gyrel/sandboxes-cli/internal/envfile"
 )
 
 // credentialsBindingsCandidates returns the global credentials.yaml locations
-// owned by Rheic. Only existing files are edited; no new storage file is
+// owned by Gyrel. Only existing files are edited; no new storage file is
 // created. Docker sbx directories are deliberately excluded: pruning must not
 // mutate another product's credential state (AGENTS repository-boundary rule).
 func credentialsBindingsCandidates() []string {
@@ -26,11 +26,11 @@ func credentialsBindingsCandidates() []string {
 		}
 	}
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		add(filepath.Join(dir, "rheic"))
+		add(filepath.Join(dir, "rheic")) // legacy-compat dir name
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		add(filepath.Join(home, ".config", "rheic"))
-		add(filepath.Join(home, ".rheic"))
+		add(filepath.Join(home, ".config", "rheic")) // legacy-compat dir name
+		add(filepath.Join(home, ".rheic"))           // legacy-compat legacy dotdir
 	}
 	return candidates
 }
@@ -42,7 +42,7 @@ func pruneEnvironmentBindings(plan envfile.Plan) error {
 	}
 	var firstErr error
 	for _, path := range credentialsBindingsCandidates() {
-		info, err := os.Stat(path) // #nosec G304,G703 -- path is one of the fixed Rheic config-dir candidates, never derived from user input beyond $HOME/$XDG_CONFIG_HOME
+		info, err := os.Stat(path) // #nosec G304,G703 -- path is one of the fixed Gyrel config-dir candidates, never derived from user input beyond $HOME/$XDG_CONFIG_HOME
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
@@ -70,14 +70,14 @@ func pruneEnvironmentBindings(plan envfile.Plan) error {
 func pruneBindingsFile(path, name string) error {
 	// Reject symlinks before reading: rename would otherwise replace whatever
 	// the link points to outside the config directory.
-	info, err := os.Lstat(path) // #nosec G304,G703 -- fixed Rheic candidate path; symlink targets are refused below
+	info, err := os.Lstat(path) // #nosec G304,G703 -- fixed Gyrel candidate path; symlink targets are refused below
 	if err != nil {
 		return fmt.Errorf("inspect credentials bindings %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("credentials bindings %s is not a regular file", path)
 	}
-	data, err := os.ReadFile(path) // #nosec G304,G703 -- fixed Rheic candidate store path after regular-file check
+	data, err := os.ReadFile(path) // #nosec G304,G703 -- fixed Gyrel candidate store path after regular-file check
 	if err != nil {
 		return fmt.Errorf("read credentials bindings %s: %w", path, err)
 	}

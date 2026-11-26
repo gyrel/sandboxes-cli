@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 // startCreateProgressWatch opens the best-effort resilient Watch follower

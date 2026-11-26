@@ -1,5 +1,5 @@
 // Package envfile loads the deliberately limited, read-only subset of
-// Docker Sandboxes environment files currently supported by Rheic.
+// Docker Sandboxes environment files currently supported by Gyrel.
 package envfile
 
 import (

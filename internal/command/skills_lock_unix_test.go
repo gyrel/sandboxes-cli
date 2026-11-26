@@ -17,10 +17,10 @@ import (
 )
 
 func TestSkillsLockProcessHelper(t *testing.T) {
-	if os.Getenv("RHEIC_SKILLS_LOCK_HELPER") != "hold" {
+	if os.Getenv("GYREL_SKILLS_LOCK_HELPER") != "hold" {
 		return
 	}
-	root, err := os.OpenRoot(os.Getenv("RHEIC_SKILLS_LOCK_ROOT"))
+	root, err := os.OpenRoot(os.Getenv("GYREL_SKILLS_LOCK_ROOT"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestSkillsLockBlocksAcrossProcesses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSkillsLockProcessHelper$") // #nosec G204 -- same test executable, fixed test filter.
-	cmd.Env = append(os.Environ(), "RHEIC_SKILLS_LOCK_HELPER=hold", "RHEIC_SKILLS_LOCK_ROOT="+dir)
+	cmd.Env = append(os.Environ(), "GYREL_SKILLS_LOCK_HELPER=hold", "GYREL_SKILLS_LOCK_ROOT="+dir)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestSkillsLockBlocksAcrossProcesses(t *testing.T) {
 }
 
 func TestSkillsImportProcessHelper(t *testing.T) {
-	source := os.Getenv("RHEIC_SKILLS_IMPORT_SOURCE")
+	source := os.Getenv("GYREL_SKILLS_IMPORT_SOURCE")
 	if source == "" {
 		return
 	}
@@ -105,7 +105,7 @@ func TestSkillsConcurrentImportsPreserveRegistry(t *testing.T) {
 	commands := make([]*exec.Cmd, 0, 2)
 	for _, source := range []string{alpha, beta} {
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSkillsImportProcessHelper$") // #nosec G204 -- same test executable, fixed test filter.
-		cmd.Env = append(os.Environ(), "RHEIC_SKILLS_IMPORT_SOURCE="+source)
+		cmd.Env = append(os.Environ(), "GYREL_SKILLS_IMPORT_SOURCE="+source)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +175,7 @@ func TestSkillsLockReleasedWhenProcessDies(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSkillsLockProcessHelper$") // #nosec G204 -- same test executable, fixed test filter.
-	cmd.Env = append(os.Environ(), "RHEIC_SKILLS_LOCK_HELPER=hold", "RHEIC_SKILLS_LOCK_ROOT="+dir)
+	cmd.Env = append(os.Environ(), "GYREL_SKILLS_LOCK_HELPER=hold", "GYREL_SKILLS_LOCK_ROOT="+dir)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

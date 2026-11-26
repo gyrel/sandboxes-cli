@@ -198,7 +198,7 @@ func (r Result) sorted() Result {
 }
 
 // kitSpecNames lists the root descriptor names accepted for a kit, in order.
-// The stem-named form is the Docker kit v3 layout; spec.yaml is Rheic's.
+// The stem-named form is the Docker kit v3 layout; spec.yaml is Gyrel's.
 func kitSpecNames(stem string) []string {
 	return []string{stem + ".yaml", stem + ".yml", kitSpecFile, "spec.yml"}
 }

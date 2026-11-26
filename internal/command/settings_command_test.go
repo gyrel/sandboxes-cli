@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func runSettings(t *testing.T, envPath string, args ...string) (*bytes.Buffer, int) {
@@ -22,7 +22,7 @@ func runSettings(t *testing.T, envPath string, args ...string) (*bytes.Buffer, i
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, Socket: filepath.Join(t.TempDir(), "sandboxesd.sock"),
 		NewClient: func(string) (sdk.Client, error) { return nil, errors.New("settings does not need a daemon") }}
-	t.Setenv("RHEIC_SETTINGS_FILE", envPath)
+	t.Setenv("GYREL_SETTINGS_FILE", envPath)
 	return &out, runner.Run(context.Background(), append([]string{"settings"}, args...))
 }
 
@@ -134,7 +134,7 @@ func TestSettingsMarksRestartRequiredKeys(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	if !strings.Contains(out.String(), "restart rheicd to apply proxy.daemon") {
+	if !strings.Contains(out.String(), "restart gyreld to apply proxy.daemon") {
 		t.Fatalf("restart notice missing: %q", out.String())
 	}
 }

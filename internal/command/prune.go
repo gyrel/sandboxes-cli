@@ -12,7 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 	"gopkg.in/yaml.v3"
 )
 

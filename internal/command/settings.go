@@ -14,14 +14,16 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/rheic/sandboxes-cli/internal/settings"
+	"github.com/gyrel/sandboxes-cli/internal/settings"
 )
 
 const (
+	// settingsUsage references the legacy-compat ~/.config/rheic directory,
+	// retained so existing settings files keep loading without a migration.
 	settingsUsage = `Usage: rsbx settings COMMAND
 
 View and manage host settings in ~/.config/rheic/settings.toml. The catalog
-lists the pinned Docker Sandboxes matrix; Rheic consumes the documented
+lists the pinned Docker Sandboxes matrix; Gyrel consumes the documented
 local subset and stores the rest as validated overrides.
 
 Commands:
@@ -103,7 +105,7 @@ func (r *Runner) settings(args []string) int {
 }
 
 func (r *Runner) settingsPath() string {
-	if path := strings.TrimSpace(os.Getenv("RHEIC_SETTINGS_FILE")); path != "" {
+	if path := strings.TrimSpace(os.Getenv("GYREL_SETTINGS_FILE")); path != "" {
 		return path
 	}
 	return settings.DefaultPath()
@@ -175,7 +177,7 @@ func boolMarker(value bool) string {
 	return ""
 }
 
-// settingRows lists the full catalog: the pinned Docker matrix plus Rheic
+// settingRows lists the full catalog: the pinned Docker matrix plus Gyrel
 // extensions, each with its override (file) or built-in default evaluated.
 func settingRows(values settings.Values) []settingOutput {
 	rows := make([]settingOutput, 0, 54)
@@ -371,7 +373,7 @@ func (r *Runner) settingsSet(args []string) int {
 	}
 	_, _ = fmt.Fprintf(r.Out, "set %s\n", args[0])
 	if restart := settingRestart(args[0]); restart {
-		_, _ = fmt.Fprintf(r.Out, "restart rheicd to apply %s\n", args[0])
+		_, _ = fmt.Fprintf(r.Out, "restart gyreld to apply %s\n", args[0])
 	}
 	return 0
 }

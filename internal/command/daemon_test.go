@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/daemonctl"
+	"github.com/gyrel/sandboxes-cli/internal/daemonctl"
 )
 
 type fakeDaemonSupervisor struct {

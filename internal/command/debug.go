@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rheic/slogx"
+	"github.com/gyrel/slogx"
 )
 
 // Debug events are a closed set. Logging an event that is not listed here is

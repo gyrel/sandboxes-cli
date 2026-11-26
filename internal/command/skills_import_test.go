@@ -186,7 +186,7 @@ func TestSkillsImportNeverOverwritesForeignDirectory(t *testing.T) {
 	source := writeTestSkill(t, t.TempDir(), "alpha", "Test skill", nil)
 	for _, extra := range [][]string{nil, {"--force"}} {
 		code, output := importTestSkill(t, source, extra...)
-		if code != 1 || !strings.Contains(output, "not imported by Rheic") {
+		if code != 1 || !strings.Contains(output, "not imported by Gyrel") {
 			t.Fatalf("extra=%v exit=%d output=%q", extra, code, output)
 		}
 	}

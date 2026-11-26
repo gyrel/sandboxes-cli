@@ -12,7 +12,7 @@ import (
 )
 
 func TestNamedPipeEndpointDetection(t *testing.T) {
-	path := fmt.Sprintf(`\\.\pipe\rheic-test-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	path := fmt.Sprintf(`\\.\pipe\gyrel-test-%d-%d`, os.Getpid(), time.Now().UnixNano())
 	if socketPathExists(path) {
 		t.Fatal("nonexistent pipe reported as present")
 	}

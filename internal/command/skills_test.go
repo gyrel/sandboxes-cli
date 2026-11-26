@@ -22,7 +22,7 @@ func setSkillsTestHome(t *testing.T) string {
 }
 
 func skillsTestConfig(home string) string {
-	return filepath.Join(home, ".config", "rheic")
+	return filepath.Join(home, ".config", "rheic") // legacy-compat dir name
 }
 
 func runSkillsTest(t *testing.T, args ...string) (int, string) {

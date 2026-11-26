@@ -16,9 +16,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 )
 
 const (
@@ -101,7 +101,7 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	format := fs.String("format", listFormatTable, "output format: table, json, yaml or github-issue")
 	verify := fs.String("verify", "", "verify a diagnostic archive")
 	bundle := fs.Bool("bundle", false, "write a redacted diagnostic bundle archive instead of the host report")
-	out := fs.String("out", "", "bundle target path (default ./rheic-diagnose-<UTC timestamp>.tar.gz)")
+	out := fs.String("out", "", "bundle target path (default ./gyrel-diagnose-<UTC timestamp>.tar.gz)")
 	sandbox := fs.String("sandbox", "", "limit the bundle to one sandbox name or id")
 	since := fs.String("since", "", "bundle daemon log tail cutoff: RFC 3339 time or positive duration")
 	paranoid := fs.Bool("paranoid", false, "hash sandbox and image names in the bundle")
@@ -349,7 +349,7 @@ func checkHostProcesses() diagnoseCheck {
 		return check
 	}
 	check.Status = diagnosePass
-	check.Detail = fmt.Sprintf("%d rheicd, %d containerd-shim-nerdbox-v1", daemons, shims)
+	check.Detail = fmt.Sprintf("%d gyreld, %d containerd-shim-nerdbox-v1", daemons, shims)
 	return check
 }
 
@@ -513,7 +513,7 @@ func checkSSHClientConfig() diagnoseCheck {
 		check.Detail = "cannot read ~/.ssh/config"
 		return check
 	}
-	if containsRheicSSHConfig(string(data)) {
+	if containsGyrelSSHConfig(string(data)) {
 		check.Status = diagnosePass
 		check.Detail = "rsbx managed entries present"
 		return check

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func TestPrepareSkillsModes(t *testing.T) {
@@ -23,7 +23,7 @@ func TestPrepareSkillsModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(config, "rheic", "skills")
+	want := filepath.Join(config, "rheic", "skills") // legacy-compat dir name
 	if got == nil || got.Mode != sdk.SkillsReadOnly || got.StorePath != want {
 		t.Fatalf("got %+v, want store %q", got, want)
 	}
@@ -48,7 +48,7 @@ func TestResolveSkillsMode(t *testing.T) {
 	}
 	// Omitted flag with no settings file uses the catalog default (readonly),
 	// matching the sbx run --help contract.
-	t.Setenv("RHEIC_SETTINGS_FILE", filepath.Join(config, "absent.toml"))
+	t.Setenv("GYREL_SETTINGS_FILE", filepath.Join(config, "absent.toml"))
 	got, err := (&Runner{}).resolveSkillsMode("")
 	if err != nil || got != "readonly" {
 		t.Fatalf("default mode: %q, %v", got, err)
@@ -58,7 +58,7 @@ func TestResolveSkillsMode(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte("skills.defaultMode = \"off\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("RHEIC_SETTINGS_FILE", settingsPath)
+	t.Setenv("GYREL_SETTINGS_FILE", settingsPath)
 	if runtime.GOOS == "windows" {
 		// Windows ACL validation is not implemented; settings loading stays
 		// fail closed there (see settings_windows_test.go), so the

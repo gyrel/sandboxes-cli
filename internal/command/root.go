@@ -17,11 +17,11 @@ import (
 	"github.com/gdamore/tcell/v3"
 	"golang.org/x/term"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
-	"github.com/rheic/slogx"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
+	"github.com/gyrel/slogx"
 
-	"github.com/rheic/sandboxes-cli/internal/daemonctl"
-	"github.com/rheic/sandboxes-cli/internal/kit"
+	"github.com/gyrel/sandboxes-cli/internal/daemonctl"
+	"github.com/gyrel/sandboxes-cli/internal/kit"
 )
 
 const (
@@ -744,7 +744,7 @@ func (r *Runner) serviceSecretRemoveAll(ctx context.Context, args []string) int 
 		r.error(err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(r.Out, "Removed %d inventoried Rheic-managed host credentials\n", removed)
+	_, _ = fmt.Fprintf(r.Out, "Removed %d inventoried Gyrel-managed host credentials\n", removed)
 	_, _ = fmt.Fprintln(r.Out, "Custom-secret storage is unavailable and was not included.")
 	return 0
 }
@@ -2050,7 +2050,7 @@ func (r *Runner) client() (sdk.Client, error) {
 
 func (r *Runner) usage() {
 	const help = `Description:
-  Rheic Sandboxes manages isolated local environments for coding agents.
+  Gyrel Sandboxes manages isolated local environments for coding agents.
 
 Usage:
   rsbx COMMAND

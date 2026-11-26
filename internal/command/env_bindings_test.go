@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 func TestPruneBindingsFileVariants(t *testing.T) {
@@ -129,7 +129,7 @@ func TestPruneBindingsFileRefusesCorruptedAndSymlink(t *testing.T) {
 	}
 }
 
-func TestCredentialsCandidatesAreRheicOnly(t *testing.T) {
+func TestCredentialsCandidatesAreGyrelOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
@@ -149,10 +149,10 @@ func TestEnvironmentRemovePrunesBindingsAndSparesSbx(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
-	rheicDir := filepath.Join(home, ".config", "rheic")
+	t.Setenv("USERPROFILE", home)                       // os.UserHomeDir on Windows
+	gyrelDir := filepath.Join(home, ".config", "rheic") // legacy-compat dir name
 	sbxDir := filepath.Join(home, ".config", "sbx")
-	for _, dir := range []string{rheicDir, sbxDir} {
+	for _, dir := range []string{gyrelDir, sbxDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -174,12 +174,12 @@ func TestEnvironmentRemovePrunesBindingsAndSparesSbx(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"env", "rm", "--force", "--prune-bindings", path}); code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	rheic, err := os.ReadFile(filepath.Join(rheicDir, "credentials.yaml"))
+	gyrel, err := os.ReadFile(filepath.Join(gyrelDir, "credentials.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(rheic), "env-remove") || !strings.Contains(string(rheic), "other-env") {
-		t.Fatalf("rheic bindings after prune: %q", rheic)
+	if strings.Contains(string(gyrel), "env-remove") || !strings.Contains(string(gyrel), "other-env") {
+		t.Fatalf("gyrel bindings after prune: %q", gyrel)
 	}
 	sbx, err := os.ReadFile(filepath.Join(sbxDir, "credentials.yaml"))
 	if err != nil {

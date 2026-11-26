@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/rheic/slogx/redact"
+	"github.com/gyrel/slogx/redact"
 )
 
 // Archive member names are untrusted. Only display the expected bundle names;

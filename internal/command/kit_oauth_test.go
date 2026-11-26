@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rheic/sandboxes-cli/internal/kit"
+	"github.com/gyrel/sandboxes-cli/internal/kit"
 )
 
 func TestKitInspectMatchesDockerDirectoryFlagGrammar(t *testing.T) {

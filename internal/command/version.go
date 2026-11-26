@@ -12,9 +12,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 
-	"github.com/rheic/sandboxes-cli/internal/version"
+	"github.com/gyrel/sandboxes-cli/internal/version"
 )
 
 const (

@@ -17,14 +17,14 @@ import (
 
 const skillsUsage = `Usage: rsbx skills COMMAND
 
-Experimental host-side agent skills store. Rheic keeps imported skills in its
+Experimental host-side agent skills store. Gyrel keeps imported skills in its
 own config directory, never inside a sandbox workspace or Docker state.
 
 Commands:
   add REPOSITORY  add skills from a Git repository (https URL, owner/repository or local directory)
-  ls, list        list skills imported by Rheic
+  ls, list        list skills imported by Gyrel
   import [PATH]   import from supported host directories or one local directory
-  rm, remove      remove a skill imported by Rheic
+  rm, remove      remove a skill imported by Gyrel
   update [NAME]   update skills added from a repository
 
 Import requires PATH to be a real directory containing SKILL.md with YAML

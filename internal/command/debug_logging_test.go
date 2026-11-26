@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
-	"github.com/rheic/slogx"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
+	"github.com/gyrel/slogx"
 )
 
 type debugSandbox struct {

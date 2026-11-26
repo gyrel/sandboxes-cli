@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 // testCloneToken is a fixed, well-formed sandbox token used by clone tests.
@@ -184,6 +184,9 @@ func TestReconcileCloneRemoteRefreshIsByteIdempotent(t *testing.T) {
 func TestReconcileCloneRemoteNeverRewritesForeignRemote(t *testing.T) {
 	t.Parallel()
 	const url = "git://127.0.0.1:4321/demo"
+	// The "rheic-" git config keys below are legacy-compat: the pre-rename
+	// on-disk keys are retained (see cloneManagedByKey/cloneLastURLKey) so
+	// existing clones keep their management bookkeeping.
 	tests := []struct {
 		name     string
 		settings map[string]string
@@ -251,6 +254,7 @@ func TestReconcileCloneRemoteNeverRewritesForeignRemote(t *testing.T) {
 
 func seedCloneRemote(t *testing.T, configPath, url string, refspecs []string) {
 	t.Helper()
+	// legacy-compat "rheic-" git config keys (see cloneManagedByKey/cloneLastURLKey).
 	for key, value := range map[string]string{
 		"remote.sandbox-demo.url":              url,
 		"remote.sandbox-demo.rheic-last-url":   url,

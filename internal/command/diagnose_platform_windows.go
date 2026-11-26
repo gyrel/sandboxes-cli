@@ -27,6 +27,6 @@ func countHostProcesses() (daemons, shims int, err error) {
 	return 0, 0, errors.New("host process scan is not implemented on Windows")
 }
 
-func containsRheicSSHConfig(data string) bool {
+func containsGyrelSSHConfig(data string) bool {
 	return strings.Contains(data, "rsbx") || strings.Contains(data, "sandboxesd")
 }

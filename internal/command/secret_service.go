@@ -16,7 +16,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const (
@@ -835,7 +835,7 @@ func (r *Runner) serviceSecretSetCustom(ctx context.Context, args []string) int 
 		return 2
 	}
 	if flagWasProvided(fs, "header") || flagWasProvided(fs, "format") {
-		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: Rheic local is vault-only; legacy static headers (--header/--format) are removed")
+		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: Gyrel local is vault-only; legacy static headers (--header/--format) are removed")
 		return 1
 	}
 	valueProvided := flagWasProvided(fs, "value") || flagWasProvided(fs, "token") || flagWasProvided(fs, "t")

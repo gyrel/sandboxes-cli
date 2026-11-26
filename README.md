@@ -1,13 +1,13 @@
 # sandboxes-cli
 
-<img src="docs/assets/rheic-shark.png" alt="Rheic shark logo" width="180">
+<img src="docs/assets/gyrel-shark.png" alt="Gyrel shark logo" width="180">
 
 
 Status: pre-alpha.
 
 ## Import path migration
 
-The canonical Go module path is now `github.com/rheic/sandboxes-cli` (previously `github.com/quoiner/sandboxes-cli`). Update imports and `go.mod` requirements when moving to a release that includes this change. The old module path is not kept as a compatibility alias. Rheic reads settings only from `~/.config/rheic/settings.toml` (or `$XDG_CONFIG_HOME/rheic/settings.toml`) and uses its own `com.rheic.*` keychain services; no legacy brand settings or keychain paths are consulted.
+The canonical Go module path is now `github.com/gyrel/sandboxes-cli` (previously `github.com/rheic/sandboxes-cli`, and before that `github.com/quoiner/sandboxes-cli`). Update imports and `go.mod` requirements when moving to a release that includes this change. The old module paths are not kept as compatibility aliases. Gyrel reads settings from `~/.config/rheic/settings.toml` (or `$XDG_CONFIG_HOME/rheic/settings.toml`); the pre-rename `rheic` config directory is retained for data-migration safety. Gyrel uses its own `com.gyrel.*` keychain services.
 
 Command-line and terminal client. Uses sandboxes-go-sdk for sandbox operations
 and the sandboxes-api contract directly for the read-only organization policy
@@ -19,7 +19,7 @@ and JSON output.
 ## Install (macOS/Linux, no manual approval)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rheic/sandboxes-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gyrel/sandboxes-cli/main/scripts/install.sh | bash
 ```
 
 The installer downloads the release asset for the current OS/architecture,
@@ -63,7 +63,7 @@ match the environment file. It prompts on a terminal; `--force` skips the
 prompt and allows deletion while the sandbox is in use. It leaves global
 credential bindings untouched. Kits, credentials, host commands, and MCP
 declarations remain unsupported and fail closed.
-`env apply` and `env ls` are not Docker `sbx` commands; Rheic keeps the upstream
+`env apply` and `env ls` are not Docker `sbx` commands; Gyrel keeps the upstream
 `create` name for provisioning.
 
 ## Debug output
@@ -71,7 +71,7 @@ declarations remain unsupported and fail closed.
 `-D`/`--debug` writes structured diagnostic events to stderr. It is accepted in
 the global prefix and after a subcommand where that command's grammar defines
 the flag; `--debug=false` disables it, and `--` keeps later arguments
-positional. Debug records use the released `github.com/rheic/slogx` logger with a
+positional. Debug records use the released `github.com/gyrel/slogx` logger with a
 closed event and attribute allowlist. Arguments, environment values, workspace
 paths, sandbox names, credentials, and raw error text are not logged. The flag
 does not change daemon log levels. Debug event coverage is not full parity with
@@ -178,8 +178,8 @@ rsbx skills remove my-skill
 ```
 
 The `rsbx tui` dashboard draws the supplied blue shark logo directly in the
-terminal using block characters, alongside the Rheic name, brand colors, and
-sandbox status. The README logo image is `docs/assets/rheic-shark.png`.
+terminal using block characters, alongside the Gyrel name, brand colors, and
+sandbox status. The README logo image is `docs/assets/gyrel-shark.png`.
 `rsbx completion bash|zsh|fish|powershell` prints a completion script generated
 from the current command tree. `rsbx setup` is experimental and read-only: it
 reports the platform, daemon socket reachability, runtime assets, required
@@ -204,7 +204,7 @@ hold a protected child. `--detach` creates and starts without attaching
 and prints the sandbox ID. `--cpus`/`--memory` apply only when creating;
 reusing an existing sandbox warns and keeps its resources. `-e/--env` and
 `--env-file` add session env overrides. `--rm` removes the sandbox after the
-session (rejected with `--detach`). `kimi` retains its existing Rheic extension
+session (rejected with `--detach`). `kimi` retains its existing Gyrel extension
 path. The Docker v0.50.1 built-in set is exposed through
 `rsbx agents list`: `claude`, `codex`, `copilot`, `cursor`, `devin`,
 `docker-agent`, `droid`, `gemini`, `kiro`, `opencode`, and `shell`. The nine
@@ -213,7 +213,7 @@ and select the dedicated guest Docker profile. Their status remains preview
 until per-agent authentication and VM lifecycle acceptance passes. `rsbx run`
 accepts preview agents and preserves Docker's argument rule:
 agent flags after `--` extend the default command, while a bare subcommand or
-prompt replaces it. `dsh` remains a Rheic preview extension; `cline` is
+prompt replaces it. `dsh` remains a Gyrel preview extension; `cline` is
 unsupported. The embedded registry is `internal/agent/registry.yaml`. Multiple
 workspaces are supported; a
 `:ro` suffix mounts a directory read-only. `--publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]`
@@ -223,7 +223,8 @@ lists the stored bindings; `ports --publish ...` / `--unpublish ...` change them
 live; omitting `HOST_PORT` allocates an ephemeral host port on the selected
 loopback IP.
 Custom agents are loaded from `~/.config/rheic/agents.yaml` (honoring
-`XDG_CONFIG_HOME`, or `RHEIC_AGENTS_FILE`). A custom entry cannot shadow a
+`XDG_CONFIG_HOME`, or `GYREL_AGENTS_FILE`; the `rheic` directory is retained for
+data-migration safety). A custom entry cannot shadow a
 built-in name; `preview` entries may use a mutable tag, while `available`
 entries must pin `@sha256:`. The file must be a regular, non-group/world-writable
 file. Example:
@@ -231,7 +232,7 @@ file. Example:
 ```yaml
 agents:
   - name: hermes
-    image: rheic/hermes-sandbox:local
+    image: gyrel/hermes-sandbox:local
     command: ["hermes"]
     status: preview
     notes: local custom image
@@ -239,7 +240,7 @@ agents:
 
 `rsbx agents ls` lists custom agents alongside built-ins, and `rsbx run hermes`
 resolves the configured image and command. Custom images are host-owned input;
-Rheic does not build or authenticate them.
+Gyrel does not build or authenticate them.
 
 `--allow-network CIDR[:PORT]` and `--deny-network CIDR[:PORT]` (optional `udp:`
 prefix) add create-time IPv4 egress rules.
@@ -316,7 +317,8 @@ secrets in argv (prefer a bounded, permission-restricted env file).
 session. `rsbx settings ls|get|set|unset` manages
 `~/.config/rheic/settings.toml` (`dns.upstream`, `policy.profile`,
 `defaults.cpus`, `defaults.memory_mib`, `sandbox.disk.dockerVolume`, and
-`mcp.remote.allowedHosts`). `settings ls --format json|yaml` and
+`mcp.remote.allowedHosts`; the `rheic` directory is retained for data-migration
+safety). `settings ls --format json|yaml` and
 `settings get --json` use sbx's typed record fields: `key`, `value`, `type`,
 `source`, `default`, `env_var` when defined, and `requires_restart` when a
 daemon restart is needed. Booleans and integers are emitted as JSON booleans
@@ -330,7 +332,8 @@ scripts to a supported host proxy route; the proxy keeps the real credential on
 the host and adds it only to requests sent to a fixed provider host.
 
 `rsbx skills` is experimental. It manages a host-side store under
-`~/.config/rheic/skills` (or `$XDG_CONFIG_HOME/rheic/skills`) and never writes
+`~/.config/rheic/skills` (or `$XDG_CONFIG_HOME/rheic/skills`; the `rheic`
+directory is retained for data-migration safety) and never writes
 inside a sandbox workspace or Docker state. `rsbx run --skills=readonly` and
 `rsbx create --skills=readonly` expose that store to a new sandbox; the default
 is `off` until the Linux runtime path is qualified. Read-only mode links each
@@ -350,10 +353,10 @@ requires a separate `--allow-link NAME=ABSOLUTE_TARGET` for its exact canonical
 target; `--force` does not grant that approval. Source-directory links, nested
 links, hard links, special files and oversized trees are rejected. Import may
 stop after importing earlier skills if a later skill fails. Identical re-imports are
-no-ops, `--force` replaces only content Rheic previously imported, and
+no-ops, `--force` replaces only content Gyrel previously imported, and
 unmanaged directories are never overwritten. `rsbx skills list` supports table,
 JSON, YAML and quiet output. `rsbx skills remove NAME` prompts unless `--force`
-and removes only skills recorded in Rheic's registry. `rsbx skills add
+and removes only skills recorded in Gyrel's registry. `rsbx skills add
 REPOSITORY` clones an https URL, an `owner/repository` GitHub shorthand or a
 local directory into a private temporary directory and imports its skills under
 the same rules as import. URLs with credentials or query strings are refused,
@@ -444,7 +447,7 @@ rsbx secret set github --command 'gh auth token' --refresh on-demand
 ```
 
 The authenticated `op` or `aws` CLI must be available to the daemon on the
-host. Rheic stores the reference or command in the host credential vault and
+host. Gyrel stores the reference or command in the host credential vault and
 resolves it only while the host proxy needs the credential; the guest receives
 only the existing proxy placeholder. Commands run through the host shell from a
 fresh temporary directory, with a 30-second deadline, bounded output and
@@ -509,7 +512,7 @@ per-sandbox vault lifecycle are implemented.
 using the same Docker public device-flow client as Docker CLI and Docker
 Sandboxes. Login starts device authorization at Docker, opens the browser,
 waits for approval, exchanges the grant for a Docker Hub PAT, and stores the
-credentials in the native host vault. No Rheic OAuth registration is needed.
+credentials in the native host vault. No Gyrel OAuth registration is needed.
 For headless login, use `rsbx login --username USER --password-stdin` and pipe a
 Docker Hub password or personal access token into stdin. The daemon validates it
 with Docker Hub before storing it; the token is never accepted as a command-line
@@ -530,7 +533,7 @@ registry or enable authenticated pulls from a sandbox. Registry broker and
 policy enforcement are still under implementation; the command says so on
 success.
 
-`SANDBOXES_SOCKET` can replace the `--socket` flag. Rheic commands and examples use `rsbx`; `sandboxes` is only the repository name. Docker Sandboxes commands are written as `sbx ...` only when explicitly discussing Docker's original product. A Rheic `sbx` compatibility alias is not installed by default; it requires that `command -v sbx` be empty and explicit user consent.
+`SANDBOXES_SOCKET` can replace the `--socket` flag. Gyrel commands and examples use `rsbx`; `sandboxes` is only the repository name. Docker Sandboxes commands are written as `sbx ...` only when explicitly discussing Docker's original product. A Gyrel `sbx` compatibility alias is not installed by default; it requires that `command -v sbx` be empty and explicit user consent.
 
 ## Development
 

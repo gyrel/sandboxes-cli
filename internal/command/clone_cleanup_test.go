@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 type cloneRemoteState int
@@ -291,6 +291,7 @@ func cloneRemoteValues(remote, sandboxID string, state cloneRemoteState) map[str
 	}
 	url := "git://127.0.0.1:4321/demo"
 	name := strings.TrimPrefix(remote, "sandbox-")
+	// legacy-compat "rheic-" git config keys (see cloneManagedByKey/cloneLastURLKey).
 	values := map[string][]string{
 		"remote." + remote + ".url":              {url},
 		"remote." + remote + ".rheic-managed-by": {sandboxID},

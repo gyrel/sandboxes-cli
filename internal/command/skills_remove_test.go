@@ -78,7 +78,7 @@ func TestSkillsRemoveCases(t *testing.T) {
 			},
 			args:       []string{"rm", "--force", "foreign"},
 			wantCode:   1,
-			wantOutput: "not managed by Rheic",
+			wantOutput: "not managed by Gyrel",
 			check: func(t *testing.T, home, skill string) {
 				t.Helper()
 				data, err := os.ReadFile(filepath.Join(skillsTestConfig(home), skillsDirectoryName, skill, "marker"))

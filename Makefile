@@ -4,11 +4,11 @@ COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 .PHONY: build dev-bundle test check fmt lint vuln clean
 
 build:
-	go build -ldflags "-X github.com/rheic/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o $(BIN) ./cmd/rsbx
+	go build -ldflags "-X github.com/gyrel/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o $(BIN) ./cmd/rsbx
 
 # Local workspace bundle; releases must use tagged module dependencies.
 dev-bundle:
-	go build -ldflags "-X github.com/rheic/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o dist/rsbx ./cmd/rsbx
+	go build -ldflags "-X github.com/gyrel/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o dist/rsbx ./cmd/rsbx
 	cd ../sandboxes-daemon && go build -o ../sandboxes-cli/dist/sandboxesd ./cmd/sandboxesd
 	cd ../sandboxes-guest && CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go build -trimpath -o ../sandboxes-cli/dist/sandboxes-guest-linux-$$(go env GOARCH) ./cmd/sandboxes-guest
 

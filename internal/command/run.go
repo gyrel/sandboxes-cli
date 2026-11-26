@@ -15,14 +15,14 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const (
 	runUsage = `usage: rsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]
 
 Create a local sandbox, start it, and attach to an agent. This command uses the
-local Rheic daemon; cloud sandboxes and remote/OCI kits are not supported here.
+local Gyrel daemon; cloud sandboxes and remote/OCI kits are not supported here.
 The default workspace is the current directory. Pass additional workspace paths
 after PATH; append :ro to make a workspace read-only. A single-file read-only
 workspace is supported. --deny-write keeps the selected workspaces and adds PATH
@@ -46,7 +46,7 @@ stderr; stdout and exit codes are unchanged. --no-progress suppresses it.
 source must be the root of a Git repository with a .git directory.
 
 Agents:
-  kimi                      available (Rheic extension)
+  kimi                      available (Gyrel extension)
   claude, copilot, cursor, devin, docker-agent, droid, gemini, kiro, opencode
   codex, shell              preview (launchable; auth and live VM behavior not fully validated)
   dsh                       preview extension
@@ -502,28 +502,28 @@ func agentHostProxyProfile(agent string) (agentProxyProfile, bool) {
 		return agentProxyProfile{
 			service: githubService, credentialEnv: ghTokenEnv, conflicts: []string{ghTokenEnv, githubTokenEnv},
 			additional: []proxyRouteMarker{
-				{environment: "RHEIC_PROXY_GITHUB_WEB", service: "github-web"},
-				{environment: "RHEIC_PROXY_GITHUB_RAW", service: "github-raw"},
-				{environment: "RHEIC_PROXY_GITHUB_GIST", service: "github-gist"},
-				{environment: "RHEIC_PROXY_GITHUB_COPILOT", service: "github-copilot"},
-				{environment: "RHEIC_PROXY_GITHUB_COPILOT_API", service: "github-copilot-api"},
+				{environment: "GYREL_PROXY_GITHUB_WEB", service: "github-web"},
+				{environment: "GYREL_PROXY_GITHUB_RAW", service: "github-raw"},
+				{environment: "GYREL_PROXY_GITHUB_GIST", service: "github-gist"},
+				{environment: "GYREL_PROXY_GITHUB_COPILOT", service: "github-copilot"},
+				{environment: "GYREL_PROXY_GITHUB_COPILOT_API", service: "github-copilot-api"},
 			},
 		}, true
 	case "cursor":
 		return agentProxyProfile{
 			service: cursorService, credentialEnv: cursorAPIKeyEnv, conflicts: []string{cursorAPIKeyEnv},
 			additional: []proxyRouteMarker{
-				{environment: "RHEIC_PROXY_CURSOR_API3", service: "cursor-api3"},
-				{environment: "RHEIC_PROXY_CURSOR_REPO42", service: "cursor-repo42"},
-				{environment: "RHEIC_PROXY_CURSOR_WEB", service: "cursor-web"},
+				{environment: "GYREL_PROXY_CURSOR_API3", service: "cursor-api3"},
+				{environment: "GYREL_PROXY_CURSOR_REPO42", service: "cursor-repo42"},
+				{environment: "GYREL_PROXY_CURSOR_WEB", service: "cursor-web"},
 			},
 		}, true
 	case "droid":
 		return agentProxyProfile{
 			service: droidService, credentialEnv: factoryAPIKeyEnv, conflicts: []string{factoryAPIKeyEnv, droidAPIKeyEnv},
 			additional: []proxyRouteMarker{
-				{environment: "RHEIC_PROXY_DROID_APP", service: "droid-app"},
-				{environment: "RHEIC_PROXY_DROID_RELAY", service: "droid-relay"},
+				{environment: "GYREL_PROXY_DROID_APP", service: "droid-app"},
+				{environment: "GYREL_PROXY_DROID_RELAY", service: "droid-relay"},
 			},
 		}, true
 	default:
@@ -1240,7 +1240,7 @@ func codexOAuthSession(agent string, argv, env []string) ([]string, []string) {
 	configured := make([]string, 0, len(argv)+2)
 	configured = append(configured, argv[0], "-c", "openai_base_url=http://127.0.0.1:3128/backend-api/codex")
 	configured = append(configured, argv[1:]...)
-	sessionEnv := append(append([]string(nil), env...), "CODEX_API_KEY=rheic-proxy-placeholder")
+	sessionEnv := append(append([]string(nil), env...), "CODEX_API_KEY=gyrel-proxy-placeholder")
 	return configured, sessionEnv
 }
 

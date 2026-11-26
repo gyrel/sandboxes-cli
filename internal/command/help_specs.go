@@ -66,7 +66,7 @@ func runHelp() commandHelp {
 			"Run an agent in a local sandbox, creating the sandbox if it does not already exist.",
 			"",
 			"Create a local sandbox, start it, and attach to an agent. This command uses the",
-			"local Rheic daemon; cloud sandboxes and remote/OCI kits are not supported here.",
+			"local Gyrel daemon; cloud sandboxes and remote/OCI kits are not supported here.",
 			"The default workspace is the current directory. Pass additional workspace paths",
 			"after PATH; append :ro to make a workspace read-only. Agent arguments after -- are",
 			"passed to the agent.",
@@ -531,7 +531,7 @@ func diagnoseHelp() commandHelp {
 			"the report: manifest, versions, platform, settings, sandbox inventory, policy",
 			"counts, pending approvals, a bounded daemon log tail and an error index.",
 			"--sandbox, --since and --paranoid compose onto --bundle; --out selects the",
-			"target path (default ./rheic-diagnose-<UTC timestamp>.tar.gz, never overwritten).",
+			"target path (default ./gyrel-diagnose-<UTC timestamp>.tar.gz, never overwritten).",
 			"",
 			"Redaction guarantee: secret values, workspace host paths and network rule targets",
 			"are never written to the bundle, and the finished archive is scanned with the",
@@ -563,7 +563,7 @@ func diagnoseHelp() commandHelp {
 			{Name: helpNameFormat, Value: helpValueString, Description: "Output format: table, json, yaml or github-issue"},
 			{Short: "h", Name: helpCommand, Description: "help for diagnose"},
 			{Name: listFormatJSON, Description: helpJSONDescription},
-			{Name: "out", Value: helpValueString, Description: "Bundle target path (default ./rheic-diagnose-<UTC timestamp>.tar.gz); an existing target is never overwritten"},
+			{Name: "out", Value: helpValueString, Description: "Bundle target path (default ./gyrel-diagnose-<UTC timestamp>.tar.gz); an existing target is never overwritten"},
 			{Name: helpNameSandbox, Value: helpValueString, Description: "Limit the bundle to one sandbox name or id (requires --bundle)"},
 			{Name: "paranoid", Description: "Replace sandbox and image names with stable SHA-256 prefixes (requires --bundle)"},
 			{Name: "since", Value: helpValueString, Description: "Daemon log tail cutoff: RFC 3339 time or positive duration (requires --bundle)"},
@@ -1295,7 +1295,7 @@ func secretRemoveHelp() commandHelp {
 			"rsbx secret rm --registry ghcr.io --all-sandboxes --force",
 		},
 		Flags: []commandFlagHelp{
-			{Name: helpNameAll, Description: "Remove inventoried Rheic credentials across scopes"},
+			{Name: helpNameAll, Description: "Remove inventoried Gyrel credentials across scopes"},
 			{Name: "all-sandboxes", Description: "Remove the all-sandboxes registry credential (requires --registry)"},
 			{Short: "f", Name: helpNameForce, Description: "Delete without confirmation prompt"},
 			{Name: "global", Description: "Deprecated: remove global credentials"},
@@ -1413,10 +1413,12 @@ func secretCustomHelp() commandHelp {
 func settingsHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
-			"View and manage settings for Rheic Sandboxes.",
+			"View and manage settings for Gyrel Sandboxes.",
 			"",
+			// legacy-compat: the pre-rename "rheic" config directory is retained
+			// so existing settings files keep loading without a migration.
 			"Settings live in ~/.config/rheic/settings.toml. The catalog lists the pinned",
-			"Docker Sandboxes matrix; Rheic consumes the documented local subset and stores",
+			"Docker Sandboxes matrix; Gyrel consumes the documented local subset and stores",
 			"the rest as validated overrides.",
 			"",
 			"Machine output uses the sbx settings record: key, value, type, source, default,",
@@ -1530,7 +1532,7 @@ func templateInspectHelp() commandHelp {
 func kitHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
-			"Manage local Rheic kits.",
+			"Manage local Gyrel kits.",
 			"",
 			"Supports the Docker Kits v2 sandbox subset and Docker kit v3 descriptors",
 			"(offline inspection only; no kit builder is implemented). Kits are unsigned",
@@ -1635,7 +1637,7 @@ func kitPackHelp() commandHelp {
 
 func tuiHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"Open the interactive RHEIC sandbox dashboard."},
+		Description: []string{"Open the interactive GYREL sandbox dashboard."},
 		Usage:       []string{"rsbx tui [flags]"},
 		Examples:    []string{"rsbx tui"},
 		Flags: []commandFlagHelp{
@@ -1662,7 +1664,7 @@ func setupHelp() commandHelp {
 		Description: []string{
 			"EXPERIMENTAL: this command may change or be removed in future releases.",
 			"",
-			"Check whether this host has the components needed by local Rheic sandboxes.",
+			"Check whether this host has the components needed by local Gyrel sandboxes.",
 			"",
 			"The check is read-only: it never installs software, changes settings, writes",
 			"files, or starts a VM. Files being present does not prove a sandbox can boot.",
@@ -1683,9 +1685,9 @@ func setupHelp() commandHelp {
 func skillsHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
-			"Manage skills available to agents in Rheic sandboxes.",
+			"Manage skills available to agents in Gyrel sandboxes.",
 			"",
-			"Experimental host-side agent skills store. Rheic keeps imported skills in its",
+			"Experimental host-side agent skills store. Gyrel keeps imported skills in its",
 			"own config directory, never inside a sandbox workspace or Docker state.",
 			"",
 			"Import requires PATH to be a real directory containing SKILL.md with YAML",
@@ -1696,9 +1698,9 @@ func skillsHelp() commandHelp {
 		Usage: []string{"rsbx skills COMMAND"},
 		AvailableCommands: []commandSummary{
 			{Name: "add, a", Description: "Add skills from a Git repository"},
-			{Name: "ls, list", Description: "List skills imported by Rheic"},
+			{Name: "ls, list", Description: "List skills imported by Gyrel"},
 			{Name: commandImport, Description: "Validate and import a local skill directory"},
-			{Name: "rm, remove", Description: "Remove a skill imported by Rheic"},
+			{Name: "rm, remove", Description: "Remove a skill imported by Gyrel"},
 			{Name: "update, upgrade", Description: "Update skills added from repositories"},
 		},
 		Flags:  []commandFlagHelp{{Short: "h", Name: helpCommand, Description: "help for skills"}},
@@ -1715,7 +1717,7 @@ func skillsAddHelp() commandHelp {
 		Description: []string{
 			helpExperimentalLine,
 			"",
-			"Install skills from a Git repository for use in Rheic sandboxes. The",
+			"Install skills from a Git repository for use in Gyrel sandboxes. The",
 			"repository must contain one or more valid SKILL.md files.",
 			"",
 			"All discovered skills are installed when --skill is omitted. Use --skill one",
@@ -1770,7 +1772,7 @@ func skillsUpdateHelp() commandHelp {
 
 func skillsListHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"List skills imported by Rheic."},
+		Description: []string{"List skills imported by Gyrel."},
 		Usage:       []string{"rsbx skills ls [flags]"},
 		Flags: []commandFlagHelp{
 			{Name: helpNameFormat, Value: helpValueString, Description: helpFormatLowerDescription},
@@ -1784,7 +1786,7 @@ func skillsListHelp() commandHelp {
 func skillsImportHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
-			"Import a local skill directory into Rheic's host-side skills store.",
+			"Import a local skill directory into Gyrel's host-side skills store.",
 			"Without PATH, import from supported host directories in priority order.",
 			"Use --dry-run without PATH to preview candidates in supported host directories.",
 			"A skill-directory link requires --allow-link NAME=ABSOLUTE_TARGET. --force",
@@ -1794,13 +1796,13 @@ func skillsImportHelp() commandHelp {
 			"",
 			"Other symlinks, special files, oversized files and oversized trees are rejected.",
 			"Identical re-imports are no-ops. Use --force only to replace skill content that",
-			"Rheic already imported; unmanaged directories are never overwritten.",
+			"Gyrel already imported; unmanaged directories are never overwritten.",
 		},
 		Usage: []string{"rsbx skills import [flags] [PATH]", "rsbx skills import --dry-run"},
 		Flags: []commandFlagHelp{
 			{Name: dryRunName, Description: "preview host skills without importing them"},
 			{Name: "allow-link", Value: "NAME=ABSOLUTE_TARGET", Description: "approve one exact link target (repeatable)"},
-			{Short: "f", Name: helpNameForce, Description: "replace skill content previously imported by Rheic"},
+			{Short: "f", Name: helpNameForce, Description: "replace skill content previously imported by Gyrel"},
 			{Short: "h", Name: helpCommand, Description: "help for skills import"},
 		},
 	}
@@ -1809,8 +1811,8 @@ func skillsImportHelp() commandHelp {
 func skillsRemoveHelp() commandHelp {
 	return commandHelp{
 		Description: []string{
-			"Remove one skill that Rheic imported.",
-			"Directories in the skills store that are not recorded in Rheic's registry are",
+			"Remove one skill that Gyrel imported.",
+			"Directories in the skills store that are not recorded in Gyrel's registry are",
 			"never removed. Without --force, an interactive terminal confirmation is required.",
 		},
 		Usage: []string{"rsbx skills rm [flags] NAME"},
@@ -1841,7 +1843,7 @@ func completionHelp() commandHelp {
 
 func versionHelp() commandHelp {
 	return commandHelp{
-		Description: []string{"Show Rheic Sandboxes version information."},
+		Description: []string{"Show Gyrel Sandboxes version information."},
 		Usage:       []string{"rsbx version [flags]"},
 		Examples: []string{
 			"rsbx version",

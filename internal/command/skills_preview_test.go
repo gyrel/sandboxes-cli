@@ -27,7 +27,7 @@ func TestHostSkillsPreview(t *testing.T) {
 	if strings.Count(got, `Candidate "alpha"`) != 1 || !strings.Contains(got, `Candidate "alpha" from .agents/skills`) || !strings.Contains(got, `Candidate "beta"`) || strings.Contains(got, ".hidden") {
 		t.Fatalf("unexpected preview: %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "rheic")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".config", "rheic")); !os.IsNotExist(err) { // legacy-compat dir name
 		t.Fatalf("preview created a store: %v", err)
 	}
 }

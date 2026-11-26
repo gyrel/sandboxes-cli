@@ -15,7 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/rheic/sandboxes-go-sdk"
+	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 	setupStatusWarn    = "warn"
 	setupStatusSkip    = "skip"
 	setupDaemonTimeout = 3 * time.Second
-	setupRuntimeDirEnv = "RHEIC_RUNTIME_DIR"
+	setupRuntimeDirEnv = "GYREL_RUNTIME_DIR"
 )
 
 const setupUsage = `Usage: rsbx setup [--format table|json|yaml] [--json]
@@ -34,7 +34,7 @@ const setupUsage = `Usage: rsbx setup [--format table|json|yaml] [--json]
 EXPERIMENTAL: this command may change or be removed in future releases.
 
 Description:
-  Check whether this host has the components needed by local Rheic sandboxes.
+  Check whether this host has the components needed by local Gyrel sandboxes.
   The check is read-only: it never installs software, changes settings, writes
   files, or starts a VM. Files being present does not prove a sandbox can boot.
 
@@ -42,7 +42,7 @@ Checks:
   platform         host operating system and architecture
   daemon socket    reachability of the local sandboxesd endpoint
   runtime assets   kernel, root filesystem and nerdbox shim under
-                   $RHEIC_RUNTIME_DIR or ~/.sandboxes/runtime
+                   $GYREL_RUNTIME_DIR or ~/.sandboxes/runtime
   binaries         sandboxesd, containerd and ctr on PATH
   Docker CLI       optional; reported as a warning when absent
 
@@ -372,7 +372,7 @@ func setupDockerCheck(detector setupDetector) setupCheck {
 	path, err := detector.lookPath("docker")
 	if err != nil || path == "" {
 		check.Status = setupStatusWarn
-		check.Detail = "not found on PATH; optional for local Rheic sandboxes"
+		check.Detail = "not found on PATH; optional for local Gyrel sandboxes"
 		return check
 	}
 	check.Status = setupStatusPass
@@ -381,7 +381,7 @@ func setupDockerCheck(detector setupDetector) setupCheck {
 }
 
 func (r *Runner) writeSetupText(report setupReport) {
-	_, _ = fmt.Fprintln(r.Out, "Rheic Sandboxes host check (experimental, read-only)")
+	_, _ = fmt.Fprintln(r.Out, "Gyrel Sandboxes host check (experimental, read-only)")
 	_, _ = fmt.Fprintf(r.Out, "Scope: %s\nPlatform: %s/%s\nDaemon socket: %s\n\n",
 		report.Scope, report.Platform.OS, report.Platform.Arch, report.Daemon.Socket)
 	for _, check := range report.Checks {

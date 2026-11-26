@@ -88,6 +88,14 @@ var (
 	// the archive stays free of the guard's own_home/foreign_home patterns.
 	diagnoseHomeUnixPattern    = regexp.MustCompile(`(^|[\s"'=:(,])/(?:Users|home)/[^/"'\s\\]+`)
 	diagnoseHomeWindowsPattern = regexp.MustCompile(`(?i)(^|[\s"'=:(,])[A-Za-z]:\\Users\\[^\\/:*?"'<>|\s]+`)
+	// Absolute path runs in the daemon tail are replaced with a stable
+	// path_sha256 token before staging. The run matches at least three
+	// slash-prefixed segments; a boundary check in scrubTailPaths keeps
+	// relative runs and URL path components out of this rewrite.
+	diagnoseTailPathPattern = regexp.MustCompile(`(/[A-Za-z0-9._-]+){3,}`)
+	// URL spans are excluded so url_userinfo/url_query (and plain URL text)
+	// keep their existing treatment instead of being read as host paths.
+	diagnoseTailURLPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
 	// Optional members are dropped in this order when the size cap binds.
 	diagnoseBundleDropOrder = []string{bundleMemberApprovals, bundleMemberPolicies, bundleMemberConfig}
 )
@@ -297,6 +305,93 @@ func (b *diagnoseBundleBuild) nameOrHash(name string) string {
 		return name
 	}
 	return diagnoseHashName(name)
+}
+
+// diagnoseScrubTailPaths replaces absolute path candidates in one daemon-log
+// line with "path_sha256:" plus the first 12 hex characters of the path's
+// SHA-256. Paths are user topology rather than secrets, so hashing keeps the
+// same path comparable across logs without disclosing where it lives.
+//
+// Only standalone runs of at least three slash-prefixed segments are
+// rewritten. A run preceded by a path character is relative (for example
+// foo/bar/baz/qux) and is left alone, and any run inside a scheme:// URL is
+// left to the existing url_userinfo/url_query rules. Short (one- or
+// two-segment) paths such as /tmp or /var/log are not rewritten so slugs and
+// URL fragments stay readable.
+func diagnoseScrubTailPaths(line []byte) []byte {
+	if len(line) == 0 {
+		return line
+	}
+	urlSpans := diagnoseTailURLPattern.FindAllIndex(line, -1)
+	runs := diagnoseTailPathPattern.FindAllIndex(line, -1)
+	if len(runs) == 0 {
+		return line
+	}
+	var out bytes.Buffer
+	last := 0
+	replaced := false
+	for _, run := range runs {
+		start, end := run[0], run[1]
+		if start < last {
+			continue
+		}
+		if !diagnoseStandalonePathRun(line, start) {
+			continue
+		}
+		if diagnoseWithinSpans(start, urlSpans) {
+			continue
+		}
+		out.Write(line[last:start])
+		out.WriteString(diagnosePathToken(string(line[start:end])))
+		last = end
+		replaced = true
+	}
+	if !replaced {
+		return line
+	}
+	out.Write(line[last:])
+	return out.Bytes()
+}
+
+func diagnoseStandalonePathRun(line []byte, start int) bool {
+	if start == 0 {
+		return true
+	}
+	previous := line[start-1]
+	if previous == '/' || previous == '\\' || previous == '~' {
+		return false
+	}
+	switch {
+	case previous >= 'A' && previous <= 'Z':
+		return false
+	case previous >= 'a' && previous <= 'z':
+		return false
+	case previous >= '0' && previous <= '9':
+		return false
+	case previous == '.' || previous == '_' || previous == '-':
+		return false
+	}
+	return true
+}
+
+func diagnoseWithinSpans(offset int, spans [][]int) bool {
+	for _, span := range spans {
+		if offset >= span[0] && offset < span[1] {
+			return true
+		}
+	}
+	return false
+}
+
+func diagnosePathToken(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return "path_sha256:" + hex.EncodeToString(sum[:6])
+}
+
+func (b *diagnoseBundleBuild) scrubTailLines(lines [][]byte) {
+	for i := range lines {
+		lines[i] = diagnoseScrubTailPaths(lines[i])
+	}
 }
 
 // --- collectors -------------------------------------------------------------
@@ -542,12 +637,40 @@ func (r *Runner) addDaemonTail(b *diagnoseBundleBuild, since time.Time) {
 		return
 	}
 	b.tailLines = diagnoseSplitLines(data)
+	// Emit-time scrubbing happens before staging: daemon-side masking only
+	// normalizes HOME, so absolute paths under /tmp or a custom state dir must
+	// be hashed here or the high-entropy rule reads them as secret material.
+	b.scrubTailLines(b.tailLines)
+	// Path tokens are longer than short raw paths, so re-apply the byte cap
+	// after scrubbing; the reader's cap alone bounds the pre-scrub input.
+	if diagnoseTailLineBytes(b.tailLines) > diagnoseTailBytes {
+		b.tailLines = diagnoseTrimTailBytes(b.tailLines, diagnoseTailBytes)
+		b.limitsAppend(diagnoseTailBytesLimit)
+	}
 	if len(b.tailLines) >= diagnoseTailLines {
 		b.limitsAppend(diagnoseTailRecordsLimit)
 	}
 	if len(data) >= diagnoseTailBytes {
 		b.limitsAppend(diagnoseTailBytesLimit)
 	}
+}
+
+func diagnoseTailLineBytes(lines [][]byte) int {
+	total := 0
+	for _, line := range lines {
+		total += len(line)
+	}
+	return total
+}
+
+func diagnoseTrimTailBytes(lines [][]byte, limit int) [][]byte {
+	total := diagnoseTailLineBytes(lines)
+	for len(lines) > 0 && total > limit {
+		total -= len(lines[0])
+		lines[0] = nil
+		lines = lines[1:]
+	}
+	return lines
 }
 
 func diagnoseSplitLines(data []byte) [][]byte {
@@ -562,9 +685,10 @@ func diagnoseSplitLines(data []byte) [][]byte {
 
 func (b *diagnoseBundleBuild) tailData() []byte {
 	var out bytes.Buffer
-	// The daemon tail is embedded verbatim: daemon-side redaction (P0.1) is
-	// the normalization boundary, and the archive guard treats any raw home
-	// path or secret as a refusal — diagnose doubles as a leak tripwire.
+	// Lines were path-scrubbed before staging (addDaemonTail). Secrets are
+	// still not normalized here: the archive guard treats any surviving
+	// secret, raw home path or high-entropy run as a refusal, so diagnose
+	// doubles as a leak tripwire.
 	for _, line := range b.tailLines {
 		out.Write(line)
 		out.WriteByte('\n')
@@ -987,7 +1111,8 @@ Contents
   sandboxes.redacted.json           sandbox inventory without workspace host paths
   policies.redacted.json            policy profiles and rule counts, no rule targets
   approvals.pending.redacted.json   pending approval ids, kinds, states and boundary names
-  logs/daemon.tail.jsonl            bounded daemon log tail (2000 records, 4 MiB)
+  logs/daemon.tail.jsonl            bounded daemon log tail (2000 records, 4 MiB); absolute paths
+                                    are hashed as path_sha256:<12 hex> to remove topology
   errors.json                       non-fatal collection error class names
   README.txt                        this file
 
@@ -1002,6 +1127,13 @@ Redaction and refusal
   path (including the daemon log tail) makes the builder delete the temporary
   archive and exit 1, printing "rule member line offset" per hit. No bundle
   file is created on refusal, so a rejected bundle cannot leak by accident.
+
+Paths in the daemon log tail
+  Absolute paths with three or more segments are replaced at emit time with
+  path_sha256:<first 12 hex of SHA-256(original path)>. Paths are not secret,
+  but they are user topology; hashing removes the location while keeping the
+  same path comparable across logs. Shorter paths and URLs with a scheme and
+  host are not rewritten by this scrub and remain subject to the URL rules.
 
 Paranoid mode
   With --paranoid, every sandbox and image name is replaced by the first 12

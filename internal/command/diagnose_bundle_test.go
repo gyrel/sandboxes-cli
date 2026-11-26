@@ -20,6 +20,7 @@ import (
 
 	"github.com/gyrel/sandboxes-core/ids"
 	sdk "github.com/gyrel/sandboxes-go-sdk"
+	"github.com/gyrel/slogx/redact"
 
 	"github.com/gyrel/sandboxes-cli/internal/settings"
 )
@@ -295,6 +296,112 @@ func TestDiagnoseBundleCanaryRefusal(t *testing.T) {
 		if strings.Contains(messages, leak) || strings.Contains(out.String(), leak) {
 			t.Fatal("canary bytes leaked into output")
 		}
+	}
+}
+
+// A real /tmp state path must not trip the high-entropy rule: the tail scrub
+// rewrites it to a stable path_sha256 token before staging, and the guard
+// still scans a clean archive.
+func TestDiagnoseBundleTailPathScrub(t *testing.T) {
+	const rawPath = "/tmp/gyrel-r5-live/state/sandboxesd.sock"
+	line := `{"ts":"2026-11-25T10:00:00Z","level":"info","msg":"daemon listening at ` + rawPath + `"}`
+	socket := bundleFixtures(t, line)
+	runner, out, stderr := bundleRunner(socket, bundleClient(bundleApprovalService{}), nil)
+	want := diagnosePathToken(rawPath)
+	tails := make([]string, 0, 2)
+	for _, name := range []string{"first.tar.gz", "second.tar.gz"} {
+		target := filepath.Join(t.TempDir(), name)
+		if code := runner.Run(context.Background(), []string{"diagnose", "--bundle", "--out", target}); code != 0 {
+			t.Fatalf("run=%s exit=%d stdout=%q stderr=%q", name, code, out.String(), stderr.String())
+		}
+		tail := string(extractBundleMembers(t, target)[bundleMemberTail])
+		if strings.Contains(tail, rawPath) {
+			t.Fatalf("tail still contains the raw path: %q", tail)
+		}
+		if !strings.Contains(tail, want) {
+			t.Fatalf("tail lacks %s: %q", want, tail)
+		}
+		if hits := redact.Scan([]byte(tail), redact.Options{}); len(hits) != 0 {
+			t.Fatalf("tail guard hits=%+v, want none", hits)
+		}
+		archiveFile, err := os.Open(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		violations, _, guardErr := redact.BundleGuard(archiveFile, redact.Options{})
+		_ = archiveFile.Close()
+		if guardErr != nil {
+			t.Fatalf("BundleGuard(%s): %v", name, guardErr)
+		}
+		if len(violations) != 0 {
+			t.Fatalf("BundleGuard(%s) hits=%+v, want none", name, violations)
+		}
+		tails = append(tails, tail)
+	}
+	if tails[0] != tails[1] {
+		t.Fatalf("tail hash is not deterministic across runs:\n%s\n%s", tails[0], tails[1])
+	}
+}
+
+// Genuine secret canaries inside a tail line must still be refused even after
+// path scrubbing: scrubbing removes topology, not secret detection.
+func TestDiagnoseBundleTailCanaryStillRefused(t *testing.T) {
+	const bearer = "Bearer abcdef1234567890ABCDEF"
+	const highEntropy = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"
+	socket := bundleFixtures(t,
+		`{"ts":"2026-11-25T10:00:00Z","level":"info","msg":"auth header `+bearer+`"}`,
+		`{"ts":"2026-11-25T10:00:01Z","level":"info","msg":"rotating material `+highEntropy+`"}`,
+	)
+	runner, out, stderr := bundleRunner(socket, bundleClient(bundleApprovalService{}), nil)
+	target := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	if code := runner.Run(context.Background(), []string{"diagnose", "--bundle", "--out", target}); code != 1 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused bundle still exists: err=%v", err)
+	}
+	messages := stderr.String()
+	t.Logf("tail canary refusal (values unquoted):\n%s", messages)
+	for _, want := range []string{"bearer", "high_entropy", "logs/daemon.tail.jsonl", "diagnostic bundle refused"} {
+		if !strings.Contains(messages, want) {
+			t.Errorf("stderr lacks %q: %s", want, messages)
+		}
+	}
+	for _, leak := range []string{"abcdef1234567890ABCDEF", highEntropy} {
+		if strings.Contains(messages, leak) || strings.Contains(out.String(), leak) {
+			t.Fatal("tail canary bytes leaked into output")
+		}
+	}
+}
+
+func TestDiagnoseScrubTailPaths(t *testing.T) {
+	longPath := "/var/log/gyrel/daemon.log"
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"three segments rewritten", "path=" + longPath, "path=" + diagnosePathToken(longPath)},
+		{"json absolute path rewritten", `{"msg":"open ` + longPath + `"}`, `{"msg":"open ` + diagnosePathToken(longPath) + `"}`},
+		{"two segments untouched", "path=/var/log", "path=/var/log"},
+		{"single segment untouched", "path=/tmp", "path=/tmp"},
+		{"relative run untouched", "path=foo/bar/baz/qux", "path=foo/bar/baz/qux"},
+		{"home relative run untouched", "path=~/foo/bar/baz", "path=~/foo/bar/baz"},
+		{"dot relative run untouched", "path=./foo/bar/baz", "path=./foo/bar/baz"},
+		{"url untouched", "url=https://example.com/a/b/c", "url=https://example.com/a/b/c"},
+		{"url with port untouched", "url=http://localhost:8080/a/b/c", "url=http://localhost:8080/a/b/c"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(diagnoseScrubTailPaths([]byte(tc.line))); got != tc.want {
+				t.Fatalf("scrub(%q)=%q, want %q", tc.line, got, tc.want)
+			}
+		})
+	}
+	sum := sha256.Sum256([]byte(longPath))
+	wantToken := "path_sha256:" + hex.EncodeToString(sum[:6])
+	if got := diagnosePathToken(longPath); got != wantToken {
+		t.Fatalf("token=%q, want %q", got, wantToken)
 	}
 }
 

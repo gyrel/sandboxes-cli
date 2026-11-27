@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.0.82 — 2026-11-27
+
+### Security
+
+- Prune now plans the whole inventory first, validates the filter grammar
+  pre-flight, aborts on any unclassifiable record before deleting, and reports
+  per-item outcomes with a counted summary instead of an aggregate success
+  line. `--force` escalates owned teardown only. `rm` multi-target follows the
+  same per-item contract.
+
 ## v0.0.81 — 2026-11-26
 
 ### Changed

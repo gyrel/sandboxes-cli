@@ -82,7 +82,7 @@ func jsonContractCases() []jsonContractCase {
 				StoppedAt: mustContractTime(t, "2026-11-15T06:22:40Z"),
 			}}}
 			runner, out := lifecycleRunner(sandbox)
-			if code := runner.Run(context.Background(), []string{"prune", "--force", "--json"}); code != 0 {
+			if code := runner.Run(context.Background(), []string{"prune", "--force", "--json", "--filter", "status=stopped"}); code != 0 {
 				t.Fatalf("prune --force exit=%d output=%q", code, out.String())
 			}
 			return out.String()
@@ -223,7 +223,7 @@ func sortedJSONKeys(values map[string]any) []string {
 func TestEmptyMutationJSONIsBareArray(t *testing.T) {
 	for _, args := range [][]string{
 		{"rm", "--all", "--force", "--json"},
-		{"prune", "--force", "--json"},
+		{"prune", "--force", "--json", "--filter", "status=stopped"},
 	} {
 		runner, out := lifecycleRunner(&lifecycleSandbox{})
 		if code := runner.Run(context.Background(), args); code != 0 {
@@ -243,7 +243,7 @@ func TestPruneDryRunReportsSkippedUnknownStop(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"prune", "--dry-run", "--json"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	var report pruneDryRunOutput
+	var report pruneDryRunEnvelope
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatalf("json %q: %v", out.String(), err)
 	}

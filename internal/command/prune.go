@@ -7,9 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
-	"text/tabwriter"
 	"time"
 
 	sdk "github.com/gyrel/sandboxes-go-sdk"
@@ -17,23 +14,18 @@ import (
 )
 
 type pruneOptions struct {
-	dryRun bool
-	force  bool
-	format string
-	until  *time.Time
+	dryRun           bool
+	force            bool
+	all              bool
+	allowUnknownSkip bool
+	format           string
+	filter           *pruneFilter
 }
 
 func (r *Runner) prune(ctx context.Context, args []string) int {
-	opts, help, err := r.parsePruneOptions(args)
-	if help {
-		return r.showCommandHelp(pruneHelp())
-	}
-	if parseErr, ok := asFlagParseError(err); ok {
-		return r.flagParseFailure("prune", parseErr.err)
-	}
-	if err != nil {
-		r.error(err)
-		return 2
+	opts, code, done := r.parsePruneCommand(args)
+	if done {
+		return code
 	}
 	client, err := r.client()
 	if err != nil {
@@ -41,48 +33,58 @@ func (r *Runner) prune(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	return r.runPrune(ctx, client, opts)
+}
+
+func (r *Runner) parsePruneCommand(args []string) (pruneOptions, int, bool) {
+	opts, help, err := r.parsePruneOptions(args)
+	if help {
+		return pruneOptions{}, r.showCommandHelp(pruneHelp()), true
+	}
+	if parseErr, ok := asFlagParseError(err); ok {
+		return pruneOptions{}, r.flagParseFailure("prune", parseErr.err), true
+	}
+	var filterErr *pruneFilterError
+	if errors.As(err, &filterErr) {
+		_, _ = fmt.Fprintf(r.Err, "error: %s\n", filterErr.Error())
+		return pruneOptions{}, 2, true
+	}
+	if err != nil {
+		r.error(err)
+		return pruneOptions{}, 2, true
+	}
+	// A bare non-interactive prune must not guess a match-all scope (PR-5).
+	// Dry-run is safe and remains usable without --filter for planning.
+	if opts.filter == nil && !opts.all && !opts.dryRun && !r.stdinIsTerminal() {
+		r.error(newPruneFilterError(pruneCodeFilterReq, "prune without --filter or --all requires a terminal; use --filter status=stopped or --all"))
+		return pruneOptions{}, 2, true
+	}
+	return opts, 0, false
+}
+
+func (r *Runner) runPrune(ctx context.Context, client sdk.Client, opts pruneOptions) int {
 	items, err := collectSandboxes(ctx, client, sandboxPageSize, 0)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
-	stopped, skippedUnknownStop := selectPruneCandidates(items, opts.until)
+	plan := buildPrunePlan(items, opts)
+	plan, abort := r.probePrunePlan(ctx, client, plan)
+	if abort {
+		if code, handled := r.handlePruneAbort(plan, opts); handled {
+			return code
+		}
+	}
 	if opts.dryRun {
-		return r.pruneDryRun(opts, stopped, skippedUnknownStop)
+		return r.pruneDryRun(plan, opts.format)
 	}
-	return r.pruneRemove(ctx, client, opts, stopped)
-}
-
-func (r *Runner) pruneDryRun(opts pruneOptions, stopped []sdk.Sandbox, skippedUnknownStop []string) int {
-	if opts.format == listFormatTable {
-		if len(stopped) == 0 {
-			_, _ = fmt.Fprintln(r.Out, "No stopped sandboxes")
-			return 0
-		}
-		printPruneCandidates(r.Out, stopped)
-		return 0
-	}
-	if err := renderPruneDryRun(r.Out, opts.format, stopped, skippedUnknownStop); err != nil {
-		r.error(err)
-		return 1
-	}
-	return 0
-}
-
-func (r *Runner) pruneRemove(ctx context.Context, client sdk.Client, opts pruneOptions, stopped []sdk.Sandbox) int {
-	if len(stopped) == 0 {
-		if opts.format == listFormatTable {
-			_, _ = fmt.Fprintln(r.Out, "No stopped sandboxes")
-			return 0
-		}
-		if err := renderMutations(r.Out, opts.format, nil); err != nil {
-			r.error(err)
-			return 1
-		}
-		return 0
+	selected := selectedPruneItems(plan)
+	if len(selected) == 0 {
+		r.renderPruneResults(plan, opts.format, false)
+		return pruneExitCode(plan, false)
 	}
 	if !opts.force {
-		confirmed, err := r.confirmPrune(len(stopped))
+		confirmed, err := r.confirmPrune(len(selected))
 		if err != nil {
 			r.error(err)
 			return 1
@@ -92,34 +94,202 @@ func (r *Runner) pruneRemove(ctx context.Context, client sdk.Client, opts pruneO
 			return 0
 		}
 	}
-	removed, failures := r.deletePrunedSandboxes(ctx, client, stopped)
-	names := make([]string, 0, len(removed))
-	for i := range removed {
-		names = append(names, removed[i].Name)
+	return r.executePrunePlan(ctx, client, plan, opts)
+}
+
+// handlePruneAbort implements A2: the default run refuses with zero deletions;
+// --allow-unknown-skip excludes the records and reports them as skipped.
+func (r *Runner) handlePruneAbort(plan []prunePlanItem, opts pruneOptions) (int, bool) {
+	if !opts.allowUnknownSkip {
+		for i := range plan {
+			if plan[i].selected() {
+				plan[i].Action = pruneActionSkipped
+				plan[i].Code = pruneCodeNone
+			}
+		}
+		if opts.dryRun {
+			r.renderPruneDryRunPlan(plan, opts.format)
+			return 2, true
+		}
+		r.renderPruneResults(plan, opts.format, false)
+		return 2, true
 	}
-	if opts.format == listFormatTable {
-		_, _ = fmt.Fprintf(r.Out, "Removed %d stopped sandboxes:\n", len(removed))
-		printPruneTable(r.Out, removed)
-	} else if err := renderMutations(r.Out, opts.format, sandboxMutations("removed", names)); err != nil {
+	for i := range plan {
+		if plan[i].Action == pruneActionUnclassified {
+			plan[i].Action = pruneActionSkipped
+		}
+	}
+	return 0, false
+}
+
+func (r *Runner) renderPruneDryRunPlan(plan []prunePlanItem, format string) {
+	if format == listFormatTable {
+		for i := range plan {
+			if plan[i].selected() {
+				_, _ = fmt.Fprintln(r.Out, plan[i].ID)
+			}
+		}
+		return
+	}
+	if err := renderPruneDryRun(r.Out, format, plan); err != nil {
 		r.error(err)
-		return 1
 	}
-	if failures != nil {
-		r.error(failures)
+}
+
+func selectedPruneItems(plan []prunePlanItem) []prunePlanItem {
+	selected := make([]prunePlanItem, 0, len(plan))
+	for i := range plan {
+		if plan[i].selected() {
+			selected = append(selected, plan[i])
+		}
+	}
+	return selected
+}
+
+func (r *Runner) pruneDryRun(plan []prunePlanItem, format string) int {
+	if format == listFormatTable {
+		for i := range plan {
+			if plan[i].selected() {
+				_, _ = fmt.Fprintln(r.Out, plan[i].ID)
+			}
+		}
+		return 0
+	}
+	if err := renderPruneDryRun(r.Out, format, plan); err != nil {
+		r.error(err)
 		return 1
 	}
 	return 0
 }
 
+// executePrunePlan re-lists the inventory and deletes only items whose record
+// hash, id, name and updated_at still match the plan (PR-3).
+func (r *Runner) executePrunePlan(ctx context.Context, client sdk.Client, plan []prunePlanItem, opts pruneOptions) int {
+	items, err := collectSandboxes(ctx, client, sandboxPageSize, 0)
+	if err != nil {
+		r.error(err)
+		return 2
+	}
+	current := make(map[string]sdk.Sandbox, len(items))
+	for i := range items {
+		current[items[i].ID] = items[i]
+	}
+	results := make([]prunePlanItem, 0, len(plan))
+	for i := range plan {
+		results = append(results, r.executePruneItem(ctx, client, plan[i], current, opts))
+	}
+	r.renderPruneResults(results, opts.format, true)
+	return pruneExitCode(results, false)
+}
+
+func (r *Runner) executePruneItem(ctx context.Context, client sdk.Client, item prunePlanItem, current map[string]sdk.Sandbox, opts pruneOptions) prunePlanItem {
+	if !item.selected() {
+		return item
+	}
+	sandbox, ok := current[item.ID]
+	if !ok || sandbox.Name != item.Name || !sandbox.UpdatedAt.Equal(item.updatedAt) ||
+		pruneRecordHash(&sandbox) != item.RecordHash {
+		item.Action = pruneActionStale
+		item.Code = pruneCodeStale
+		return item
+	}
+	if item.stopRequired && sandbox.State == sdk.StateRunning && r.stopPruneItem(ctx, client, &item, &sandbox) {
+		return item
+	}
+	r.deletePruneItem(ctx, client, &item, &sandbox, opts.force)
+	return item
+}
+
+func (r *Runner) stopPruneItem(ctx context.Context, client sdk.Client, item *prunePlanItem, sandbox *sdk.Sandbox) bool {
+	op, err := client.Sandboxes().Stop(ctx, sandbox.ID, sdk.StopOptions{})
+	if err != nil {
+		item.Action, item.Code = pruneFailureAction(err)
+		return true
+	}
+	if op != nil && op.State == sdk.StateFailed {
+		item.Action = pruneActionFailed
+		item.Code = operationMachineCode(op)
+		return true
+	}
+	return false
+}
+
+func (r *Runner) deletePruneItem(ctx context.Context, client sdk.Client, item *prunePlanItem, sandbox *sdk.Sandbox, force bool) bool {
+	r.warnCloneRemoval(sandbox)
+	op, err := client.Sandboxes().Delete(ctx, sandbox.ID, sdk.DeleteOptions{Force: force})
+	if err != nil {
+		item.Action, item.Code = pruneFailureAction(err)
+		return true
+	}
+	if op != nil && op.State == sdk.StateFailed {
+		item.Action = pruneActionFailed
+		item.Code = operationMachineCode(op)
+		return true
+	}
+	item.Action = pruneActionRemoved
+	item.Code = pruneCodeNone
+	r.cleanupDeletedCloneRemote(ctx, sandbox, true)
+	return false
+}
+
+func pruneFailureAction(err error) (string, string) {
+	code := machineCodeOf(err)
+	if isUnclassifiedCode(code) {
+		return pruneActionUnclassified, code
+	}
+	if code == "" {
+		code = pruneCodeError
+	}
+	return pruneActionFailed, code
+}
+
+func operationMachineCode(op *sdk.Operation) string {
+	if op == nil {
+		return pruneCodeError
+	}
+	if code := machineCodeOf(errors.New(op.Error)); code != "" {
+		return code
+	}
+	return pruneCodeError
+}
+
+func (r *Runner) renderPruneResults(plan []prunePlanItem, format string, executed bool) {
+	if format != listFormatTable {
+		r.renderPruneStructured(plan, format)
+		return
+	}
+	for i := range plan {
+		_, _ = fmt.Fprintf(r.Out, "%s|%s|%s|%s\n", plan[i].ID, plan[i].Name, plan[i].Action, joinPlanCode(plan[i].Code))
+	}
+	summary := summarizePrune(plan, executed)
+	_, _ = fmt.Fprintf(r.Out, "summary: pruned=%d skipped=%d stale=%d unclassified=%d failure=%d\n",
+		summary.Pruned, summary.Skipped, summary.Stale, summary.Unclassified, summary.Failure)
+}
+
+func (r *Runner) renderPruneStructured(plan []prunePlanItem, format string) {
+	items := make([]mutationOutput, 0, len(plan))
+	for i := range plan {
+		items = append(items, mutationOutput{
+			Action: plan[i].Action, Resource: resourceSandbox, Name: plan[i].Name,
+			ID: plan[i].ID, Code: joinPlanCode(plan[i].Code),
+		})
+	}
+	if err := renderMutations(r.Out, format, items); err != nil {
+		r.error(err)
+	}
+}
+
 func (r *Runner) parsePruneOptions(args []string) (pruneOptions, bool, error) {
 	fs := r.newFlagSet("prune")
 	fs.SetOutput(io.Discard)
-	dryRun := fs.Bool("dry-run", false, "list stopped sandboxes without removing them")
-	force := fs.Bool("force", false, "remove without confirmation")
+	dryRun := fs.Bool("dry-run", false, "list the validated plan without removing anything")
+	force := fs.Bool("force", false, "remove without confirmation; escalates teardown of owned running sandboxes")
 	fs.BoolVar(force, "f", false, "remove without confirmation")
+	all := fs.Bool("all", false, "include running sandboxes (stop then delete)")
+	allowUnknownSkip := fs.Bool("allow-unknown-skip", false, "exclude unclassifiable items and continue")
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	filter := fs.String("filter", "", "until=TIMESTAMP or until=DURATION")
+	filterValue := fs.String("filter", "", "filter candidates: status=STATE, label=KEY=VALUE, name=NAME, name~^REGEX, until=DURATION")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return pruneOptions{}, true, nil
@@ -127,60 +297,65 @@ func (r *Runner) parsePruneOptions(args []string) (pruneOptions, bool, error) {
 		return pruneOptions{}, false, flagParseError{err: err}
 	}
 	if fs.NArg() != 0 {
-		return pruneOptions{}, false, errors.New("usage: rsbx prune [--dry-run] [-f|--force] [--format table|json|yaml]")
+		return pruneOptions{}, false, errors.New("usage: rsbx prune [--dry-run] [-f|--force] [--all] [--filter FILTER] [--allow-unknown-skip] [--format table|json|yaml]")
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
 	if err != nil {
 		return pruneOptions{}, false, err
 	}
-	until, hasUntil, err := parsePruneFilter(*filter, time.Now())
-	if err != nil {
-		return pruneOptions{}, false, err
+	filterSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "filter" {
+			filterSet = true
+		}
+	})
+	var filter *pruneFilter
+	if filterSet {
+		filter, err = parsePruneFilter(*filterValue, time.Now())
+		if err != nil {
+			return pruneOptions{}, false, err
+		}
 	}
-	var untilPtr *time.Time
-	if hasUntil {
-		untilPtr = &until
-	}
-	return pruneOptions{dryRun: *dryRun, force: *force, format: selected, until: untilPtr}, false, nil
+	return pruneOptions{
+		dryRun: *dryRun, force: *force, all: *all, allowUnknownSkip: *allowUnknownSkip,
+		format: selected, filter: filter,
+	}, false, nil
 }
 
-// pruneCandidateOutput mirrors one sbx prune --dry-run candidate.
-type pruneCandidateOutput struct {
-	Name       string   `json:"name" yaml:"name"`
-	Agent      string   `json:"agent,omitempty" yaml:"agent,omitempty"`
-	StoppedAt  string   `json:"stopped_at,omitempty" yaml:"stopped_at,omitempty"`
-	Workspaces []string `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
+// pruneDryRunEnvelope is the structured plan. would_remove keeps the sbx
+// field name; skipped_running and unclassified are new fail-closed sections.
+type pruneDryRunEnvelope struct {
+	WouldRemove        []prunePlanItem `json:"would_remove" yaml:"would_remove"`
+	SkippedUnknownStop []string        `json:"skipped_unknown_stop" yaml:"skipped_unknown_stop"`
+	SkippedRunning     []string        `json:"skipped_running" yaml:"skipped_running"`
+	Unclassified       []prunePlanItem `json:"unclassified" yaml:"unclassified"`
+	Summary            pruneSummary    `json:"summary" yaml:"summary"`
 }
 
-// pruneDryRunOutput mirrors the sbx prune --dry-run envelope.
-type pruneDryRunOutput struct {
-	WouldRemove        []pruneCandidateOutput `json:"would_remove" yaml:"would_remove"`
-	SkippedUnknownStop []string               `json:"skipped_unknown_stop" yaml:"skipped_unknown_stop"`
-}
-
-func pruneCandidateFor(sb *sdk.Sandbox) pruneCandidateOutput {
-	var workspaces []string
-	if len(sb.Workspaces) > 0 {
-		workspaces = workspacePaths(sb.Workspaces)
-	} else if sb.Workspace != "" {
-		workspaces = []string{sb.Workspace}
+func renderPruneDryRun(out io.Writer, format string, plan []prunePlanItem) error {
+	output := pruneDryRunEnvelope{
+		WouldRemove:        make([]prunePlanItem, 0),
+		SkippedUnknownStop: make([]string, 0),
+		SkippedRunning:     make([]string, 0),
+		Unclassified:       make([]prunePlanItem, 0),
 	}
-	return pruneCandidateOutput{
-		Name:       sb.Name,
-		Agent:      sb.Agent,
-		StoppedAt:  listTime(sb.StoppedAt),
-		Workspaces: workspaces,
+	for i := range plan {
+		switch plan[i].Action {
+		case pruneActionRemoved:
+			output.WouldRemove = append(output.WouldRemove, plan[i])
+		case pruneActionSkippedRunning:
+			output.SkippedRunning = append(output.SkippedRunning, plan[i].Name)
+		case pruneActionUnclassified, pruneActionFailed:
+			output.Unclassified = append(output.Unclassified, plan[i])
+		case pruneActionSkipped:
+			if plan[i].Code == pruneCodeUnknown {
+				output.SkippedUnknownStop = append(output.SkippedUnknownStop, plan[i].Name)
+				break
+			}
+			output.Unclassified = append(output.Unclassified, plan[i])
+		}
 	}
-}
-
-func renderPruneDryRun(out io.Writer, format string, stopped []sdk.Sandbox, skippedUnknownStop []string) error {
-	output := pruneDryRunOutput{
-		WouldRemove:        make([]pruneCandidateOutput, 0, len(stopped)),
-		SkippedUnknownStop: append([]string{}, skippedUnknownStop...),
-	}
-	for i := range stopped {
-		output.WouldRemove = append(output.WouldRemove, pruneCandidateFor(&stopped[i]))
-	}
+	output.Summary = summarizePrune(plan, false)
 	switch format {
 	case listFormatJSON:
 		encoder := json.NewEncoder(out)
@@ -196,93 +371,6 @@ func renderPruneDryRun(out io.Writer, format string, stopped []sdk.Sandbox, skip
 	default:
 		return fmt.Errorf("unsupported format %q for structured prune output", format)
 	}
-}
-
-// selectPruneCandidates returns stopped sandboxes with known stop times and
-// names the sandboxes whose stop time the daemon could not report. Like sbx,
-// unknown stop times are left alone because their age cannot be established.
-func selectPruneCandidates(items []sdk.Sandbox, until *time.Time) ([]sdk.Sandbox, []string) {
-	stopped := make([]sdk.Sandbox, 0, len(items))
-	skipped := make([]string, 0)
-	for i := range items {
-		if items[i].State != sdk.StateStopped {
-			continue
-		}
-		if items[i].StoppedAt.IsZero() {
-			skipped = append(skipped, items[i].Name)
-			continue
-		}
-		if until != nil && !items[i].StoppedAt.Before(*until) {
-			continue
-		}
-		stopped = append(stopped, items[i])
-	}
-	return stopped, skipped
-}
-
-func parsePruneFilter(value string, now time.Time) (time.Time, bool, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return time.Time{}, false, nil
-	}
-	if !strings.HasPrefix(value, "until=") {
-		return time.Time{}, false, errors.New("prune filter must be until=TIMESTAMP or until=DURATION")
-	}
-	value = strings.TrimPrefix(value, "until=")
-	if value == "" {
-		return time.Time{}, false, errors.New("prune filter value is empty")
-	}
-	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return parsed, true, nil
-	}
-	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
-		return time.Unix(seconds, 0).UTC(), true, nil
-	}
-	if duration, err := time.ParseDuration(value); err == nil && duration >= 0 {
-		return now.Add(-duration), true, nil
-	}
-	return time.Time{}, false, errors.New("prune filter must be an RFC3339 timestamp, Unix seconds, or a non-negative duration")
-}
-
-func (r *Runner) deletePrunedSandboxes(ctx context.Context, client sdk.Client, stopped []sdk.Sandbox) ([]sdk.Sandbox, error) {
-	var failures []error
-	removed := make([]sdk.Sandbox, 0, len(stopped))
-	for i := range stopped {
-		r.warnCloneRemoval(&stopped[i])
-		op, err := client.Sandboxes().Delete(ctx, stopped[i].ID, sdk.DeleteOptions{Force: true})
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		if op != nil && op.State == sdk.StateFailed {
-			failures = append(failures, fmt.Errorf("prune sandbox %s failed: %s", stopped[i].Name, op.Error))
-			continue
-		}
-		removed = append(removed, stopped[i])
-		r.cleanupDeletedCloneRemote(ctx, &stopped[i], true)
-	}
-	return removed, errors.Join(failures...)
-}
-
-func printPruneCandidates(out io.Writer, items []sdk.Sandbox) {
-	_, _ = fmt.Fprintf(out, "Would remove %d stopped sandboxes:\n", len(items))
-	printPruneTable(out, items)
-}
-
-func printPruneTable(out io.Writer, items []sdk.Sandbox) {
-	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SANDBOX\tAGENT\tSTOPPED\tWORKSPACE")
-	for i := range items {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", items[i].Name, formatAgent(items[i].Agent), formatStoppedAge(items[i].StoppedAt), formatWorkspaces(&items[i]))
-	}
-	_ = tw.Flush()
-}
-
-func formatStoppedAge(stopped time.Time) string {
-	if stopped.IsZero() {
-		return "-"
-	}
-	return formatAge(stopped)
 }
 
 func (r *Runner) confirmPrune(count int) (bool, error) {

@@ -99,10 +99,7 @@ func TestPruneDryRunNarrative(t *testing.T) {
 		t.Fatalf("exit=%d", code)
 	}
 	text := out.String()
-	if !strings.Contains(text, "Would remove 1 stopped sandboxes:") ||
-		!strings.Contains(text, "SANDBOX") || !strings.Contains(text, "AGENT") ||
-		!strings.Contains(text, "STOPPED") || !strings.Contains(text, "WORKSPACE") ||
-		!strings.Contains(text, "old") || strings.Contains(text, "live") {
+	if text != "sb-1\n" || strings.Contains(text, "live") {
 		t.Fatalf("output=%q", text)
 	}
 }
@@ -113,10 +110,11 @@ func TestPruneRemovesWithNarrative(t *testing.T) {
 		{ID: "sb-1", Name: "old", State: sdk.StateStopped, Agent: "shell", StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
 	}}
 	runner, out, _ := runTestRunner(t, runClient{sandboxes: sandboxes}, "")
-	if code := runner.Run(context.Background(), []string{"prune", "--force"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"prune", "--force", "--filter", "status=stopped"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "Removed 1 stopped sandboxes:") {
+	if !strings.Contains(out.String(), "sb-1|old|removed|-") ||
+		!strings.Contains(out.String(), "summary: pruned=1 skipped=0 stale=0 unclassified=0 failure=0") {
 		t.Fatalf("output=%q", out.String())
 	}
 }

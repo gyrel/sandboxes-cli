@@ -106,14 +106,17 @@ func TestRemoveRequiresStoppedSandboxesWithoutForce(t *testing.T) {
 			wantDeletes: []string{"sb-run"},
 		},
 		{
-			name: "mixed batch refuses the whole batch",
+			name: "mixed batch removes stopped and refuses running",
 			items: []sdk.Sandbox{
 				{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped},
 				{ID: "sb-run", Name: "running", State: sdk.StateRunning},
 			},
-			args:       []string{"rm", "stopped", "running"},
-			wantCode:   1,
-			wantErrors: []string{"sandbox running is running; stop it first or pass --force"},
+			args:        []string{"rm", "stopped", "running"},
+			confirmed:   true,
+			wantCode:    1,
+			wantDeletes: []string{"sb-stop"},
+			wantPrompts: 1,
+			wantErrors:  []string{"sb-stop|stopped|removed|-", "sb-run|running|refused|BUSY"},
 		},
 		{
 			name: "multiple running sandboxes are all reported",
@@ -121,12 +124,9 @@ func TestRemoveRequiresStoppedSandboxesWithoutForce(t *testing.T) {
 				{ID: "sb-one", Name: "one", State: sdk.StateRunning},
 				{ID: "sb-two", Name: "two", State: sdk.StateRunning},
 			},
-			args:     []string{"rm", "one", "two"},
-			wantCode: 1,
-			wantErrors: []string{
-				"sandbox one is running; stop it first or pass --force",
-				"sandbox two is running; stop it first or pass --force",
-			},
+			args:       []string{"rm", "one", "two"},
+			wantCode:   1,
+			wantErrors: []string{"sb-one|one|refused|BUSY", "sb-two|two|refused|BUSY"},
 		},
 		{
 			name:        "stopped without force deletes after confirmation",
@@ -177,6 +177,11 @@ func TestRemoveMultipleResolvesNamesAndForces(t *testing.T) {
 	if strings.Join(sandbox.deletes, ",") != "sb-1,sb-2" {
 		t.Fatalf("deletes=%v", sandbox.deletes)
 	}
+	if !strings.Contains(out.String(), "sb-1|one|removed|-") ||
+		!strings.Contains(out.String(), "sb-2|two|removed|-") ||
+		!strings.Contains(out.String(), "summary: pruned=2 skipped=0 stale=0 unclassified=0 failure=0") {
+		t.Fatalf("output=%q", out.String())
+	}
 }
 
 func TestRemovePartialFailureReturnsOne(t *testing.T) {
@@ -185,7 +190,8 @@ func TestRemovePartialFailureReturnsOne(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"rm", "--force", "one", "missing"}); code != 1 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	if len(sandbox.deletes) != 1 || !strings.Contains(out.String(), "cannot remove") || !strings.Contains(out.String(), "missing") {
+	if len(sandbox.deletes) != 1 || !strings.Contains(out.String(), "sb-1|one|failed|ERROR") ||
+		!strings.Contains(out.String(), "-|missing|refused|NOT_FOUND") {
 		t.Fatalf("unexpected partial failure: deletes=%v output=%q", sandbox.deletes, out.String())
 	}
 }
@@ -203,7 +209,7 @@ func TestStopMultipleSandboxes(t *testing.T) {
 	}
 }
 
-func TestPruneDryRunListsOnlyStopped(t *testing.T) {
+func TestPruneDryRunListsPlanIDsOnly(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
 		{ID: "sb-run", Name: "running", State: sdk.StateRunning},
 		{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
@@ -212,33 +218,56 @@ func TestPruneDryRunListsOnlyStopped(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"prune", "--dry-run"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	if !strings.Contains(out.String(), "stopped") || strings.Contains(out.String(), "running") || len(sandbox.deletes) != 0 {
+	if out.String() != "sb-stop\n" || len(sandbox.deletes) != 0 {
 		t.Fatalf("unexpected dry-run: deletes=%v output=%q", sandbox.deletes, out.String())
 	}
 }
 
-func TestPruneRemovesOnlyStopped(t *testing.T) {
+func TestPruneRemovesOnlyStoppedAndRecordsRunningSkip(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
 		{ID: "sb-run", Name: "running", State: sdk.StateRunning},
 		{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)},
 	}}
 	runner, out := lifecycleRunner(sandbox)
-	if code := runner.Run(context.Background(), []string{"prune", "-f"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"prune", "-f", "--filter", "name~^.*"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 	if strings.Join(sandbox.deletes, ",") != "sb-stop" {
 		t.Fatalf("deletes=%v", sandbox.deletes)
 	}
+	if !strings.Contains(out.String(), "sb-stop|stopped|removed|-") ||
+		!strings.Contains(out.String(), "sb-run|running|skipped_running|-") ||
+		!strings.Contains(out.String(), "summary: pruned=1 skipped=1 stale=0 unclassified=0 failure=0") {
+		t.Fatalf("output=%q", out.String())
+	}
 }
 
-func TestPruneRequiresForceWithoutTerminal(t *testing.T) {
+func TestPruneRequiresFilterWithoutTerminal(t *testing.T) {
 	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)}}}
-	runner, out := lifecycleRunner(sandbox)
-	if code := runner.Run(context.Background(), []string{"prune"}); code != 1 || len(sandbox.deletes) != 0 {
-		t.Fatalf("exit=%d deletes=%v output=%q", code, sandbox.deletes, out.String())
+	for _, args := range [][]string{{"prune"}, {"prune", "-f"}} {
+		runner, out := lifecycleRunner(sandbox)
+		if code := runner.Run(context.Background(), args); code != 2 || len(sandbox.deletes) != 0 {
+			t.Fatalf("%v exit=%d deletes=%v output=%q", args, code, sandbox.deletes, out.String())
+		}
+		if !strings.Contains(out.String(), "FILTER_REQUIRED") {
+			t.Fatalf("%v missing FILTER_REQUIRED: %q", args, out.String())
+		}
 	}
-	if !strings.Contains(out.String(), "use --force") {
-		t.Fatalf("missing force guidance: %q", out.String())
+}
+
+func TestPruneTTYShowsPlanAndConfirms(t *testing.T) {
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{{ID: "sb-stop", Name: "stopped", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)}}}
+	var out bytes.Buffer
+	runner := &Runner{
+		Out: &out, Err: &out, In: strings.NewReader("y\n"),
+		NewClient:       func(string) (sdk.Client, error) { return fakeClient{sandbox: sandbox}, nil },
+		confirmTerminal: func() bool { return true },
+	}
+	if code := runner.Run(context.Background(), []string{"prune"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if strings.Join(sandbox.deletes, ",") != "sb-stop" || !strings.Contains(out.String(), "[y/N]") {
+		t.Fatalf("deletes=%v output=%q", sandbox.deletes, out.String())
 	}
 }
 
@@ -311,46 +340,65 @@ func TestPruneJSONFormats(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"prune", "--dry-run", "--json"}); code != 0 {
 		t.Fatalf("dry-run exit=%d output=%q", code, out.String())
 	}
-	var candidates pruneDryRunOutput
+	var candidates pruneDryRunEnvelope
 	if err := json.Unmarshal(out.Bytes(), &candidates); err != nil || len(candidates.WouldRemove) != 1 ||
-		candidates.WouldRemove[0].Name != "stopped" || len(candidates.SkippedUnknownStop) != 0 {
+		candidates.WouldRemove[0].Name != "stopped" || candidates.WouldRemove[0].ID != "sb-stop" ||
+		len(candidates.SkippedUnknownStop) != 0 || candidates.Summary.Planned != 1 {
 		t.Fatalf("candidates=%#v err=%v", candidates, err)
 	}
 	runner, out = lifecycleRunner(sandbox)
-	if code := runner.Run(context.Background(), []string{"prune", "-f", "--json"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"prune", "-f", "--json", "--filter", "status=stopped"}); code != 0 {
 		t.Fatalf("force exit=%d output=%q", code, out.String())
 	}
 	var records []mutationOutput
 	if err := json.Unmarshal(out.Bytes(), &records); err != nil || len(records) != 1 ||
-		records[0].Action != "removed" || records[0].Name != "stopped" {
+		records[0].Action != "removed" || records[0].Name != "stopped" || records[0].Code != "-" {
 		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }
 
 func TestParsePruneFilter(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
+	valid := []struct {
 		value string
-		want  time.Time
-		has   bool
-		ok    bool
+		check func(*pruneFilter) bool
 	}{
-		{"", time.Time{}, false, true},
-		{"until=2026-10-31T01:00:00Z", time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC), true, true},
-		{"until=1761862800", time.Unix(1761862800, 0).UTC(), true, true},
-		{"until=2h", now.Add(-2 * time.Hour), true, true},
-		{"until=bad", time.Time{}, false, false},
-		{"not-until=2h", time.Time{}, false, false},
-		{"until=-1h", time.Time{}, false, false},
+		{"status=stopped", func(f *pruneFilter) bool { return f.kind == pruneFilterStatus && f.status == sdk.StateStopped }},
+		{"label=env=ci", func(f *pruneFilter) bool { return f.kind == pruneFilterLabel && f.label == "env=ci" }},
+		{"name=my-sandbox", func(f *pruneFilter) bool { return f.kind == pruneFilterName && f.name == "my-sandbox" }},
+		{"name~^tmp-", func(f *pruneFilter) bool { return f.kind == pruneFilterNameRegex && f.re.MatchString("tmp-1") }},
+		{"until=2026-10-31T01:00:00Z", func(f *pruneFilter) bool {
+			return f.until != nil && f.until.Equal(time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC))
+		}},
+		{"until=2h", func(f *pruneFilter) bool { return f.until != nil && f.until.Equal(now.Add(-2*time.Hour)) }},
+	}
+	for _, tc := range valid {
+		got, err := parsePruneFilter(tc.value, now)
+		if err != nil || !tc.check(got) {
+			t.Fatalf("parsePruneFilter(%q)=%#v,%v", tc.value, got, err)
+		}
+	}
+	for _, tc := range []struct{ value, code string }{
+		{"", pruneCodeFilterReq},
+		{"   ", pruneCodeFilterReq},
+		{"bogus=1", pruneCodeFilterBad},
+		{"status=", pruneCodeFilterBad},
+		{"status", pruneCodeFilterBad},
+		{"status=sideways", pruneCodeFilterBad},
+		{"until=soon", pruneCodeFilterBad},
+		{"until=-1h", pruneCodeFilterBad},
+		{"label=env", pruneCodeFilterBad},
+		{"name~tmp-", pruneCodeFilterBad},
 	} {
-		got, has, err := parsePruneFilter(tc.value, now)
-		if (err == nil) != tc.ok || has != tc.has || !got.Equal(tc.want) {
-			t.Fatalf("parsePruneFilter(%q)=%v,%t,%v", tc.value, got, has, err)
+		_, err := parsePruneFilter(tc.value, now)
+		var filterErr *pruneFilterError
+		if !errors.As(err, &filterErr) || filterErr.code != tc.code {
+			t.Fatalf("parsePruneFilter(%q) error=%v, want %s", tc.value, err, tc.code)
 		}
 	}
 }
 
-func TestSelectPruneCandidatesHonorsUntilAndUnknownStopTime(t *testing.T) {
+func TestBuildPrunePlanHonorsUntilAndUnknownStopTime(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 0, 0, 0, time.UTC)
 	items := []sdk.Sandbox{
 		{ID: "old", Name: "old", State: sdk.StateStopped, StoppedAt: now.Add(-3 * time.Hour)},
@@ -358,17 +406,25 @@ func TestSelectPruneCandidatesHonorsUntilAndUnknownStopTime(t *testing.T) {
 		{ID: "unknown", Name: "unknown", State: sdk.StateStopped},
 		{ID: "running", Name: "running", State: sdk.StateRunning, StoppedAt: now.Add(-4 * time.Hour)},
 	}
-	cutoff := now.Add(-2 * time.Hour)
-	got, skipped := selectPruneCandidates(items, &cutoff)
-	if len(got) != 1 || got[0].ID != "old" {
-		t.Fatalf("filtered=%v", got)
+	filter, err := parsePruneFilter("until=2h", now)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(skipped) != 1 || skipped[0] != "unknown" {
-		t.Fatalf("skipped=%v", skipped)
+	plan := buildPrunePlan(items, pruneOptions{filter: filter})
+	if len(plan) != 1 || plan[0].ID != "old" || plan[0].Action != pruneActionRemoved {
+		t.Fatalf("filtered plan=%#v", plan)
 	}
-	all, skippedAll := selectPruneCandidates(items, nil)
-	if len(all) != 2 || len(skippedAll) != 1 || skippedAll[0] != "unknown" {
-		t.Fatalf("unfiltered=%v skipped=%v", all, skippedAll)
+	plan = buildPrunePlan(items, pruneOptions{})
+	if len(plan) != 4 {
+		t.Fatalf("default plan=%#v", plan)
+	}
+	actions := map[string]string{}
+	for i := range plan {
+		actions[plan[i].ID] = plan[i].Action
+	}
+	if actions["old"] != pruneActionRemoved || actions["new"] != pruneActionRemoved ||
+		actions["unknown"] != pruneActionSkipped || actions["running"] != pruneActionSkippedRunning {
+		t.Fatalf("actions=%v", actions)
 	}
 }
 

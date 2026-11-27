@@ -12,6 +12,8 @@ import (
 	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
+const resourceSandbox = "sandbox"
+
 type operationOutput struct {
 	ID         string `json:"id" yaml:"id"`
 	SandboxID  string `json:"sandbox_id" yaml:"sandbox_id"`
@@ -31,6 +33,7 @@ type mutationOutput struct {
 	Resource string `json:"resource" yaml:"resource"`
 	Name     string `json:"name" yaml:"name"`
 	ID       string `json:"id,omitempty" yaml:"id,omitempty"`
+	Code     string `json:"code,omitempty" yaml:"code,omitempty"`
 	Error    string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
@@ -38,7 +41,7 @@ type mutationOutput struct {
 func sandboxMutations(action string, names []string) []mutationOutput {
 	items := make([]mutationOutput, 0, len(names))
 	for _, name := range names {
-		items = append(items, mutationOutput{Action: action, Resource: "sandbox", Name: name})
+		items = append(items, mutationOutput{Action: action, Resource: resourceSandbox, Name: name})
 	}
 	return items
 }

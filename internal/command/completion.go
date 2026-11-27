@@ -18,7 +18,7 @@ var completionTree = map[string][]string{
 	policyCommand:     {formatFlag, jsonFlag, sandboxFlag, protocolFlag, logTypeFlag, limitFlag, "--write", forceFlag, helpShort, helpFlag},
 	stopCommand:       {graceFlag, formatFlag, jsonFlag},
 	"rm":              {"-f", forceFlag, allFlag, formatFlag, jsonFlag},
-	"prune":           {dryRunFlag, "-f", forceFlag, "--filter", formatFlag, jsonFlag},
+	"prune":           {dryRunFlag, "-f", forceFlag, "--filter", allFlag, "--allow-unknown-skip", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
 	"attach":          {"--shell", helpShort, helpFlag},
 	"login":           {usernameFlag, passwordStdinFlag},

@@ -2,6 +2,8 @@
   {
     "action": "removed",
     "resource": "sandbox",
-    "name": "matrix-20261115-1025"
+    "name": "matrix-20261115-1025",
+    "id": "sb-contract-prune",
+    "code": "-"
   }
 ]

@@ -1,29 +1,51 @@
 {
   "would_remove": [
     {
+      "id": "sb-contract-1",
       "name": "matrix-20261115-1025",
+      "action": "removed",
+      "code": "-",
       "agent": "codex",
       "stopped_at": "<TIMESTAMP>",
       "workspaces": [
         "/private/tmp/gyrel-sbx-matrix-20261115/repo"
-      ]
+      ],
+      "record_hash": "0c7647fc0aafd7f804aefb9448d0da27387e4ebdbe0241a78a9034027386568d"
     },
     {
+      "id": "sb-contract-2",
       "name": "matrix-20261115-1035-prune",
+      "action": "removed",
+      "code": "-",
       "agent": "codex",
       "stopped_at": "<TIMESTAMP>",
       "workspaces": [
         "/private/tmp/gyrel-sbx-matrix-20261115/repo"
-      ]
+      ],
+      "record_hash": "165ddc587695c13c62cc39034c9dd975b7bce3297977ea5125c22be6a525a2ed"
     },
     {
+      "id": "sb-contract-3",
       "name": "my-sandbox",
+      "action": "removed",
+      "code": "-",
       "agent": "codex",
       "stopped_at": "<TIMESTAMP>",
       "workspaces": [
         "/Users/vladimirzikman/Workspace/opensource/sandboxes"
-      ]
+      ],
+      "record_hash": "044db161cada6715f95da1812aadd533b91b274b551c2ba6dad3a96f0da1e096"
     }
   ],
-  "skipped_unknown_stop": []
+  "skipped_unknown_stop": [],
+  "skipped_running": [],
+  "unclassified": [],
+  "summary": {
+    "planned": 3,
+    "pruned": 0,
+    "skipped": 0,
+    "stale": 0,
+    "unclassified": 0,
+    "failure": 0
+  }
 }

@@ -1703,6 +1703,9 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	if len(opts.targets) > 1 {
+		return r.removeMany(ctx, client, opts)
+	}
 	targets, resolveFailed, code := r.prepareRemoval(ctx, client, opts)
 	if code >= 0 {
 		return code

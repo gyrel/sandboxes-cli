@@ -55,7 +55,7 @@ func TestPruneCleansCloneRemotes(t *testing.T) {
 			sandboxes := &lifecycleSandbox{items: []sdk.Sandbox{sb}}
 			runner, out, errOut := cloneCleanupRunner(sandboxes, state)
 
-			if code := runner.Run(context.Background(), []string{"prune", "--force"}); code != 0 {
+			if code := runner.Run(context.Background(), []string{"prune", "--force", "--filter", "status=stopped"}); code != 0 {
 				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
 			if len(sandboxes.deletes) != 1 || sandboxes.deletes[0] != sb.ID {
@@ -135,7 +135,7 @@ func TestBulkDeleteWithoutCloneMetadataDoesNotAccessGit(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "prune", args: []string{"prune", "--force"}},
+		{name: "prune", args: []string{"prune", "--force", "--filter", "status=stopped"}},
 		{name: "reset", args: []string{"reset", "--force"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -424,7 +424,7 @@ func TestPruneWarnsBeforeRemovingCloneSandbox(t *testing.T) {
 	sandboxes := &lifecycleSandbox{items: []sdk.Sandbox{sb}}
 	runner, out, errOut := cloneCleanupRunner(sandboxes, state)
 
-	if code := runner.Run(context.Background(), []string{"prune", "--force"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"prune", "--force", "--filter", "status=stopped"}); code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if len(sandboxes.deletes) != 1 || sandboxes.deletes[0] != sb.ID {

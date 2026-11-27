@@ -111,7 +111,7 @@ func runHelp() commandHelp {
 			{Name: "new", Description: "always create a new sandbox instead of reusing the named one"},
 			{Name: "no-progress", Description: "suppress progress output"},
 			{Name: "policy-profile", Value: helpValueString, Description: "allow-all (default), deny-all, balanced, or sbx-compat"},
-			{Short: "p", Name: helpNamePublish, Value: helpNameStringArray, Description: "publish a guest port (repeatable): [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]"},
+			{Short: "p", Name: helpNamePublish, Value: helpNameStringArray, Description: "publish a guest port (repeatable): [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]\nAccepted grammar: [[HOST_IP:]HOST_PORT:]CONTAINER_PORT[/PROTOCOL]"},
 			{Name: "replace", Description: "delete and recreate an existing --name sandbox before running"},
 			{Name: "rm", Description: "remove the sandbox after the agent session exits"},
 			{Name: "skills", Value: "MODE", Description: "shared skills mode for a new sandbox only: off, readonly, or readwrite (unsupported); an omitted flag uses the skills.defaultMode setting (default readonly); reuse keeps the existing mode"},

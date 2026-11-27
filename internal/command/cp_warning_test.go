@@ -310,3 +310,27 @@ func TestCpHelpMentionsHostDisclosure(t *testing.T) {
 		t.Fatalf("help lacks disclosure sentence: %q", stdout.String())
 	}
 }
+
+// TestParseCopySpecDriveLetters pins that Windows drive-letter paths are host
+// paths, never SANDBOX:PATH references (Windows CI failure on r7-era parser).
+func TestParseCopySpecDriveLetters(t *testing.T) {
+	tests := []struct {
+		value    string
+		wantHost bool
+	}{
+		{`C:\Users\me\a.txt`, true},
+		{`c:/temp/b`, true},
+		{`Z:\x`, true},
+		{`C:`, true},
+		{`a:/x`, true}, // single-letter sandbox names are already invalid (grammar needs >=2 chars)
+		{"dev:/x", false},
+		{"web2:/data/out.tar", false},
+		{"ab:/x", false},
+	}
+	for _, tc := range tests {
+		_, guest := parseCopySpec(tc.value)
+		if guest == tc.wantHost {
+			t.Fatalf("parseCopySpec(%q) guest=%t, want host-only=%t", tc.value, guest, tc.wantHost)
+		}
+	}
+}

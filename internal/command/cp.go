@@ -39,6 +39,16 @@ func parseCopySpec(value string) (copySpec, bool) {
 	if index <= 0 || index == len(value)-1 {
 		return copySpec{}, false
 	}
+	// A single ASCII letter before the first colon is a Windows drive letter
+	// (C:\... or C:/...), not a sandbox reference. Without this, a host path
+	// like C:\Users\me\a.txt would be misparsed as SANDBOX:PATH and cp would
+	// reject the valid host→guest direction.
+	if index == 1 {
+		drive := value[0]
+		if (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z') {
+			return copySpec{}, false
+		}
+	}
 	return copySpec{sandbox: value[:index], path: value[index+1:]}, true
 }
 

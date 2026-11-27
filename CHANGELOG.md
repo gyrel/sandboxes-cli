@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.0.85 — 2026-11-28
+
+### Added
+
+- `cp` from the host now prints a disclosure note naming only the copied
+  basenames (never the absolute path) and carries `host_source_basename` in
+  `--json` / `--format` output.
+
+### Fixed
+
+- Windows drive-letter paths (`C:\…`) are classified as host paths instead of
+  being misparsed as `SANDBOX:PATH`.
+- On platforms without safe-open, host-to-guest `cp` refuses before opening an
+  exec session (fail-closed ordering is now test-pinned on both OS families).
+
 ## v0.0.84 — 2026-11-27
 
 ### Added

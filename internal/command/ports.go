@@ -38,30 +38,70 @@ func parsePublishSpec(value string) (sdk.Port, error) {
 	return parsePortSpec(value, true)
 }
 
+// parsePortSpecStrict validates a port spec against the strict shared grammar
+// without allocating an ephemeral host port. It returns the parsed port with a
+// zero host port when the host port was omitted.
+func parsePortSpecStrict(s string) (sdk.Port, error) {
+	if s == "" || strings.ContainsAny(s, " \t\n\r\v\f") {
+		return sdk.Port{}, errors.New("SPEC_INVALID: port spec must not be empty or contain whitespace")
+	}
+	protocol, hostIP, family, err := parsePortProtocol(s)
+	if err != nil {
+		return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
+	}
+	value := s
+	if idx := strings.IndexByte(value, '/'); idx >= 0 {
+		value = value[:idx]
+	}
+	if strings.HasPrefix(value, "[") {
+		port, err := parseBracketedPortSpec(value, protocol, family, false)
+		if err != nil {
+			return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
+		}
+		return port, nil
+	}
+	parts := strings.Split(value, ":")
+	switch len(parts) {
+	case 1:
+		port, err := ephemeralPort(parts[0], protocol, hostIP, false)
+		if err != nil {
+			return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
+		}
+		return port, nil
+	case 2:
+		port, err := explicitPort(parts[0], parts[1], protocol, hostIP)
+		if err != nil {
+			return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
+		}
+		return port, nil
+	case 3:
+		newHostIP, err := normalizePortHostIP(parts[0], family)
+		if err != nil {
+			return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
+		}
+		port, err := explicitPort(parts[1], parts[2], protocol, newHostIP)
+		if err != nil {
+			return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
+		}
+		return port, nil
+	default:
+		return sdk.Port{}, errors.New("SPEC_INVALID: port spec must be [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]")
+	}
+}
+
 func parsePortSpec(value string, allocateHost bool) (sdk.Port, error) {
-	protocol, hostIP, family, err := parsePortProtocol(value)
+	port, err := parsePortSpecStrict(value)
 	if err != nil {
 		return sdk.Port{}, err
 	}
-	value, _, _ = strings.Cut(value, "/")
-	if strings.HasPrefix(value, "[") {
-		return parseBracketedPortSpec(value, protocol, family, allocateHost)
-	}
-	parts := strings.Split(value, ":")
-	if len(parts) == 1 {
-		return ephemeralPort(parts[0], protocol, hostIP, allocateHost)
-	}
-	if len(parts) == 2 {
-		return explicitPort(parts[0], parts[1], protocol, hostIP)
-	}
-	if len(parts) == 3 {
-		hostIP, err = normalizePortHostIP(parts[0], family)
+	if allocateHost && port.Host == 0 {
+		host, err := allocateHostPort(port.Protocol, port.HostIP)
 		if err != nil {
-			return sdk.Port{}, err
+			return sdk.Port{}, fmt.Errorf("SPEC_INVALID: %w", err)
 		}
-		return explicitPort(parts[1], parts[2], protocol, hostIP)
+		port.Host = host
 	}
-	return sdk.Port{}, errors.New("port spec must be [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]")
+	return port, nil
 }
 
 func parsePortProtocol(value string) (protocol, hostIP, family string, err error) {
@@ -212,6 +252,22 @@ func resolvePorts(values []string) ([]sdk.Port, error) {
 	return resolvePortSpecs(values, true)
 }
 
+// resolvePortMutationSpecs validates both publish and unpublish specs before
+// the ports command opens a client, so malformed unpublish requests fail before
+// any RPC as well.
+func resolvePortMutationSpecs(publish, unpublish []string) ([]sdk.Port, error) {
+	published, err := resolvePorts(publish)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range unpublish {
+		if _, err := parsePortSpec(value, false); err != nil {
+			return nil, err
+		}
+	}
+	return published, nil
+}
+
 func resolvePortSpecs(values []string, allocateHost bool) ([]sdk.Port, error) {
 	if len(values) > 32 {
 		return nil, errors.New("at most 32 published ports are supported")
@@ -331,7 +387,7 @@ func (r *Runner) ports(ctx context.Context, args []string) int {
 }
 
 func (r *Runner) portsMutate(ctx context.Context, sandbox string, publishFlags, unpublishFlags []string) int {
-	published, err := resolvePorts(publishFlags)
+	published, err := resolvePortMutationSpecs(publishFlags, unpublishFlags)
 	if err != nil {
 		r.error(err)
 		return 2

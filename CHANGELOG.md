@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.83 — 2026-11-27
+
+### Changed
+
+- `run --publish` and `ports add` validate port specs with the strict shared
+  grammar and refuse malformed input pre-flight with `SPEC_INVALID:`-prefixed
+  errors; the accepted set is unchanged.
+
 ## v0.0.82 — 2026-11-27
 
 ### Security

@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,17 +13,21 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	sdk "github.com/gyrel/sandboxes-go-sdk"
 )
 
-const cpUsage = `usage: rsbx cp SRC DST
+const cpUsage = `usage: rsbx cp SRC... DST
 
-Copy one file or directory between the host and a sandbox. Exactly one side
-must be SANDBOX:PATH with an absolute guest path. The destination is the exact
-target path; an existing host directory is used as a directory container.
-Symbolic links, hard links and special files are rejected by default. -L follows
-a top-level source symlink (nested links remain rejected). Directory trees and
-regular files are supported.`
+Copy files or directories between the host and a sandbox. Exactly one side
+must be SANDBOX:PATH with an absolute guest path; host-to-sandbox copies may list
+multiple sources. The destination is the exact target path; an existing host
+directory is used as a directory container. Symbolic links, hard links and
+special files are rejected by default. -L follows a top-level source symlink
+(nested links remain rejected). Directory trees and regular files are supported.`
+
+const cpDisclosureSourceLimit = 8
 
 type copySpec struct {
 	sandbox string
@@ -34,6 +39,16 @@ func parseCopySpec(value string) (copySpec, bool) {
 	if index <= 0 || index == len(value)-1 {
 		return copySpec{}, false
 	}
+	// A single ASCII letter before the first colon is a Windows drive letter
+	// (C:\... or C:/...), not a sandbox reference. Without this, a host path
+	// like C:\Users\me\a.txt would be misparsed as SANDBOX:PATH and cp would
+	// reject the valid host→guest direction.
+	if index == 1 {
+		drive := value[0]
+		if (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z') {
+			return copySpec{}, false
+		}
+	}
 	return copySpec{sandbox: value[:index], path: value[index+1:]}, true
 }
 
@@ -42,26 +57,28 @@ func (r *Runner) cp(ctx context.Context, args []string) int {
 	fs.SetOutput(io.Discard)
 	follow := fs.Bool("L", false, "follow a top-level source symbolic link")
 	fs.BoolVar(follow, "follow-link", false, "follow a top-level source symbolic link")
+	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
+	jsonOutput := fs.Bool("json", false, "output in JSON format")
 	fs.Usage = func() { r.showCommandHelp(cpHelp()) }
-	if err := fs.Parse(reorderFlagArgs(args, nil)); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{formatFlag: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("cp", err)
 	}
-	if fs.NArg() != 2 {
+	if fs.NArg() < 2 {
 		_, _ = fmt.Fprintln(r.Err, cpUsage)
 		return 2
 	}
-	src, srcGuest := parseCopySpec(fs.Arg(0))
-	dst, dstGuest := parseCopySpec(fs.Arg(1))
-	if srcGuest == dstGuest {
-		_, _ = fmt.Fprintln(r.Err, "exactly one of SRC or DST must be SANDBOX:PATH")
+	selectedFormat, err := resolveOperationFormat(*format, *jsonOutput)
+	if err != nil {
+		r.error(err)
 		return 2
 	}
-	spec := dst
-	if srcGuest {
-		spec = src
+	plan, ok := resolveCpPlan(fs.Args())
+	if !ok {
+		_, _ = fmt.Fprintln(r.Err, "exactly one of SRC or DST must be SANDBOX:PATH")
+		return 2
 	}
 	client, err := r.client()
 	if err != nil {
@@ -69,30 +86,146 @@ func (r *Runner) cp(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	id, err := findExecSandbox(ctx, client, spec.sandbox)
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	var workspaces []sdk.Workspace
-	if !srcGuest {
-		sb, getErr := client.Sandboxes().Get(ctx, id)
-		if getErr != nil {
-			r.error(getErr)
-			return 1
-		}
-		workspaces = sb.Workspaces
-	}
-	if srcGuest {
-		err = copyGuestToHost(ctx, client, id, src.path, fs.Arg(1), *follow)
-	} else {
-		err = copyHostToGuest(ctx, client, id, fs.Arg(0), dst.path, workspaces, *follow)
-	}
+	workspaces, err := r.executeCpPlan(ctx, client, plan, *follow)
 	if err != nil {
 		r.error(explainCopyError(err, workspaces))
 		return 1
 	}
+	if selectedFormat != listFormatTable {
+		return r.renderCpResult(selectedFormat, plan)
+	}
 	return 0
+}
+
+func (r *Runner) executeCpPlan(ctx context.Context, client sdk.Client, plan cpPlan, follow bool) ([]sdk.Workspace, error) {
+	spec := plan.sandbox()
+	id, err := findExecSandbox(ctx, client, spec.sandbox)
+	if err != nil {
+		return nil, err
+	}
+	if plan.srcGuest {
+		return nil, copyGuestToHost(ctx, client, id, plan.src.path, plan.destination, follow)
+	}
+	sb, err := client.Sandboxes().Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	workspaces := sb.Workspaces
+	sandboxName := spec.sandbox
+	if sb.Name != "" {
+		sandboxName = sb.Name
+	}
+	r.printHostCopyDisclosure(sandboxName, plan.sources)
+	if !hostSourceCopySupported {
+		// Fail closed before any session state exists: the disclosure note is
+		// emitted first, then the typed unsupported refusal (AGENTS section 5).
+		return workspaces, errors.New("source hard link validation is unsupported on this platform")
+	}
+	for _, source := range plan.sources {
+		if err := copyHostToGuest(ctx, client, id, source, plan.dst.path, workspaces, follow); err != nil {
+			return workspaces, err
+		}
+	}
+	return workspaces, nil
+}
+
+func (r *Runner) renderCpResult(format string, plan cpPlan) int {
+	result := copyResult{}
+	if !plan.srcGuest {
+		result.HostSourceBasename = strings.Join(copySourceBasenames(plan.sources), ", ")
+	}
+	if err := renderCopyResult(r.Out, format, result); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+type cpPlan struct {
+	dst         copySpec
+	src         copySpec
+	srcGuest    bool
+	sources     []string
+	destination string
+}
+
+func (p cpPlan) sandbox() copySpec {
+	if p.srcGuest {
+		return p.src
+	}
+	return p.dst
+}
+
+// resolveCpPlan accepts multiple host sources only when the destination is a
+// guest path. Guest-to-host copies keep their single-source shape.
+func resolveCpPlan(positionals []string) (cpPlan, bool) {
+	destination := positionals[len(positionals)-1]
+	dst, dstGuest := parseCopySpec(destination)
+	sources := positionals[:len(positionals)-1]
+	if dstGuest {
+		for _, source := range sources {
+			if _, guest := parseCopySpec(source); guest {
+				return cpPlan{}, false
+			}
+		}
+		return cpPlan{dst: dst, sources: sources, destination: destination}, true
+	}
+	if len(sources) != 1 {
+		return cpPlan{}, false
+	}
+	src, srcGuest := parseCopySpec(sources[0])
+	if !srcGuest {
+		return cpPlan{}, false
+	}
+	return cpPlan{src: src, srcGuest: true, sources: sources, destination: destination}, true
+}
+
+// copyResult is the structured cp success record. The disclosure basename is
+// host-only: guest-to-host and local paths never populate it.
+type copyResult struct {
+	HostSourceBasename string `json:"host_source_basename,omitempty" yaml:"host_source_basename,omitempty"`
+}
+
+func renderCopyResult(out io.Writer, format string, result copyResult) error {
+	switch format {
+	case listFormatJSON:
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	case listFormatYAML:
+		data, err := yaml.Marshal(result)
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(data)
+		return err
+	default:
+		return nil
+	}
+}
+
+func copySourceBasenames(sources []string) []string {
+	basenames := make([]string, 0, len(sources))
+	for _, source := range sources {
+		basenames = append(basenames, filepath.Base(filepath.Clean(source)))
+	}
+	return basenames
+}
+
+// printHostCopyDisclosure names only the copied basenames. Absolute host paths
+// stay out of terminal output so the audit trail remains X-3 hygiene clean.
+func (r *Runner) printHostCopyDisclosure(sandboxName string, sources []string) {
+	basenames := copySourceBasenames(sources)
+	shown := basenames
+	if len(shown) > cpDisclosureSourceLimit {
+		shown = shown[:cpDisclosureSourceLimit]
+	}
+	listing := strings.Join(shown, ", ")
+	if remaining := len(basenames) - len(shown); remaining > 0 {
+		listing += fmt.Sprintf(", +%d more", remaining)
+	}
+	_, _ = fmt.Fprintf(r.Err, "note: copying host content into sandbox %s: %s (the daemon user can read this path)\n",
+		sanitizeTerminalText(sandboxName), sanitizeTerminalText(listing))
 }
 
 // explainCopyError adds workspace context to raw os.Root escape failures so

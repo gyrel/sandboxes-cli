@@ -208,8 +208,9 @@ func cpHelp() commandHelp {
 			"When copying a directory, the directory itself is placed at the destination.",
 			"Symbolic links, hard links and special files are rejected by default.",
 			"-L follows a top-level source symbolic link; nested links remain rejected.",
+			"Copying host content into a sandbox prints a note naming the copied basenames because the daemon user can read those host paths.",
 		},
-		Usage: []string{"rsbx cp SRC DST [flags]"},
+		Usage: []string{"rsbx cp SRC... DST [flags]"},
 		Examples: []string{
 			"# Copy a file from host to sandbox",
 			"rsbx cp ./config.json my-sandbox:/home/user/",
@@ -219,6 +220,8 @@ func cpHelp() commandHelp {
 		},
 		Flags: []commandFlagHelp{
 			{Short: "L", Name: "follow-link", Description: "follow a top-level source symbolic link"},
+			{Name: helpNameFormat, Value: helpValueString, Description: "output format: table, json or yaml"},
+			{Name: "json", Description: "output in JSON format"},
 			{Short: "h", Name: helpCommand, Description: "help for cp"},
 		},
 	}

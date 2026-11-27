@@ -8,6 +8,11 @@ import (
 	"syscall"
 )
 
+// hostSourceCopySupported is true wherever safe source opening is implemented
+// (descriptor-relative with hardlink validation); see cp_hardlink_other.go for
+// the fail-closed counterpart.
+const hostSourceCopySupported = true
+
 func rejectCopyHardlink(info os.FileInfo) error {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Nlink != 1 {

@@ -208,27 +208,8 @@ func TestCpHostToGuestDisclosureLines(t *testing.T) {
 			runner, stdout, stderr, sessions := newCpWarningRunner(t, nil)
 			code := runner.Run(context.Background(), cpWarningArgs(sources, "dev:/workspace/"))
 			want := fmt.Sprintf("note: copying host content into sandbox dev: %s (the daemon user can read this path)\n", tt.wantNames)
-			if !cpHostSourceCopySupported {
-				// Fail-closed platform contract (cp_hardlink_other.go): the note is
-				// emitted first, then the copy refuses with the typed unsupported
-				// error and no exec session starts. Assert the refusal rather than
-				// relaxing the stub (AGENTS section 5: enforced or explicitly
-				// unsupported).
-				if code != 1 {
-					t.Fatalf("unsupported platform exit=%d want=1 stderr=%q", code, stderr.String())
-				}
-				if got := stderr.String(); !strings.HasPrefix(got, want) || !strings.Contains(got, "source hard link validation is unsupported on this platform") {
-					t.Fatalf("unsupported-platform output=%q want note prefix %q plus typed refusal", got, want)
-				}
-				if got := stdout.String(); got != "" {
-					t.Fatalf("stdout=%q want empty", got)
-				}
-				if strings.Contains(stdout.String()+stderr.String(), root) {
-					t.Fatalf("absolute host fixture path leaked: %q", stderr.String())
-				}
-				if got := sessions.requestCount(); got != 0 {
-					t.Fatalf("copy sessions=%d want=0 on unsupported platform", got)
-				}
+			if !hostSourceCopySupported {
+				requireUnsupportedPlatformRefusal(t, code, stdout, stderr, sessions, root, want)
 				return
 			}
 			if code != 0 {
@@ -297,20 +278,10 @@ func TestCpJSONHostSourceBasename(t *testing.T) {
 				target := filepath.Join(t.TempDir(), "target")
 				args = []string{"cp", "dev:/home/user/output.log", target, "--json"}
 			}
-			if code := runner.Run(context.Background(), args); code != 0 {
-				if tt.wantPresent && !cpHostSourceCopySupported {
-					// Fail-closed platform contract: disclosure note emitted, then the
-					// typed unsupported refusal; no JSON success record on failure.
-					if !strings.Contains(stderr.String(), "sandbox dev: fixture.txt") ||
-						!strings.Contains(stderr.String(), "source hard link validation is unsupported on this platform") {
-						t.Fatalf("unsupported-platform output=%q", stderr.String())
-					}
-					if stdout.String() != "" {
-						t.Fatalf("stdout=%q want empty on refused copy", stdout.String())
-					}
-					if strings.Contains(stdout.String()+stderr.String(), root) {
-						t.Fatalf("absolute host fixture path leaked: %q", stderr.String())
-					}
+			code := runner.Run(context.Background(), args)
+			if code != 0 {
+				if tt.wantPresent && !hostSourceCopySupported {
+					requireUnsupportedJSONRefusal(t, stdout, stderr, root)
 					return
 				}
 				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -326,17 +297,60 @@ func TestCpJSONHostSourceBasename(t *testing.T) {
 			if tt.wantPresent && value != "fixture.txt" {
 				t.Fatalf("host_source_basename=%v want=fixture.txt", value)
 			}
-			if tt.wantPresent {
-				if !strings.Contains(stderr.String(), "sandbox dev: fixture.txt") {
-					t.Fatalf("JSON mode lost disclosure: %q", stderr.String())
-				}
-			} else if stderr.String() != "" {
+			if tt.wantPresent && !strings.Contains(stderr.String(), "sandbox dev: fixture.txt") {
+				t.Fatalf("JSON mode lost disclosure: %q", stderr.String())
+			}
+			if !tt.wantPresent && stderr.String() != "" {
 				t.Fatalf("guest-to-host JSON stderr=%q", stderr.String())
 			}
 			if strings.Contains(stdout.String()+stderr.String(), root) {
 				t.Fatalf("absolute host fixture path leaked: stdout=%q stderr=%q", stdout.String(), stderr.String())
 			}
 		})
+	}
+}
+
+// requireUnsupportedJSONRefusal asserts the fail-closed platform contract for
+// JSON output: disclosure note first, typed unsupported refusal, empty stdout.
+func requireUnsupportedJSONRefusal(t *testing.T, stdout, stderr *cpSpyWriter, root string) {
+	t.Helper()
+	if !strings.Contains(stderr.String(), "sandbox dev: fixture.txt") {
+		t.Fatalf("JSON unsupported-platform output lost disclosure: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "source hard link validation is unsupported on this platform") {
+		t.Fatalf("JSON unsupported-platform output lost typed refusal: %q", stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout=%q want empty on refused copy", stdout.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), root) {
+		t.Fatalf("absolute host fixture path leaked: %q", stderr.String())
+	}
+}
+
+// requireUnsupportedPlatformRefusal asserts the fail-closed host-to-guest cp
+// contract on platforms whose safe-open is a stub (cp_hardlink_other.go):
+// note first, typed refusal, exit 1, empty stdout, zero exec sessions.
+func requireUnsupportedPlatformRefusal(t *testing.T, code int, stdout, stderr *cpSpyWriter, sessions *cpWarningSessions, root, want string) {
+	t.Helper()
+	if code != 1 {
+		t.Fatalf("unsupported platform exit=%d want=1 stderr=%q", code, stderr.String())
+	}
+	got := stderr.String()
+	if !strings.HasPrefix(got, want) {
+		t.Fatalf("unsupported-platform stderr=%q want note prefix %q", got, want)
+	}
+	if !strings.Contains(got, "source hard link validation is unsupported on this platform") {
+		t.Fatalf("unsupported-platform stderr lacks typed refusal: %q", got)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout=%q want empty", stdout.String())
+	}
+	if strings.Contains(stdout.String()+got, root) {
+		t.Fatalf("absolute host fixture path leaked: %q", got)
+	}
+	if n := sessions.requestCount(); n != 0 {
+		t.Fatalf("copy sessions=%d want=0 on unsupported platform", n)
 	}
 }
 

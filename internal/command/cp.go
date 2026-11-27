@@ -116,6 +116,11 @@ func (r *Runner) executeCpPlan(ctx context.Context, client sdk.Client, plan cpPl
 		sandboxName = sb.Name
 	}
 	r.printHostCopyDisclosure(sandboxName, plan.sources)
+	if !hostSourceCopySupported {
+		// Fail closed before any session state exists: the disclosure note is
+		// emitted first, then the typed unsupported refusal (AGENTS section 5).
+		return workspaces, errors.New("source hard link validation is unsupported on this platform")
+	}
 	for _, source := range plan.sources {
 		if err := copyHostToGuest(ctx, client, id, source, plan.dst.path, workspaces, follow); err != nil {
 			return workspaces, err

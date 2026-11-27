@@ -35,13 +35,14 @@ type listOptions struct {
 // last_used_at, workspaces and created_at, in that order. Fields sbx omits
 // when empty keep the same omitempty behavior here.
 type sandboxOutput struct {
-	Name       string   `json:"name" yaml:"name"`
-	ID         string   `json:"id" yaml:"id"`
-	Agent      string   `json:"agent" yaml:"agent"`
-	Status     string   `json:"status" yaml:"status"`
-	LastUsedAt string   `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
-	Workspaces []string `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
-	CreatedAt  string   `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	Name       string            `json:"name" yaml:"name"`
+	ID         string            `json:"id" yaml:"id"`
+	Agent      string            `json:"agent" yaml:"agent"`
+	Status     string            `json:"status" yaml:"status"`
+	LastUsedAt string            `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	Workspaces []string          `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	CreatedAt  string            `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
 func (r *Runner) list(ctx context.Context, args []string) int {
@@ -211,6 +212,7 @@ func sandboxOutputFor(sb *sdk.Sandbox) sandboxOutput {
 		Status:     sb.State,
 		LastUsedAt: listTime(sb.LastUsedAt),
 		Workspaces: workspaces,
+		Labels:     sb.Labels,
 		CreatedAt:  listTime(sb.CreatedAt),
 	}
 }

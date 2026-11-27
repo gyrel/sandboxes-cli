@@ -174,9 +174,9 @@ func parsePruneUntil(value string, now time.Time) (time.Time, error) {
 	return now.Add(-duration), nil
 }
 
-// matches applies the filter to one inventory record. label filters always
-// report false because the pinned list RPC exposes no labels; the expression
-// is still validated so a typo cannot become match-all.
+// matches applies the filter to one inventory record. Label filters compare
+// the exact key/value pair against the labels the daemon returns on the list
+// record, so they participate in the two-phase plan like every other key.
 func (f *pruneFilter) matches(sb *sdk.Sandbox) bool {
 	if f == nil {
 		return true
@@ -185,7 +185,12 @@ func (f *pruneFilter) matches(sb *sdk.Sandbox) bool {
 	case pruneFilterStatus:
 		return sb.State == f.status
 	case pruneFilterLabel:
-		return false
+		key, value, ok := strings.Cut(f.label, "=")
+		if !ok {
+			return false
+		}
+		actual, exists := sb.Labels[key]
+		return exists && actual == value
 	case pruneFilterName:
 		return sb.Name == f.name
 	case pruneFilterNameRegex:
@@ -420,7 +425,7 @@ var machineCodes = map[string]struct{}{
 	pruneCodeFilterReq: {}, pruneCodeFilterBad: {}, "MEMBER_TYPE_REFUSED": {}, "LINK_ESCAPE": {},
 	"COPY_ROLLBACK": {}, "HOST_PATH_NOT_ALLOWED": {}, "LEASE_DRAINING": {}, "PORT_RESERVED": {},
 	"SETTINGS_INVALID": {}, "AUDIT_CAP_EXCEEDED": {}, "LIMITS_UNAVAILABLE": {},
-	"PRIVILEGED_UNSUPPORTED": {}, "APPROVAL_PROVIDER_UNAVAILABLE": {},
+	"PRIVILEGED_UNSUPPORTED": {}, "APPROVAL_PROVIDER_UNAVAILABLE": {}, "LABEL_INVALID": {},
 }
 
 func isMachineCode(code string) bool {

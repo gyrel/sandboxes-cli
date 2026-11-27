@@ -48,6 +48,7 @@ const (
 	helpEnvFileDescription     = "read environment overrides from a file (repeatable)"
 	helpNameKitArg             = "kit-arg"
 	helpNameKitArgsFile        = "kit-args-file"
+	helpNameLabel              = "label"
 	helpKitArgDescription      = "(Experimental) Value for an argument the kit declares, as name=value for every kit or kit.name=value for one (can be repeated)"
 	helpKitArgsFileDescription = "(Experimental) File of name=value kit arguments, one per line (can be repeated); --kit-arg overrides"
 	helpUserDescription        = "uid[:gid] or name[:group]"
@@ -106,6 +107,7 @@ func runHelp() commandHelp {
 			{Name: "kit", Value: helpValueString, Description: "apply a local kit definition"},
 			{Name: helpNameKitArg, Value: helpNameStringArray, Description: helpKitArgDescription},
 			{Name: helpNameKitArgsFile, Value: helpNameStringArray, Description: helpKitArgsFileDescription},
+			{Name: helpNameLabel, Value: "KEY=VALUE", Description: "metadata for a new sandbox (repeatable; duplicate keys keep the last value)"},
 			{Short: "m", Name: "memory", Value: helpValueString, Description: "memory limit for a new sandbox, such as 512m or 2g"},
 			{Name: helpNameName, Value: helpValueString, Description: "sandbox name; reuse and restart it when it already exists"},
 			{Name: "new", Description: "always create a new sandbox instead of reusing the named one"},
@@ -165,6 +167,7 @@ func createHelp() commandHelp {
 			{Name: "kit", Value: helpValueString, Description: "apply a local kit definition"},
 			{Name: helpNameKitArg, Value: helpNameStringArray, Description: helpKitArgDescription},
 			{Name: helpNameKitArgsFile, Value: helpNameStringArray, Description: helpKitArgsFileDescription},
+			{Name: helpNameLabel, Value: "KEY=VALUE", Description: "metadata for a new sandbox (repeatable; duplicate keys keep the last value)"},
 			{Short: "m", Name: "memory", Value: helpValueString, Description: "memory limit such as 512m or 2g (empty selects the daemon default)"},
 			{Name: helpNameName, Value: helpValueString, Description: "sandbox name"},
 			{Name: "no-progress", Description: "suppress progress output"},
@@ -363,9 +366,11 @@ func pruneHelp() commandHelp {
 			"before any deletion with exit 2; --allow-unknown-skip excludes them and exits 1.",
 			"",
 			"--filter accepts status=STATE, label=KEY=VALUE, name=NAME, name~^REGEX or",
-			"until=DURATION|TIMESTAMP. Invalid keys and values fail with FILTER_UNKNOWN; an",
-			"empty filter fails with FILTER_REQUIRED. A bare non-interactive prune with no",
-			"--filter or --all refuses with FILTER_REQUIRED rather than guessing a match-all.",
+			"until=DURATION|TIMESTAMP. Label filters match the labels recorded at create",
+			"time and join the same two-phase plan. Invalid keys and values fail with",
+			"FILTER_UNKNOWN; an empty filter fails with FILTER_REQUIRED. A bare non-interactive",
+			"prune with no --filter or --all refuses with FILTER_REQUIRED rather than guessing",
+			"a match-all.",
 			"",
 			"Validation and planning happen before deletion. --dry-run prints the stable plan",
 			"ids one per line (or a structured plan with --json) without removing anything.",

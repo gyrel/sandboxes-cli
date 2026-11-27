@@ -1290,6 +1290,7 @@ type createOptions struct {
 	memoryMiB        uint32
 	env              []string
 	oauthCredentials []sdk.OAuthCredential
+	labels           map[string]string
 	profile          string
 	privileged       bool
 	clone            *sdk.CloneOptions
@@ -1357,6 +1358,7 @@ func (r *Runner) create(ctx context.Context, args []string) int {
 		OAuthCredentials: opts.oauthCredentials,
 		Clone:            opts.clone,
 		Skills:           opts.skills,
+		Labels:           opts.labels,
 	})
 	if err != nil {
 		r.error(err)
@@ -1512,7 +1514,7 @@ func createKitSelection(kitRefs, values, files []string) (string, map[string]str
 	return kitPath, arguments, err
 }
 
-//nolint:funlen // create accepts the full documented flag matrix.
+//nolint:funlen,gocyclo,cyclop // create accepts the full documented flag matrix.
 func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createOptions, bool, error) {
 	fs := r.newFlagSet(commandCreate)
 	fs.SetOutput(io.Discard)
@@ -1530,6 +1532,8 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 	fs.Var(&envFlags, "env", "environment KEY=VALUE for every process (repeatable)")
 	fs.Var(&envFlags, "e", "environment KEY=VALUE for every process (repeatable)")
 	fs.Var(&envFileFlags, "env-file", "read environment from a file (repeatable)")
+	var labelFlags stringListFlag
+	fs.Var(&labelFlags, "label", "metadata KEY=VALUE for a new sandbox (repeatable; duplicate keys keep the last value)")
 	idempotency := fs.String("idempotency-key", "", "idempotency key")
 	cpus := fs.Uint("cpus", 0, "CPUs (0 selects the daemon default)")
 	memory := fs.String("memory", "", "memory limit such as 512m or 2g (empty selects the daemon default)")
@@ -1550,6 +1554,10 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 			return createOptions{}, true, nil
 		}
 		return createOptions{}, false, flagParseError{err: err}
+	}
+	labels, err := parseLabelAssignments(labelFlags)
+	if err != nil {
+		return createOptions{}, false, err
 	}
 	kitPath, kitArguments, err := createKitSelection(kitRefs, kitArgs, kitArgFiles)
 	if err != nil {
@@ -1607,7 +1615,7 @@ func (r *Runner) parseCreateOptions(ctx context.Context, args []string) (createO
 		name: name, agent: agent, image: imageRef, workspace: workspace, idempotencyKey: *idempotency,
 		workspaces: workspaces, ports: ports, allow: allow, deny: deny,
 		cpus: cpuCount, memoryMiB: memoryMiB, env: env, oauthCredentials: oauthCredentials, profile: *profile, privileged: *privileged, clone: cloneOptions,
-		skills: skills,
+		skills: skills, labels: labels,
 	}, false, nil
 }
 

@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -91,8 +92,8 @@ func TestPruneFilterMatrixRejectsBeforeAnyDelete(t *testing.T) {
 func TestPruneFilterMatrixSelectsExpectedSubset(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 0, 0, 0, time.UTC)
 	items := []sdk.Sandbox{
-		{ID: "old", Name: "tmp-old", State: sdk.StateStopped, StoppedAt: now.Add(-3 * time.Hour)},
-		{ID: "new", Name: "tmp-new", State: sdk.StateStopped, StoppedAt: now.Add(-time.Hour)},
+		{ID: "old", Name: "tmp-old", State: sdk.StateStopped, StoppedAt: now.Add(-3 * time.Hour), Labels: map[string]string{"env": "ci", "team": "platform"}},
+		{ID: "new", Name: "tmp-new", State: sdk.StateStopped, StoppedAt: now.Add(-time.Hour), Labels: map[string]string{"env": "dev"}},
 		{ID: "run", Name: "web", State: sdk.StateRunning},
 		{ID: "other", Name: "other", State: sdk.StateStopped, StoppedAt: now.Add(-2 * time.Hour)},
 	}
@@ -105,7 +106,9 @@ func TestPruneFilterMatrixSelectsExpectedSubset(t *testing.T) {
 		{"name=web", []string{"run"}},
 		{"name~^tmp-", []string{"old", "new"}},
 		{"until=2h", []string{"old"}},
-		{"label=env=ci", nil},
+		{"label=env=ci", []string{"old"}},
+		{"label=team=platform", []string{"old"}},
+		{"label=env=missing", nil},
 	} {
 		filter, err := parsePruneFilter(tc.filter, now)
 		if err != nil {
@@ -260,14 +263,43 @@ func TestPruneUnknownStopTimeSkipsAndExitsOne(t *testing.T) {
 	}
 }
 
-func TestPruneLabelFilterIsValidatedAndMatchesNothing(t *testing.T) {
-	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{pruneStopped("sb-1", "one")}}
+func TestPruneLabelFilterMatchesAndSelects(t *testing.T) {
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
+		{ID: "sb-ci", Name: "ci", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC), Labels: map[string]string{"env": "ci"}},
+		{ID: "sb-dev", Name: "dev", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC), Labels: map[string]string{"env": "dev"}},
+		pruneStopped("sb-plain", "plain"),
+	}}
 	runner, out := lifecycleRunner(sandbox)
 	if code := runner.Run(context.Background(), []string{"prune", "-f", "--filter", "label=env=ci"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	if len(sandbox.deletes) != 0 || !strings.Contains(out.String(), "summary: pruned=0 skipped=0") {
+	if strings.Join(sandbox.deletes, ",") != "sb-ci" {
 		t.Fatalf("deletes=%v output=%q", sandbox.deletes, out.String())
+	}
+	if !strings.Contains(out.String(), "sb-ci|ci|removed|-") ||
+		!strings.Contains(out.String(), "summary: pruned=1 skipped=0 stale=0 unclassified=0 failure=0") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestPruneLabelFilterParticipatesInDryRunPlan(t *testing.T) {
+	sandbox := &lifecycleSandbox{items: []sdk.Sandbox{
+		{ID: "sb-ci", Name: "ci", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC), Labels: map[string]string{"env": "ci"}},
+		{ID: "sb-dev", Name: "dev", State: sdk.StateStopped, StoppedAt: time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC), Labels: map[string]string{"env": "dev"}},
+	}}
+	runner, out := lifecycleRunner(sandbox)
+	if code := runner.Run(context.Background(), []string{"prune", "--dry-run", "--json", "--filter", "label=env=dev"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	var plan pruneDryRunEnvelope
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("json %q: %v", out.String(), err)
+	}
+	if len(plan.WouldRemove) != 1 || plan.WouldRemove[0].ID != "sb-dev" || plan.Summary.Planned != 1 {
+		t.Fatalf("plan=%#v output=%q", plan, out.String())
+	}
+	if len(sandbox.deletes) != 0 {
+		t.Fatalf("dry-run deleted %v", sandbox.deletes)
 	}
 }
 

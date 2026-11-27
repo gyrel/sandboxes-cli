@@ -73,6 +73,7 @@ Flags:
   -m, --memory SIZE               memory limit for a new sandbox, such as 512m or 2g
   -e, --env KEY=VALUE             environment override for the agent session (repeatable)
       --env-file FILE             read environment overrides from a file (repeatable)
+      --label KEY=VALUE           metadata for a new sandbox (repeatable; duplicate keys keep the last value)
       --no-progress               suppress the deployment progress indicator
       --rm                        remove the sandbox after the agent session exits
   -h, --help                      help for run
@@ -180,6 +181,7 @@ type runResources struct {
 	ports   []sdk.Port
 	allow   []sdk.NetworkRule
 	deny    []sdk.NetworkRule
+	labels  map[string]string
 }
 
 type runOptions struct {
@@ -201,6 +203,7 @@ type runOptions struct {
 	env              []string
 	oauthCredentials []sdk.OAuthCredential
 	envFiles         []string
+	labels           []string
 	skills           string
 	skillsOptions    *sdk.SkillsOptions
 	detach           bool
@@ -853,7 +856,11 @@ func (r *Runner) prepareRunResources(opts *runOptions) (runResources, error) {
 	if err := validateOAuthProxyEnvironment(env); err != nil {
 		return runResources{}, err
 	}
-	return runResources{cpus: cpus, memory: memoryMiB, env: env, profile: opts.profile, ports: ports, allow: allow, deny: deny}, nil
+	labels, err := parseLabelAssignments(opts.labels)
+	if err != nil {
+		return runResources{}, err
+	}
+	return runResources{cpus: cpus, memory: memoryMiB, env: env, profile: opts.profile, ports: ports, allow: allow, deny: deny, labels: labels}, nil
 }
 
 //nolint:gocritic // runOptions is an immutable value object.
@@ -866,6 +873,9 @@ func (r *Runner) warnReusedResources(sandbox *sdk.Sandbox, opts runOptions, reso
 	}
 	if len(opts.allow) > 0 || len(opts.deny) > 0 || opts.profile != "" {
 		_, _ = fmt.Fprintf(r.Err, "warning: sandbox %s keeps its existing network policy; policy flags apply only to new sandboxes\n", sandbox.Name)
+	}
+	if len(resources.labels) > 0 {
+		_, _ = fmt.Fprintf(r.Err, "warning: sandbox %s keeps its existing labels; --label applies only to new sandboxes\n", sandbox.Name)
 	}
 }
 
@@ -1012,6 +1022,9 @@ func parseRunValuedFlag(r *Runner, args []string, index int, arg string, opts *r
 	case envFileFlag:
 		consumed, err := parseRunListValue(args, index, envFileFlag, &opts.envFiles)
 		return consumed, true, err
+	case labelFlag:
+		consumed, err := parseRunListValue(args, index, labelFlag, &opts.labels)
+		return consumed, true, err
 	case skillsFlag:
 		consumed, err := parseRunValue(args, index, skillsFlag, &opts.skills)
 		return consumed, true, err
@@ -1100,6 +1113,10 @@ func parseRunAssignmentFlag(r *Runner, arg string, opts *runOptions) (int, bool,
 	}
 	if value, ok := strings.CutPrefix(arg, envFileFlag+"="); ok {
 		consumed, err := appendRunListValue(envFileFlag, value, &opts.envFiles)
+		return consumed, true, err
+	}
+	if value, ok := strings.CutPrefix(arg, labelFlag+"="); ok {
+		consumed, err := appendRunListValue(labelFlag, value, &opts.labels)
 		return consumed, true, err
 	}
 	if value, ok := strings.CutPrefix(arg, skillsFlag+"="); ok {
@@ -1609,6 +1626,7 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 		OAuthCredentials: opts.oauthCredentials,
 		Clone:            cloneOptions,
 		Skills:           opts.skillsOptions,
+		Labels:           resources.labels,
 	})
 	if err != nil {
 		progress.fail()

@@ -10,7 +10,7 @@
       "workspaces": [
         "/private/tmp/gyrel-sbx-matrix-20261115/repo"
       ],
-      "record_hash": "0c7647fc0aafd7f804aefb9448d0da27387e4ebdbe0241a78a9034027386568d"
+      "record_hash": "fb535de987f25efa8788c5280eb83db6be16d1c47d161a8a8fb82e0fb497d3d6"
     },
     {
       "id": "sb-contract-2",
@@ -22,7 +22,7 @@
       "workspaces": [
         "/private/tmp/gyrel-sbx-matrix-20261115/repo"
       ],
-      "record_hash": "165ddc587695c13c62cc39034c9dd975b7bce3297977ea5125c22be6a525a2ed"
+      "record_hash": "73506503988c8b6ec9c62d0475fd548623e2dc37edfbdd0edddcf6d57e209cc1"
     },
     {
       "id": "sb-contract-3",
@@ -34,7 +34,7 @@
       "workspaces": [
         "/Users/vladimirzikman/Workspace/opensource/sandboxes"
       ],
-      "record_hash": "044db161cada6715f95da1812aadd533b91b274b551c2ba6dad3a96f0da1e096"
+      "record_hash": "76fcedd1a9f064dc6f79dbda984bbfd8aa92bf774f542b393a400a94011cd991"
     }
   ],
   "skipped_unknown_stop": [],

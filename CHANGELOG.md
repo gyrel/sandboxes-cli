@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.0.84 — 2026-11-27
+
+### Added
+
+- `run` and `create` accept repeatable `--label KEY=VALUE` (last value wins
+  per key; cheap shape guard client-side, full grammar enforced by the
+  daemon with `LABEL_INVALID`). Labels appear in `--format json|yaml` output
+  only, never in the default table. `prune --filter label=k=v` now matches.
+
 ## v0.0.83 — 2026-11-27
 
 ### Changed

@@ -46,8 +46,11 @@ func TestParsePortSpecHostIPAndIPv6(t *testing.T) {
 		{value: "[::1]:8080:3000/tcp6", hostIP: "::1", host: 8080, guest: 3000, proto: "tcp", ok: true},
 		{value: "[::1]:3000/udp6", hostIP: "::1", guest: 3000, proto: "udp", ok: true},
 		{value: "8080/tcp6", hostIP: "::1", guest: 8080, proto: "tcp", ok: true},
+		{value: "10.0.0.5:8080:3000/tcp4", hostIP: "10.0.0.5", host: 8080, guest: 3000, proto: "tcp", ok: true},
+		{value: "100.64.5.9:8080:3000", hostIP: "100.64.5.9", host: 8080, guest: 3000, proto: "tcp", ok: true},
 		{value: "::1:8080:3000/tcp6", ok: false},
-		{value: "192.0.2.10:8080:3000", ok: false},
+		{value: "0.0.0.0:8080:3000", ok: false},
+		{value: "[::]:8080:3000/tcp6", ok: false},
 		{value: "127.0.0.1:8080:3000/tcp6", ok: false},
 		{value: "[::1]:8080:3000/tcp4", ok: false},
 	} {
@@ -61,6 +64,46 @@ func TestParsePortSpecHostIPAndIPv6(t *testing.T) {
 		if port.HostIP != tc.hostIP || port.Host != tc.host || port.Guest != tc.guest || port.Protocol != tc.proto {
 			t.Fatalf("parsePortSpec(%q)=%+v", tc.value, port)
 		}
+	}
+}
+
+func TestPortNormalizeHostIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		family  string
+		want    string
+		wantErr string
+	}{
+		{name: "loopback IPv4", value: "127.0.0.1", want: "127.0.0.1"},
+		{name: "loopback IPv6", value: "::1", want: "::1"},
+		{name: "specific non-loopback IPv4", value: "10.0.0.5", family: "4", want: "10.0.0.5"},
+		{name: "carrier-grade NAT IPv4", value: "100.64.5.9", family: "4", want: "100.64.5.9"},
+		{name: "specific non-loopback IPv6", value: "2001:db8::5", family: "6", want: "2001:db8::5"},
+		{name: "unparseable", value: "not-an-ip", wantErr: "host IP must be a valid IP address"},
+		{name: "IPv4 wildcard", value: "0.0.0.0", wantErr: "host IP must be a specific address, not 0.0.0.0 or ::"},
+		{name: "IPv6 wildcard", value: "::", wantErr: "host IP must be a specific address, not 0.0.0.0 or ::"},
+		{name: "IPv4 wildcard with family", value: "0.0.0.0", family: "4", wantErr: "host IP must be a specific address, not 0.0.0.0 or ::"},
+		{name: "IPv6 wildcard with family", value: "::", family: "6", wantErr: "host IP must be a specific address, not 0.0.0.0 or ::"},
+		{name: "tcp4 with IPv6", value: "::1", family: "4", wantErr: "host IP family does not match port protocol"},
+		{name: "tcp6 with IPv4", value: "10.0.0.5", family: "6", wantErr: "host IP family does not match port protocol"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizePortHostIP(tc.value, tc.family)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("normalizePortHostIP(%q, %q) error = %v, want %q", tc.value, tc.family, err, tc.wantErr)
+				}
+				if got != "" {
+					t.Fatalf("normalizePortHostIP(%q, %q) = %q on error, want empty", tc.value, tc.family, got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("normalizePortHostIP(%q, %q) = %q, %v, want %q", tc.value, tc.family, got, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -111,6 +154,72 @@ func TestRunPassesPublishedPortsOnCreate(t *testing.T) {
 	}
 	if len(sandboxes.created.Ports) != 1 || sandboxes.created.Ports[0].Host != 8080 {
 		t.Fatalf("ports=%+v", sandboxes.created.Ports)
+	}
+	if sandboxes.created.Ports[0].HostIP != loopbackHost {
+		t.Fatalf("host IP=%q, want %q", sandboxes.created.Ports[0].HostIP, loopbackHost)
+	}
+}
+
+func TestRunPublishNonLoopbackReachesDaemonAndBindForbiddenExits2(t *testing.T) {
+	workspace := t.TempDir()
+	base := &runSandbox{}
+	spy := &bindRefusalSandbox{
+		runSandbox: base,
+		createErr: &sdk.Error{
+			Code:        "InvalidArgument",
+			Message:     "publish denied by the server allowlist",
+			MachineCode: "BIND_FORBIDDEN",
+		},
+	}
+	client := bindRefusalClient{
+		runClient:      runClient{sandboxes: base, sessions: &fakeSessions{}},
+		sandboxService: spy,
+	}
+	runner, out, stderr := runTestRunner(t, client, "")
+	code := runner.Run(context.Background(), []string{"run", "--detach", "--publish", "10.0.0.5:9000:80", "shell", workspace})
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2 (stdout=%q stderr=%q)", code, out.String(), stderr.String())
+	}
+	if spy.createCalls != 1 {
+		t.Fatalf("Create calls=%d, want 1", spy.createCalls)
+	}
+	if len(spy.created.Ports) != 1 {
+		t.Fatalf("ports=%+v", spy.created.Ports)
+	}
+	port := spy.created.Ports[0]
+	if port.HostIP != "10.0.0.5" || port.Host != 9000 || port.Guest != 80 {
+		t.Fatalf("port=%+v, want host IP 10.0.0.5 host 9000 guest 80", port)
+	}
+	output := out.String() + stderr.String()
+	if strings.Contains(output, "must be loopback") {
+		t.Fatalf("CLI pre-empted the daemon allowlist: %q", output)
+	}
+	if !strings.Contains(output, "publish denied by the server allowlist") {
+		t.Fatalf("output lacks the daemon refusal: %q", output)
+	}
+}
+
+func TestRunPublishWildcardRefusedBeforeClient(t *testing.T) {
+	workspace := t.TempDir()
+	clientCalls := 0
+	var out bytes.Buffer
+	runner := &Runner{
+		Out: &out,
+		Err: &out,
+		NewClient: func(string) (sdk.Client, error) {
+			clientCalls++
+			return fakeClient{}, nil
+		},
+	}
+	code := runner.Run(context.Background(), []string{"run", "--detach", "--publish", "0.0.0.0:9000:80", "shell", workspace})
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2 (output=%q)", code, out.String())
+	}
+	if clientCalls != 0 {
+		t.Fatalf("NewClient called %d times before rejecting the wildcard", clientCalls)
+	}
+	if !strings.Contains(out.String(), "host IP must be a specific address, not 0.0.0.0 or ::") {
+		t.Fatalf("output=%q", out.String())
 	}
 }
 

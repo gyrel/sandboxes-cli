@@ -151,8 +151,11 @@ func parseBracketedPortSpec(value, protocol, family string, allocateHost bool) (
 
 func normalizePortHostIP(value, family string) (string, error) {
 	ip := net.ParseIP(value)
-	if ip == nil || !ip.IsLoopback() {
-		return "", errors.New("host IP must be loopback (127.0.0.1 or ::1)")
+	if ip == nil {
+		return "", errors.New("host IP must be a valid IP address")
+	}
+	if ip.IsUnspecified() {
+		return "", errors.New("host IP must be a specific address, not 0.0.0.0 or ::") //nolint:staticcheck // "::" is an address, not trailing punctuation.
 	}
 	if family == "" {
 		return ip.String(), nil
@@ -329,6 +332,7 @@ after arguments; use -- to end flag parsing.
 
 Flags:
       --publish SPEC      publish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO] (repeatable)
+                          non-loopback HOST_IP requires a server-side allowlist entry
       --unpublish SPEC    unpublish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO] (repeatable)
       --format FORMAT     output format: table, json or yaml
       --json              output in JSON format

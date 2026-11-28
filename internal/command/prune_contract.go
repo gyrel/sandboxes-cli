@@ -382,9 +382,10 @@ func pruneExitCode(plan []prunePlanItem, preflightAbort bool) int {
 }
 
 // machineCodeOf extracts a daemon machine reason from an error. The pinned
-// SDK maps gRPC status details to *sdk.Error and drops ErrorInfo, so the CLI
-// accepts a typed carrier when present and falls back to a registered token
-// in the message. It never guesses a code from a transport status class.
+// SDK maps gRPC status details to *sdk.Error and exposes a registry-matched
+// ErrorInfo reason as MachineCode, so the CLI accepts a typed carrier when
+// present, then the SDK field, and finally falls back to a registered token in
+// the message. It never guesses a code from a transport status class.
 func machineCodeOf(err error) string {
 	if err == nil {
 		return ""
@@ -403,6 +404,9 @@ func machineCodeOf(err error) string {
 	}
 	var typed *sdk.Error
 	if errors.As(err, &typed) {
+		if code := normalizeMachineCode(typed.MachineCode); code != "" && isMachineCode(code) {
+			return code
+		}
 		if code := normalizeMachineCode(typed.Code); code != "" && isMachineCode(code) {
 			return code
 		}

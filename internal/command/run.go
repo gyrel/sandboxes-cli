@@ -63,7 +63,8 @@ Flags:
       --kit-arg NAME=VALUE        (Experimental) value for an argument the kit declares (repeatable)
       --kit-args-file FILE        (Experimental) file of name=value kit arguments (repeatable); --kit-arg overrides
       --deny-write PATH           keep selected workspaces and add PATH read-only (repeatable)
-  -p, --publish PORT_SPEC         publish a guest TCP/UDP port on host loopback
+  -p, --publish PORT_SPEC         publish a guest TCP/UDP port on a host address (default loopback)
+                                  non-loopback HOST_IP requires a server-side allowlist entry
                                   repeatable; accepts [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
       --allow-network CIDR[:PORT] allow egress CIDR rule (repeatable; optional udp: prefix)
       --deny-network CIDR[:PORT]  deny egress CIDR rule (repeatable; optional udp: prefix)
@@ -291,7 +292,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	sandbox, created, workspaces, err := r.reuseOrCreateSandbox(ctx, client, opts, agent, workspacePaths, workspacesExplicit, resources, progress)
 	if err != nil {
 		r.error(err)
-		return 1
+		return runFailureExitCode(err)
 	}
 	r.debug(ctx, debugEventRunSandbox, debugBoolean("created", created))
 	r.debug(ctx, debugEventRunAttach, debugBoolean("detached", opts.detach))
@@ -313,6 +314,17 @@ func (r *Runner) runWorkspaceError(err error) int {
 	}
 	_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
 	return 2
+}
+
+// runFailureExitCode separates a daemon publish refusal from other run
+// failures. The daemon owns the publish allowlist decision, so BIND_FORBIDDEN
+// is a rejected request (the same exit class as the local port grammar), not an
+// internal or transport failure.
+func runFailureExitCode(err error) int {
+	if machineCodeOf(err) == "BIND_FORBIDDEN" {
+		return 2
+	}
+	return 1
 }
 
 func agentHasReadOnlyPrimary(agent string, paths []string) bool {

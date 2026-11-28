@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.86 — 2026-11-28
+
+### Fixed
+
+- `--publish` now forwards specific non-loopback host IPs to the daemon, so
+  the `network.publish.allowedCIDRs` operator allowlist works through the CLI;
+  wildcard addresses (`0.0.0.0`, `::`) and invalid input stay locally refused.
+
 ## v0.0.85 — 2026-11-28
 
 ### Added

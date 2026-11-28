@@ -217,8 +217,10 @@ prompt replaces it. `dsh` remains a Gyrel preview extension; `cline` is
 unsupported. The embedded registry is `internal/agent/registry.yaml`. Multiple
 workspaces are supported; a
 `:ro` suffix mounts a directory read-only. `--publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]`
-may be repeated when creating, with loopback `HOST_IP` limited to `127.0.0.1` and
-`::1` (IPv6 uses brackets, e.g. `[::1]:8080:80/tcp6`); `rsbx ports SANDBOX`
+may be repeated when creating, with `HOST_IP` defaulting to loopback `127.0.0.1`
+or `::1` (IPv6 uses brackets, e.g. `[::1]:8080:80/tcp6`); a specific
+non-loopback `HOST_IP` requires a `network.publish.allowedCIDRs` server-side
+allowlist entry. `rsbx ports SANDBOX`
 lists the stored bindings; `ports --publish ...` / `--unpublish ...` change them
 live; omitting `HOST_PORT` allocates an ephemeral host port on the selected
 loopback IP.
@@ -284,7 +286,8 @@ method/path/query conditions are not exposed by the `rsbx` policy surface yet
 (the gateway policy layer validates them). TCP and UDP are supported with explicit
 or ephemeral host ports; an occupied host port is rejected at create and
 dynamic updates reconcile gvproxy's forwarders without restarting the VM.
-Loopback IPv4/IPv6 bindings are supported; public bindings are rejected.
+Loopback IPv4/IPv6 bindings are supported; non-loopback bindings require a
+`network.publish.allowedCIDRs` server-side allowlist entry.
 Local kits (`--kit FILE_OR_DIR`) can set agent, image, profile and mounts. A
 Docker Kits v2 directory is read from `spec.yaml` (or `spec.yml`). Its sandbox
 envelope and OAuth declaration fields are accepted for

@@ -56,6 +56,26 @@ type runSandbox struct {
 	suppressCloneInfo bool
 }
 
+type bindRefusalSandbox struct {
+	*runSandbox
+	createErr   error
+	createCalls int
+	created     sdk.CreateRequest
+}
+
+func (s *bindRefusalSandbox) Create(_ context.Context, req sdk.CreateRequest) (*sdk.Operation, error) {
+	s.createCalls++
+	s.created = req
+	return nil, s.createErr
+}
+
+type bindRefusalClient struct {
+	runClient
+	sandboxService sdk.SandboxService
+}
+
+func (c bindRefusalClient) Sandboxes() sdk.SandboxService { return c.sandboxService }
+
 func (s *runSandbox) Create(_ context.Context, req sdk.CreateRequest) (*sdk.Operation, error) {
 	s.createCalls++
 	s.created = req

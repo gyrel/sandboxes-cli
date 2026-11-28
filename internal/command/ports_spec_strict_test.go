@@ -34,6 +34,11 @@ func TestPortSpecStrictCanonicalForms(t *testing.T) {
 			want: sdk.Port{Host: 3000, Guest: 8080, Protocol: tcpProtocol, HostIP: loopbackHost},
 		},
 		{
+			name: "specific non-loopback host IP host and guest",
+			spec: "10.0.0.5:3000:8080/tcp4",
+			want: sdk.Port{Host: 3000, Guest: 8080, Protocol: tcpProtocol, HostIP: "10.0.0.5"},
+		},
+		{
 			name: "guest and protocol",
 			spec: "8080/udp",
 			want: sdk.Port{Guest: 8080, Protocol: udpProtocol, HostIP: loopbackHost},
@@ -98,7 +103,8 @@ func TestPortSpecStrictMalformed(t *testing.T) {
 		{name: "non numeric ports", spec: "a:b"},
 		{name: "negative host port", spec: "-1:80"},
 		{name: "negative guest port", spec: "80:-1"},
-		{name: "non loopback host IP", spec: "192.0.2.10:8080:80"},
+		{name: "IPv4 wildcard host IP", spec: "0.0.0.0:8080:80"},
+		{name: "IPv6 wildcard host IP", spec: "[::]:8080:80/tcp6"},
 		{name: "bare IPv6 host IP", spec: "::1:8080:80"},
 	}
 

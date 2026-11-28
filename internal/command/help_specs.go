@@ -79,6 +79,7 @@ func runHelp() commandHelp {
 			"--new is also set. --replace deletes and recreates an existing --name sandbox.",
 			"With --detach, rsbx creates or starts the sandbox, prints its ID, and exits.",
 			"--rm removes the sandbox after the attached agent session exits.",
+			"A non-loopback --publish HOST_IP requires a server-side allowlist entry.",
 		},
 		Usage: []string{
 			"rsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]",
@@ -424,6 +425,7 @@ func portsHelp() commandHelp {
 			"",
 			"Port spec format: [[HOST_IP:]HOST_PORT:]SANDBOX_PORT[/PROTOCOL]",
 			"Supported protocols: tcp, tcp4, tcp6, udp, udp4, udp6.",
+			"A non-loopback HOST_IP requires a server-side allowlist entry.",
 		},
 		Usage: []string{"rsbx ports SANDBOX [flags]"},
 		Examples: []string{
